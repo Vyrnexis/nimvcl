@@ -1,0 +1,7 @@
+build/
+nimcache/
+testresults/
+outputGotten.txt
+*.exe
+/examples/*
+!/examples/*.nim
