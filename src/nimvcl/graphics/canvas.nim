@@ -160,6 +160,7 @@ proc fillRoundRect*(c: Canvas, rect: RectF, radius: float32, color: Color) =
 proc strokeRoundRect*(c: Canvas, rect: RectF, radius: float32, color: Color,
                       width: float32 = 1) =
   ## Anti-aliased rounded border of `width` logical px, drawn inside `rect`.
+  ## The thickness is rounded to whole device pixels (at least 1), like `frameRect`.
   if color.a == 0: return
   let r = c.snapRect(rect)
   c.ctx.geo.addStrokeRoundRect(r.x, r.y, r.w, r.h, radius * c.ctx.scale,
@@ -174,7 +175,8 @@ proc fillEllipse*(c: Canvas, rect: RectF, color: Color) =
   c.flushGeo()
 
 proc strokeEllipse*(c: Canvas, rect: RectF, color: Color, width: float32 = 1) =
-  ## Anti-aliased ellipse outline of `width` logical px, drawn inside `rect`.
+  ## Anti-aliased ellipse outline of `width` logical px, drawn inside `rect`
+  ## (thickness rounded to whole device pixels, at least 1).
   if color.a == 0: return
   let r = c.snapRect(rect)
   c.ctx.geo.addStrokeEllipse(r.x, r.y, r.w, r.h, max(width * c.ctx.scale, 1'f32), color)

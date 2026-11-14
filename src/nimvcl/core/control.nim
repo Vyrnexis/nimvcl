@@ -1,0 +1,599 @@
+## `Control` and `Container`: the VCL TControl / TWinControl analogues.
+##
+## Conventions
+## -----------
+## * Coordinates are logical pixels (float32). A control's `left`/`top` are
+##   relative to its PARENT's client origin (the top-left of the parent's
+##   `clientRect`, padding NOT subtracted). The root of a tree (no parent, a
+##   Form in phase 2b) ignores its own left/top.
+## * Properties are getter/setter procs with VCL names (`c.width = 10`).
+##   Setters repaint (`invalidate`) and/or relayout as needed; both are no-ops
+##   until a `RootHost` is attached to the tree's root.
+## * Virtual behaviour is `method`. Two families:
+##   - `doXxx` methods (`doClick`, `doMouseDown`, `doKeyDown`, `doResize`,
+##     `doEnter`, ...) are the event dispatch points. The base implementation
+##     just fires the matching `onXxx` field when it is not nil. Subclasses
+##     override them, normally calling `procCall` of the base (or firing the
+##     handler themselves) after their own work. The platform layer (2b) calls
+##     only these.
+##   - `paint`, `preferredSize`, `canFocus`, `hitTest` (and Container's
+##     `customAlign`) are query/draw hooks.
+##   `onXxx` event fields are public and nil by default.
+## * Key events: handlers receive `key: var Key`; setting it to `Key(0)` swallows
+##   the key (after `doKeyDown` returns, check `key != Key(0)` before acting).
+##   `doKeyPress` works the same with an empty `text`.
+## * Constructors: `newControl(owner)`. Subclasses written in other modules call
+##   `initControl(self, owner)` (or `initContainer`) from their own `newXxx`;
+##   a bare `Control()` has zeroed defaults.
+## * Ownership (`Component.owner`) and the parent/child tree are independent.
+##   The tree is `Container.children`; z-order = child index, last on top.
+##   Layout order of same-`align` siblings is ALSO the child index (see
+##   layout.nim), so `bringToFront` reorders stacking too.
+## * `core` imports no SDL; it uses `graphics` (Canvas etc.) only.
+
+import ../graphics/[geometry, color, font, canvas]
+import ./types, ./component, ./theme
+export types, component, theme
+
+type
+  Control* = ref object of Component
+    # geometry (parent's client coordinates)
+    fLeft, fTop, fWidth, fHeight: float32
+    fAlign: Align
+    fAnchors: Anchors
+    fMargins: Spacing
+    fConstraints: SizeConstraints
+    fAutoSize: bool
+    # state
+    fVisible, fEnabled: bool
+    fCaption, fHint: string
+    fCursor: Cursor
+    fFont: FontSpec
+    fParentFont: bool
+    fColor: Color
+    fParentColor: bool
+    fTabStop: bool
+    fTabOrder: int
+    fParent: Container
+    fHost: RootHost
+    # events
+    onClick*, onDblClick*, onMouseEnter*, onMouseLeave*: NotifyEvent
+    onEnter*, onExit*, onResize*: NotifyEvent
+    onMouseDown*, onMouseUp*: MouseEvent
+    onMouseMove*: MouseMoveEvent
+    onMouseWheel*: MouseWheelEvent
+    onKeyDown*, onKeyUp*: KeyEvent
+    onKeyPress*: KeyPressEvent
+    onPaint*: PaintEvent
+
+  Container* = ref object of Control
+    ## A control that holds children (TWinControl). Children are positioned by
+    ## `layout` (layout.nim).
+    fChildren: seq[Control]
+    fPadding: Spacing
+    # Layout bookkeeping, used by layout.nim. Treat as internal.
+    needsLayout*: bool          ## own children must be re-aligned
+    childNeedsLayout*: bool     ## some descendant container needs layout
+    layouting*: bool            ## true while `layout` runs (suppresses feedback)
+    lastLayoutSize*: SizeF      ## container size at the previous layout
+    layoutInitialized*: bool    ## false until the first layout recorded a size
+
+  NotifyEvent* = proc(sender: Control)
+  MouseEvent* = proc(sender: Control, button: MouseButton, shift: ShiftState,
+                     x, y: float32)
+  MouseMoveEvent* = proc(sender: Control, shift: ShiftState, x, y: float32)
+  MouseWheelEvent* = proc(sender: Control, shift: ShiftState, dx, dy: float32,
+                          handled: var bool)
+  KeyEvent* = proc(sender: Control, key: var Key, shift: ShiftState)
+  KeyPressEvent* = proc(sender: Control, text: var string)
+  PaintEvent* = proc(sender: Control, canvas: Canvas)
+
+  RootHost* = ref object of RootObj
+    ## What a tree's root reports to (implemented by Form in phase 2b). All
+    ## methods are no-ops here. They are called on the UI thread, and may be
+    ## called many times per frame, so implementations should just set flags.
+    theme*: Theme   ## per-window theme; nil means the global `currentTheme()`
+
+# ------------------------------------------------------------- RootHost
+
+method invalidate*(h: RootHost, rectInForm: RectF) {.base.} =
+  ## Part of the form (root client coordinates) needs repainting.
+  discard
+method requestLayout*(h: RootHost) {.base.} =
+  ## Some container has `needsLayout` set; run `layout(root)` before painting.
+  discard
+method controlLost*(h: RootHost, c: Control) {.base.} =
+  ## `c` (and its subtree) is no longer a valid focus/hover/capture target: it
+  ## was removed from the tree (still attached when this is called), hidden or
+  ## disabled. The host drops focus, hover and mouse capture inside `c`.
+  discard
+method cursorChanged*(h: RootHost, c: Control) {.base.} =
+  ## `c.cursor` changed; the host re-evaluates the cursor under the mouse.
+  discard
+
+# ------------------------------------------------------------ construction
+
+proc initControl*(c: Control, owner: Component = nil) =
+  ## Sets VCL defaults (75x25, visible, enabled, anchors {akLeft, akTop},
+  ## parentFont/parentColor true). Call from subclass constructors.
+  c.initComponent(owner)
+  c.fWidth = 75
+  c.fHeight = 25
+  c.fAnchors = DefaultAnchors
+  c.fVisible = true
+  c.fEnabled = true
+  c.fParentFont = true
+  c.fParentColor = true
+
+proc newControl*(owner: Component = nil): Control =
+  new result
+  result.initControl(owner)
+
+proc initContainer*(c: Container, owner: Component = nil) =
+  c.initControl(owner)
+  c.needsLayout = true
+
+proc newContainer*(owner: Component = nil): Container =
+  new result
+  result.initContainer(owner)
+
+# ------------------------------------------------------------------- tree
+
+func parent*(c: Control): Container = c.fParent
+
+func root*(c: Control): Control =
+  ## Topmost ancestor (the "form"); `c` itself when it has no parent.
+  result = c
+  while result.fParent != nil: result = result.fParent
+
+func children*(c: Container): lent seq[Control] =
+  ## Children in z-order (last = topmost). Read-only view; change the tree with
+  ## `insertControl`/`removeControl`/`parent=`.
+  c.fChildren
+template controls*(c: Container): lent seq[Control] = c.fChildren
+func controlCount*(c: Container): int = c.fChildren.len
+func `[]`*(c: Container, i: int): Control = c.fChildren[i]
+
+func isAncestorOf*(a, b: Control): bool =
+  ## True when `a` is a strict ancestor of `b`.
+  var p = Control(b.fParent)
+  while p != nil:
+    if p == a: return true
+    p = p.fParent
+  false
+
+func host*(c: Control): RootHost =
+  ## The host of the tree `c` is in (stored on the root); nil when none.
+  root(c).fHost
+proc `host=`*(c: Control, h: RootHost) =
+  ## Attach a host. Set it on the ROOT control of the tree.
+  c.fHost = h
+
+func isVisible*(c: Control): bool =
+  ## `visible` of the control and all its ancestors.
+  var x = c
+  while x != nil:
+    if not x.fVisible: return false
+    x = x.fParent
+  true
+
+func isEnabled*(c: Control): bool =
+  ## `enabled` of the control and all its ancestors.
+  var x = c
+  while x != nil:
+    if not x.fEnabled: return false
+    x = x.fParent
+  true
+
+# ---------------------------------------------------------------- geometry
+
+func left*(c: Control): float32 = c.fLeft
+func top*(c: Control): float32 = c.fTop
+func width*(c: Control): float32 = c.fWidth
+func height*(c: Control): float32 = c.fHeight
+func boundsRect*(c: Control): RectF = rectF(c.fLeft, c.fTop, c.fWidth, c.fHeight)
+func clientRect*(c: Control): RectF = rectF(0, 0, c.fWidth, c.fHeight)
+func align*(c: Control): Align = c.fAlign
+func anchors*(c: Control): Anchors = c.fAnchors
+func margins*(c: Control): Spacing = c.fMargins
+func constraints*(c: Control): SizeConstraints = c.fConstraints
+func autoSize*(c: Control): bool = c.fAutoSize
+func padding*(c: Container): Spacing = c.fPadding
+
+func clientToParent*(c: Control, p: PointF): PointF =
+  pointF(p.x + c.fLeft, p.y + c.fTop)
+func clientToParent*(c: Control, r: RectF): RectF = r.offset(c.fLeft, c.fTop)
+func parentToClient*(c: Control, p: PointF): PointF =
+  pointF(p.x - c.fLeft, p.y - c.fTop)
+
+func formOrigin*(c: Control): PointF =
+  ## Origin of `c`'s client area in form (root client) coordinates.
+  var x = c
+  while x.fParent != nil:
+    result.x += x.fLeft
+    result.y += x.fTop
+    x = x.fParent
+
+func clientToForm*(c: Control, p: PointF): PointF =
+  let o = formOrigin(c)
+  pointF(p.x + o.x, p.y + o.y)
+func clientToForm*(c: Control, r: RectF): RectF =
+  let o = formOrigin(c)
+  r.offset(o.x, o.y)
+func formToClient*(c: Control, p: PointF): PointF =
+  let o = formOrigin(c)
+  pointF(p.x - o.x, p.y - o.y)
+func formToClient*(c: Control, r: RectF): RectF =
+  let o = formOrigin(c)
+  r.offset(-o.x, -o.y)
+
+# ------------------------------------------------------- invalidate / layout
+
+proc invalidate*(c: Control, r: RectF) =
+  ## Repaint `r` (client coordinates of `c`). No-op without a host or when `c`
+  ## is not visible.
+  let h = c.host
+  if h == nil or not c.isVisible: return
+  h.invalidate(c.clientToForm(r))
+
+proc invalidate*(c: Control) =
+  ## Repaint the whole control.
+  c.invalidate(c.clientRect)
+
+proc invalidateInParent(c: Control, r: RectF) =
+  ## `r` is in the parent's client coordinates.
+  if c.fParent != nil: c.fParent.invalidate(r)
+  else: c.invalidate()
+
+proc markLayout(c: Container) =
+  if c.layouting: return
+  c.needsLayout = true
+  var p = c.fParent
+  while p != nil:
+    p.childNeedsLayout = true
+    p = p.fParent
+  let h = c.host
+  if h != nil: h.requestLayout()
+
+proc relayout*(c: Container) =
+  ## The children of `c` must be re-aligned (sets `needsLayout`, notifies host).
+  markLayout(c)
+
+proc requestLayout*(c: Control) =
+  ## A layout-relevant property of `c` changed: its PARENT (or `c` itself when
+  ## it is a root container) must re-align.
+  if c.fParent != nil: markLayout(c.fParent)
+  elif c of Container: markLayout(Container(c))
+
+proc parentLayouting(c: Control): bool {.inline.} =
+  c.fParent != nil and c.fParent.layouting
+
+# ------------------------------------------------------------ event methods
+
+method doResize*(c: Control) {.base.} =
+  if c.onResize != nil: c.onResize(c)
+method doClick*(c: Control) {.base.} =
+  if c.onClick != nil: c.onClick(c)
+method doDblClick*(c: Control) {.base.} =
+  if c.onDblClick != nil: c.onDblClick(c)
+method doMouseDown*(c: Control, button: MouseButton, shift: ShiftState,
+                    x, y: float32) {.base.} =
+  if c.onMouseDown != nil: c.onMouseDown(c, button, shift, x, y)
+method doMouseUp*(c: Control, button: MouseButton, shift: ShiftState,
+                  x, y: float32) {.base.} =
+  if c.onMouseUp != nil: c.onMouseUp(c, button, shift, x, y)
+method doMouseMove*(c: Control, shift: ShiftState, x, y: float32) {.base.} =
+  if c.onMouseMove != nil: c.onMouseMove(c, shift, x, y)
+method doMouseEnter*(c: Control) {.base.} =
+  if c.onMouseEnter != nil: c.onMouseEnter(c)
+method doMouseLeave*(c: Control) {.base.} =
+  if c.onMouseLeave != nil: c.onMouseLeave(c)
+method doMouseWheel*(c: Control, shift: ShiftState, dx, dy: float32,
+                     handled: var bool) {.base.} =
+  if c.onMouseWheel != nil: c.onMouseWheel(c, shift, dx, dy, handled)
+method doKeyDown*(c: Control, key: var Key, shift: ShiftState) {.base.} =
+  if c.onKeyDown != nil: c.onKeyDown(c, key, shift)
+method doKeyUp*(c: Control, key: var Key, shift: ShiftState) {.base.} =
+  if c.onKeyUp != nil: c.onKeyUp(c, key, shift)
+method doKeyPress*(c: Control, text: var string) {.base.} =
+  if c.onKeyPress != nil: c.onKeyPress(c, text)
+method doEnter*(c: Control) {.base.} =
+  ## Gained keyboard focus.
+  if c.onEnter != nil: c.onEnter(c)
+method doExit*(c: Control) {.base.} =
+  ## Lost keyboard focus.
+  if c.onExit != nil: c.onExit(c)
+
+# --------------------------------------------------------- hook methods
+
+method paint*(c: Control, canvas: Canvas) {.base.} =
+  ## Draw the control. The canvas origin is the control's client origin and the
+  ## clip is its client rect. Base: draws nothing (children are painted by
+  ## `paintTree` afterwards).
+  discard
+
+method preferredSize*(c: Control): SizeF {.base.} =
+  ## Natural size, used when `autoSize` is set. Base: the current size.
+  sizeF(c.fWidth, c.fHeight)
+
+method canFocus*(c: Control): bool {.base.} =
+  ## Whether the control can take keyboard focus. Base: false. Focusable
+  ## controls override this (typically `c.isVisible and c.isEnabled`).
+  false
+
+method wantsTextInput*(c: Control): bool {.base.} =
+  ## Whether the control edits text: the platform starts SDL text input
+  ## (soft keyboard / IME) while it has focus. Base: false.
+  false
+
+method textInputRect*(c: Control): RectF {.base.} =
+  ## IME candidate area in the control's client coordinates. Base: client rect.
+  c.clientRect
+
+method hitTest*(c: Control, p: PointF): bool {.base.} =
+  ## `p` is inside the control's client area (already within its bounds).
+  ## Override for non-rectangular or click-through controls.
+  true
+
+method customAlign*(c: Container, child: Control, available: RectF) {.base.} =
+  ## Called by `layout` for every visible `alCustom` child, after all other
+  ## alignment, with the rectangle left over (client area minus padding, minus
+  ## space taken by aligned siblings). Base: leaves the child as is.
+  discard
+
+# ----------------------------------------------------------------- setters
+
+func sameFont(a, b: FontSpec): bool =
+  a.family == b.family and a.size == b.size and a.style == b.style
+func sameColor(a, b: Color): bool =
+  a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a
+
+proc setBounds*(c: Control, l, t, w, h: float32) =
+  ## Sets position and size. Width/height are clamped to >= 0 and to
+  ## `constraints` (like VCL's ConstrainedResize). Fires `doResize` when the
+  ## size changed.
+  let nw = c.fConstraints.clampWidth(max(w, 0))
+  let nh = c.fConstraints.clampHeight(max(h, 0))
+  if l == c.fLeft and t == c.fTop and nw == c.fWidth and nh == c.fHeight: return
+  let old = c.boundsRect
+  let sizeChanged = nw != c.fWidth or nh != c.fHeight
+  c.fLeft = l
+  c.fTop = t
+  c.fWidth = nw
+  c.fHeight = nh
+  let quiet = c.parentLayouting   # the parent's layout repaints/relayouts once
+  if not quiet:
+    c.invalidateInParent(old)
+    c.invalidateInParent(c.boundsRect)
+  if sizeChanged and c of Container:
+    if quiet: Container(c).needsLayout = true
+    else: markLayout(Container(c))
+  if not quiet and c.fAlign != alNone and c.fParent != nil:
+    markLayout(c.fParent)
+  if sizeChanged: c.doResize()
+
+proc `left=`*(c: Control, v: float32) = c.setBounds(v, c.fTop, c.fWidth, c.fHeight)
+proc `top=`*(c: Control, v: float32) = c.setBounds(c.fLeft, v, c.fWidth, c.fHeight)
+proc `width=`*(c: Control, v: float32) = c.setBounds(c.fLeft, c.fTop, v, c.fHeight)
+proc `height=`*(c: Control, v: float32) = c.setBounds(c.fLeft, c.fTop, c.fWidth, v)
+
+proc `align=`*(c: Control, v: Align) =
+  if v == c.fAlign: return
+  c.fAlign = v
+  c.requestLayout()
+
+proc `anchors=`*(c: Control, v: Anchors) =
+  if v == c.fAnchors: return
+  c.fAnchors = v
+  c.requestLayout()
+
+proc `margins=`*(c: Control, v: Spacing) =
+  if v == c.fMargins: return
+  c.fMargins = v
+  c.requestLayout()
+
+proc `padding=`*(c: Container, v: Spacing) =
+  if v == c.fPadding: return
+  c.fPadding = v
+  markLayout(c)
+  c.invalidate()
+
+proc `constraints=`*(c: Control, v: SizeConstraints) =
+  if v == c.fConstraints: return
+  c.fConstraints = v
+  c.setBounds(c.fLeft, c.fTop, c.fWidth, c.fHeight)  # re-clamp
+  c.requestLayout()
+
+proc `autoSize=`*(c: Control, v: bool) =
+  if v == c.fAutoSize: return
+  c.fAutoSize = v
+  c.requestLayout()
+
+func visible*(c: Control): bool = c.fVisible
+proc `visible=`*(c: Control, v: bool) =
+  if v == c.fVisible: return
+  let h = c.host
+  c.fVisible = v
+  if not v and h != nil: h.controlLost(c)
+  # repaint the area it occupied/occupies in the parent
+  if c.fParent != nil: c.fParent.invalidate(c.boundsRect) else: c.invalidate()
+  if c.fParent != nil: markLayout(c.fParent)
+
+func enabled*(c: Control): bool = c.fEnabled
+proc `enabled=`*(c: Control, v: bool) =
+  if v == c.fEnabled: return
+  c.fEnabled = v
+  let h = c.host
+  if not v and h != nil: h.controlLost(c)
+  c.invalidate()
+
+func caption*(c: Control): string = c.fCaption
+proc `caption=`*(c: Control, v: string) =
+  if v == c.fCaption: return
+  c.fCaption = v
+  c.invalidate()
+  if c.fAutoSize: c.requestLayout()
+func text*(c: Control): string = c.fCaption
+proc `text=`*(c: Control, v: string) = c.caption = v
+
+func hint*(c: Control): string = c.fHint
+proc `hint=`*(c: Control, v: string) = c.fHint = v
+
+func cursor*(c: Control): Cursor = c.fCursor
+proc `cursor=`*(c: Control, v: Cursor) =
+  if v == c.fCursor: return
+  c.fCursor = v
+  let h = c.host
+  if h != nil: h.cursorChanged(c)
+
+func tabStop*(c: Control): bool = c.fTabStop
+proc `tabStop=`*(c: Control, v: bool) = c.fTabStop = v
+func tabOrder*(c: Control): int = c.fTabOrder
+proc `tabOrder=`*(c: Control, v: int) = c.fTabOrder = v
+  ## Tab order among siblings; equal values fall back to child order.
+
+# ------------------------------------------------------------- theme/font/color
+
+proc theme*(c: Control): Theme =
+  ## The effective theme: the root host's, else the global `currentTheme()`.
+  let h = c.host
+  if h != nil and h.theme != nil: h.theme else: currentTheme()
+
+proc font*(c: Control): FontSpec =
+  ## Effective font: own when `parentFont` is false, else the parent's, else
+  ## (at the root) `theme.font`.
+  if not c.fParentFont: c.fFont
+  elif c.fParent != nil: c.fParent.font
+  else: c.theme.font
+
+func parentFont*(c: Control): bool = c.fParentFont
+
+proc fontChanged(c: Control) =
+  c.invalidate()
+  if c.fAutoSize: c.requestLayout()
+
+proc `font=`*(c: Control, v: FontSpec) =
+  ## Sets an own font (and clears `parentFont`, like VCL).
+  if not c.fParentFont and sameFont(c.fFont, v): return
+  c.fFont = v
+  c.fParentFont = false
+  c.fontChanged()
+
+proc `parentFont=`*(c: Control, v: bool) =
+  if v == c.fParentFont: return
+  if not v: c.fFont = c.font      # freeze the inherited value
+  c.fParentFont = v
+  c.fontChanged()
+
+proc color*(c: Control): Color =
+  ## Effective color: own when `parentColor` is false, else the parent's, else
+  ## (at the root) `theme.window`.
+  if not c.fParentColor: c.fColor
+  elif c.fParent != nil: c.fParent.color
+  else: c.theme.window
+
+func parentColor*(c: Control): bool = c.fParentColor
+
+proc `color=`*(c: Control, v: Color) =
+  ## Sets an own color (and clears `parentColor`).
+  if not c.fParentColor and sameColor(c.fColor, v): return
+  c.fColor = v
+  c.fParentColor = false
+  c.invalidate()
+
+proc `parentColor=`*(c: Control, v: bool) =
+  if v == c.fParentColor: return
+  if not v: c.fColor = c.color
+  c.fParentColor = v
+  c.invalidate()
+
+# ----------------------------------------------------------------- tree edit
+
+proc removeControl*(c: Container, child: Control) =
+  ## Detaches `child` from `c` (no-op when it is not a child).
+  let i = c.fChildren.find(child)
+  if i < 0: return
+  let h = c.host
+  if h != nil: h.controlLost(child)      # still attached here
+  c.invalidate(child.boundsRect)
+  c.fChildren.delete(i)
+  child.fParent = nil
+  markLayout(c)
+
+proc insertControl*(c: Container, child: Control, index = -1) =
+  ## Adds `child` at `index` (default: append = topmost), re-parenting it from
+  ## its previous parent. Both containers are marked for relayout.
+  if child == nil: return
+  doAssert child != Control(c) and not child.isAncestorOf(c),
+    "insertControl: would create a cycle"
+  if child.fParent != nil: child.fParent.removeControl(child)
+  let at = if index < 0 or index > c.fChildren.len: c.fChildren.len else: index
+  c.fChildren.insert(child, at)
+  child.fParent = c
+  markLayout(c)
+  c.invalidate(child.boundsRect)
+
+proc `parent=`*(c: Control, p: Container) =
+  ## Re-parents: removes from the old parent, appends to the new one (nil just
+  ## detaches). Relayouts both.
+  if p == c.fParent: return
+  if p == nil: c.fParent.removeControl(c)
+  else: p.insertControl(c)
+
+proc bringToFront*(c: Control) =
+  ## Moves `c` to the end of its parent's children (topmost; also last in
+  ## layout order).
+  let p = c.fParent
+  if p == nil or p.fChildren[^1] == c: return
+  p.fChildren.delete(p.fChildren.find(c))
+  p.fChildren.add c
+  markLayout(p)
+  c.invalidateInParent(c.boundsRect)
+
+proc sendToBack*(c: Control) =
+  let p = c.fParent
+  if p == nil or p.fChildren[0] == c: return
+  p.fChildren.delete(p.fChildren.find(c))
+  p.fChildren.insert(c, 0)
+  markLayout(p)
+  c.invalidateInParent(c.boundsRect)
+
+# ------------------------------------------------------------------ hit test
+
+proc controlAtPoint*(c: Container, p: PointF, includeDisabled = false): Control =
+  ## Deepest visible descendant under `p` (client coordinates of `c`), or nil.
+  ## Topmost sibling (last child) wins. Points outside `c`'s client rect hit
+  ## nothing (children are clipped). Invisible controls are skipped; disabled
+  ## ones (with their subtree) too unless `includeDisabled`; a skipped control
+  ## lets the hit fall through to whatever is below it.
+  if not c.clientRect.contains(p): return nil
+  for i in countdown(c.fChildren.high, 0):
+    let ch = c.fChildren[i]
+    if not ch.fVisible: continue
+    if not includeDisabled and not ch.fEnabled: continue
+    let lp = ch.parentToClient(p)
+    if not ch.clientRect.contains(lp) or not ch.hitTest(lp): continue
+    if ch of Container:
+      let deeper = controlAtPoint(Container(ch), lp, includeDisabled)
+      if deeper != nil: return deeper
+    return ch
+
+# -------------------------------------------------------------------- paint
+
+proc paintTree*(c: Control, canvas: Canvas) =
+  ## Paints `c` and its visible children. The canvas must be positioned at the
+  ## parent's client origin (for a root: at the form origin). For each control:
+  ## translate to its origin, clip to its client rect, `paint`, then children
+  ## in z-order. Controls whose rect is fully clipped out are skipped.
+  if not c.fVisible: return
+  let ox = if c.fParent == nil: 0'f32 else: c.fLeft
+  let oy = if c.fParent == nil: 0'f32 else: c.fTop
+  if canvas.isClippedOut(rectF(ox, oy, c.fWidth, c.fHeight)): return
+  canvas.pushTranslate(ox, oy)
+  canvas.pushClip(c.clientRect)
+  c.paint(canvas)
+  if c of Container:
+    for ch in Container(c).fChildren:
+      ch.paintTree(canvas)
+  canvas.popClip()
+  canvas.popTranslate()

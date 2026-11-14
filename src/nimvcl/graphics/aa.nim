@@ -107,17 +107,29 @@ proc fillShape(g: var GeoBuf, s: Shape, c: Color) =
     g.tri inner + j, outer + i, outer + j
 
 proc strokeShape(g: var GeoBuf, s: Shape, bw: float32, c: Color) =
-  # Border lies inside the shape, `bw` device px wide. Rings: outer feather,
-  # outer edge, inner edge, inner feather.
-  let ds = [-0.5'f32, 0.5, bw - 0.5, bw + 0.5]
-  let al = [0'f32, 1, 1, 0]
+  ## Border lies inside the shape, `bw` device px wide. Callers pass whole
+  ## device pixels (>= 1): fractional widths would create sliver triangles
+  ## (the software renderer drops pixels in those) and blurry edges.
+  ## Rings: outer feather, outer edge, [inner edge,] inner feather; the two
+  ## middle rings coincide for 1 px strokes and are merged.
+  var ds: array[4, float32]
+  var al: array[4, float32]
+  var n = 0
+  template ring(d, a: float32) =
+    ds[n] = d
+    al[n] = a
+    inc n
+  ring -0.5, 0
+  ring 0.5, 1
+  if bw > 1.01: ring bw - 0.5, 1
+  ring bw + 0.5, 0
   var first: array[4, cint]
-  for k in 0 .. 3:
+  for k in 0 ..< n:
     first[k] = g.addRing(s, ds[k], c, al[k])
-  let n = s.ringCount.cint
-  for k in 0 .. 2:
-    for i in 0 ..< n:
-      let j = (i + 1) mod n
+  let cnt = s.ringCount.cint
+  for k in 0 ..< n - 1:
+    for i in 0 ..< cnt:
+      let j = (i + 1) mod cnt
       g.tri first[k] + i, first[k + 1] + i, first[k] + j
       g.tri first[k] + j, first[k + 1] + i, first[k + 1] + j
 
@@ -128,14 +140,14 @@ proc addFillRoundRect*(g: var GeoBuf, x, y, w, h, r: float32, c: Color) =
 proc addStrokeRoundRect*(g: var GeoBuf, x, y, w, h, r, bw: float32, c: Color) =
   ## Rounded rect border, `bw` device px wide, inside the rect.
   if w > 0 and h > 0:
-    g.strokeShape(roundRectShape(x, y, w, h, r), min(bw, min(w, h) / 2), c)
+    g.strokeShape(roundRectShape(x, y, w, h, r), max(round(min(bw, min(w, h) / 2)), 1'f32), c)
 
 proc addFillEllipse*(g: var GeoBuf, x, y, w, h: float32, c: Color) =
   if w > 0 and h > 0: g.fillShape(ellipseShape(x, y, w, h), c)
 
 proc addStrokeEllipse*(g: var GeoBuf, x, y, w, h, bw: float32, c: Color) =
   if w > 0 and h > 0:
-    g.strokeShape(ellipseShape(x, y, w, h), min(bw, min(w, h) / 2), c)
+    g.strokeShape(ellipseShape(x, y, w, h), max(round(min(bw, min(w, h) / 2)), 1'f32), c)
 
 proc addLine*(g: var GeoBuf, x1, y1, x2, y2, bw: float32, c: Color) =
   ## Line of width `bw` device px centred on the segment, butt caps, feathered

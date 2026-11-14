@@ -3,6 +3,10 @@
 ## Umbrella module. Re-exports the public API as it is built.
 
 import nimvcl/graphics/[color, geometry, font, image, context, canvas]
-import nimvcl/platform/sdlutil
+import nimvcl/platform/[sdlutil, events, window]
+import nimvcl/core/[types, component, theme, control, layout, input, form,
+                    timer, application, host]
 
-export color, geometry, font, image, context, canvas, sdlutil
+export color, geometry, font, image, context, canvas, sdlutil, events, window
+export types, component, theme, control, layout, input, form, timer,
+       application, host

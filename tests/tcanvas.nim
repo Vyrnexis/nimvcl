@@ -2,7 +2,7 @@
 ## plus non-pixel tests of the stacks, caches and resource lifetime.
 ## Env NIMVCL_UPDATE_GOLDEN=1 rewrites the golden BMPs.
 
-import std/[unittest, os, strutils]
+import std/[unittest, os, strutils, math]
 import sdl3 except Color
 import nimvcl
 
@@ -194,6 +194,42 @@ suite "canvas state":
       check px(12, 12) == 0        # inside (10..20 device px)
       check px(9, 12) == 255       # just left of the clip
       check px(20, 12) == 255      # just right of it
+
+  test "1px stroke is uniform along straight edges at fractional scales":
+    for sc in [1.0'f32, 1.25'f32, 1.5'f32, 2.0'f32]:
+      for (rx, ry) in [(0.0'f32, 0.0'f32), (3.0'f32, 5.0'f32), (7.0'f32, 2.0'f32)]:
+        withTarget(t, 60, 60, sc):
+          let c = beginFrame(t.ctx)
+          c.clear rgb(255, 255, 255)
+          let r = rectF(rx + 4, ry + 4, 40, 36)
+          c.strokeRoundRect(r, 6, rgb(0, 0, 0), 1)
+          c.endFrame()
+          let raw = renderReadPixels(t.renderer, nil)
+          let s = convertSurface(raw, PIXELFORMAT_RGBA32)
+          destroySurface raw
+          defer: destroySurface s
+          template v(x, y: int): int = int(s.pixels[y * s.pitch + x * 4])
+          let x0 = int(round(r.x * sc))
+          let y0 = int(round(r.y * sc))
+          let x1 = int(round(r.right * sc))
+          let y1 = int(round(r.bottom * sc))
+          let rad = int(ceil(6 * sc)) + 2          # stay clear of the corner arcs
+          let bw = int(ceil(sc)) + 1               # columns that may carry stroke
+          for k in 0 ..< bw:
+            # left / right edge columns vary only along y, top / bottom along x
+            var lo = [255, 255, 255, 255]
+            var hi = [0, 0, 0, 0]
+            for y in y0 + rad ..< y1 - rad:
+              lo[0] = min(lo[0], v(x0 + k, y)); hi[0] = max(hi[0], v(x0 + k, y))
+              lo[1] = min(lo[1], v(x1 - 1 - k, y)); hi[1] = max(hi[1], v(x1 - 1 - k, y))
+            for x in x0 + rad ..< x1 - rad:
+              lo[2] = min(lo[2], v(x, y0 + k)); hi[2] = max(hi[2], v(x, y0 + k))
+              lo[3] = min(lo[3], v(x, y1 - 1 - k)); hi[3] = max(hi[3], v(x, y1 - 1 - k))
+            for e in 0 .. 3:
+              if hi[e] - lo[e] > 2:
+                echo "NONUNIFORM sc=", sc, " off=", rx, ",", ry, " k=", k, " edge=", e,
+                     " lo=", lo[e], " hi=", hi[e]
+              check hi[e] - lo[e] <= 2
 
   test "font resolution":
     check resolveFont(font()).path.endsWith("NotoSans-Regular.ttf")
