@@ -101,6 +101,7 @@ type
     ## methods are no-ops here. They are called on the UI thread, and may be
     ## called many times per frame, so implementations should just set flags.
     theme*: Theme   ## per-window theme; nil means the global `currentTheme()`
+    hidden*: bool   ## the window is not shown (Form sets it); see `isShowing`
 
 # ------------------------------------------------------------- RootHost
 
@@ -117,6 +118,9 @@ method controlLost*(h: RootHost, c: Control) {.base.} =
   discard
 method cursorChanged*(h: RootHost, c: Control) {.base.} =
   ## `c.cursor` changed; the host re-evaluates the cursor under the mouse.
+  discard
+method altChanged*(h: RootHost) {.base.} =
+  ## The Alt key went down or up (mnemonic underlines change).
   discard
 method scrollChanged*(h: RootHost, c: Container) {.base.} =
   ## The scroll offset of `c` changed: what is under the mouse may differ, so
@@ -188,6 +192,11 @@ func isVisible*(c: Control): bool =
     if not x.fVisible: return false
     x = x.fParent
   true
+
+func isShowing*(c: Control): bool =
+  ## `isVisible` and attached to a host whose window is shown.
+  let h = c.host
+  h != nil and not h.hidden and c.isVisible
 
 func isEnabled*(c: Control): bool =
   ## `enabled` of the control and all its ancestors.
@@ -381,6 +390,12 @@ method isTabStop*(c: Control): bool {.base.} =
   ## Base: the `tabStop` property. RadioButton overrides it (one stop per group).
   c.fTabStop
 
+method activateMnemonic*(c: Control, ch: char): bool {.base.} =
+  ## Alt+`ch` (lowercase ASCII) was pressed and no menu bar item took it. A
+  ## control whose caption has the mnemonic `ch` activates itself and returns
+  ## true. Only called for visible, enabled controls (see `UiRoot`). Base: false.
+  false
+
 method wantsTextInput*(c: Control): bool {.base.} =
   ## Whether the control edits text: the platform starts SDL text input
   ## (soft keyboard / IME) while it has focus. Base: false.
@@ -413,6 +428,22 @@ method beforeLayout*(c: Container) {.base.} =
 
 method afterLayout*(c: Container) {.base.} =
   ## Called by `layout` after the children were positioned.
+  discard
+
+method arrangeChildren*(c: Container, area: RectF): bool {.base.} =
+  ## Layout-owner hook, called by `layout` after `beforeLayout` with the client
+  ## area deflated by `padding`. A container that positions its children itself
+  ## (FlowPanel, GridPanel) does so here and returns true: `layout` then skips
+  ## the align passes (children keep their `align` untouched) but still
+  ## recurses into child containers. Base: false (normal align layout).
+  false
+
+method visibilityChanged*(c: Control) {.base.} =
+  ## The effective visibility of `c` may have changed: `visible` of `c` or an
+  ## ancestor was toggled, `c` was inserted into / removed from a tree, or the
+  ## form was shown / hidden. Query `isShowing` for the current state. Not
+  ## called for controls that are themselves `visible = false` below a toggled
+  ## ancestor (their state did not change). Base: nothing.
   discard
 
 method childBoundsChanged*(c: Container, child: Control) {.base.} =
@@ -495,11 +526,21 @@ proc `autoSize=`*(c: Control, v: bool) =
   c.fAutoSize = v
   c.requestLayout()
 
+proc notifyVisibility*(c: Control) =
+  ## Calls `visibilityChanged` on `c` and its descendants that are `visible`
+  ## themselves (see the method). The Form calls it when its window is shown or
+  ## hidden.
+  c.visibilityChanged()
+  if c of Container:
+    for ch in Container(c).fChildren:
+      if ch.fVisible: notifyVisibility(ch)
+
 func visible*(c: Control): bool = c.fVisible
 proc `visible=`*(c: Control, v: bool) =
   if v == c.fVisible: return
   let h = c.host
   c.fVisible = v
+  if c.fParent == nil or c.fParent.isVisible: c.notifyVisibility()
   if not v and h != nil: h.controlLost(c)
   # repaint the area it occupied/occupies in the parent
   if c.fParent != nil: c.fParent.invalidate(c.visualRect) else: c.invalidate()
@@ -615,6 +656,7 @@ proc removeControl*(c: Container, child: Control) =
   child.fParent = nil
   markLayout(c)
   c.childBoundsChanged(child)
+  if child.fVisible: child.notifyVisibility()
 
 proc insertControl*(c: Container, child: Control, index = -1) =
   ## Adds `child` at `index` (default: append = topmost), re-parenting it from
@@ -629,6 +671,7 @@ proc insertControl*(c: Container, child: Control, index = -1) =
   markLayout(c)
   c.invalidate(child.visualRect)
   c.childBoundsChanged(child)
+  if child.fVisible: child.notifyVisibility()
 
 proc `parent=`*(c: Control, p: Container) =
   ## Re-parents: removes from the old parent, appends to the new one (nil just

@@ -15,7 +15,6 @@
 
 import std/[os, strutils]
 import nimvcl
-import nimvcl/controls/[scrollbar, scrolling, scrollbox, listbox]
 
 var status: Label
 

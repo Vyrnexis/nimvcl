@@ -7,11 +7,13 @@
 ## Default / cancel (properties `isDefault`, `isCancel`; the VCL names clash
 ## with Nim's `default`): Enter anywhere in the form clicks the first visible,
 ## enabled default button, Esc the first cancel button. They are reached
-## through `UiRoot.onUnhandledKey`, so they only see keys the focused control
-## did not use; a focused Button handles Enter itself (clicking itself).
-## The hook is installed lazily (when a default/cancel button is set or first
-## painted) and only if the form has no hook yet; a form with its own hook
-## should call `handleDialogKey(form, key, shift)` from it.
+## through the key-handler chain (`UiRoot.addKeyHandler`), so they only see
+## keys the focused control did not use; a focused Button handles Enter itself
+## (clicking itself). The handler is installed lazily (when a default/cancel
+## button is set or first painted).
+##
+## Mnemonic: `&` in the caption underlines a letter while Alt is held;
+## Alt+letter clicks the button.
 ##
 ## `modalResult`: when not `mrNone`, a click also sets it on the button's form
 ## (which closes it when shown with `showModal`).
@@ -55,19 +57,11 @@ proc handleDialogKey*(root: Control, key: var Key, shift: ShiftState) =
       b.click()
 
 proc installDialogKeys*(ui: UiRoot) =
-  ## Routes unhandled Enter/Esc of `ui`'s form to its default/cancel buttons.
-  ## For a `Form` it joins the form's key-handler chain (`addKeyHandler`), so
-  ## it coexists with menu shortcuts. Does nothing when the form (or a host)
-  ## already has its own `onUnhandledKey` hook.
-  if ui.root of Form:
-    let f = Form(ui.root)
-    if ui.onUnhandledKey != nil and not f.keyChainActive: return
-    f.addKeyHandler("dialog", proc(key: var Key, shift: ShiftState) =
-      handleDialogKey(ui.root, key, shift))
-    return
-  if ui.onUnhandledKey != nil: return
-  ui.onUnhandledKey = proc(key: var Key, shift: ShiftState) =
-    handleDialogKey(ui.root, key, shift)
+  ## Routes unhandled Enter/Esc of `ui`'s form or host to its default/cancel
+  ## buttons, through the key-handler chain (id "dialog"; idempotent), so it
+  ## coexists with menu shortcuts and the application's own `onUnhandledKey`.
+  ui.addKeyHandler("dialog", proc(key: var Key, shift: ShiftState) =
+    handleDialogKey(ui.root, key, shift))
 
 proc ensureHook(b: Button) =
   if b.fHooked: return
@@ -113,10 +107,15 @@ proc state(b: Button): VisualState =
 
 method canFocus*(b: Button): bool = b.isVisible and b.isEnabled
 
+method activateMnemonic*(b: Button, ch: char): bool =
+  if mnemonicOf(b.caption) != ch: return false
+  b.click()
+  true
+
 method preferredSize*(b: Button): SizeF =
   if not b.canMeasure: return sizeF(b.width, b.height)
   let t = b.theme
-  let s = b.measure(b.caption, b.font)
+  let s = b.measure(displayText(b.caption), b.font)
   sizeF(max(ceil(s.w) + 2 * ButtonPadding, 64),
         max(t.controlHeight, ceil(s.h) + t.spacing))
 
@@ -194,7 +193,8 @@ method paint*(b: Button, c: Canvas) =
   if not accent and not b.fFlat:
     c.strokeRoundRect(r, t.radius, borderColorFor(t, st), t.borderWidth)
   let txt = if accent: t.accentText else: textColorFor(t, st)
-  c.textRect(b.caption, b.font, r.inflate(-t.spacing + 2), txt, taCenter, vaCenter)
+  c.drawMnemonic(b.caption, b.font, r.inflate(-t.spacing + 2), txt, b.altHeld,
+                 taCenter, vaCenter)
   if b.focused: drawFocusRing(c, r, t, onFilled = accent)
   procCall paint(Control(b), c)
 

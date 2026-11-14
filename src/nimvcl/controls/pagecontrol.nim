@@ -7,11 +7,13 @@
 ##
 ## Keyboard (the strip focused): Left/Right/Home/End select a tab, Ctrl+Tab /
 ## Ctrl+PageDown go to the next, Ctrl+Shift+Tab / Ctrl+PageUp to the previous
-## (wrapping). A PageControl also installs a form-level key hook (chained in
-## front of `UiRoot.onUnhandledKey`, after the default/cancel button hook) so
-## the Ctrl+Tab / Ctrl+PageUp/Down shortcuts work while focus is inside the
-## active page. A form that assigns its own `onUnhandledKey` afterwards
-## replaces that hook; the shortcuts then only work on the focused strip.
+## (wrapping). A PageControl also registers a handler (id "pages") in the
+## `UiRoot` key-handler chain when it is inserted into a form or host, so the
+## Ctrl+Tab / Ctrl+PageUp/Down shortcuts work while focus is inside the active
+## page, whatever the registration order of other handlers (menus, dialog keys).
+##
+## Mnemonics: `&` in a sheet caption is underlined while Alt is held;
+## Alt+letter selects that page (when the sheet is enabled).
 ##
 ## Overflow: when the tabs do not fit, two small arrow buttons appear at the
 ## right end of the strip and scroll it (selecting does not need them: the
@@ -29,7 +31,7 @@
 ## children can be placed in, below the strip.
 
 import ../core/[input, form]
-import ./[common, button]
+import ./common
 
 type
   TabChangingEvent* = proc(sender: Control, allowChange: var bool)
@@ -49,7 +51,6 @@ type
   TabSheet* = ref object of Container
 
   PageControl* = ref object of TabBase
-    fHooked: bool
 
 const
   TabPad = 14'f32
@@ -72,7 +73,7 @@ proc stripHeight*(t: TabBase): float32 =
   t.theme.controlHeight
 
 proc tabWidth(t: TabBase, i: int): float32 =
-  max(t.textWidth(t.tabText(i), t.font) + 2 * TabPad, MinTabW)
+  max(t.textWidth(displayText(t.tabText(i)), t.font) + 2 * TabPad, MinTabW)
 
 proc totalTabsWidth(t: TabBase): float32 =
   for i in 0 ..< t.tabCount: result += t.tabWidth(i)
@@ -182,6 +183,15 @@ proc handleTabKey(t: TabBase, key: var Key, shift: ShiftState): bool =
     return true
   false
 
+method tabEnabled*(t: TabBase, i: int): bool {.base.} = true
+
+method activateMnemonic*(t: TabBase, ch: char): bool =
+  ## Alt+letter selects the tab whose caption has that mnemonic.
+  for i in 0 ..< t.tabCount:
+    if t.tabEnabled(i) and mnemonicOf(t.tabText(i)) == ch:
+      t.tabIndex = i
+      return true
+
 method doKeyDown*(t: TabBase, key: var Key, shift: ShiftState) =
   procCall doKeyDown(Control(t), key, shift)
   if key == Key(0): return
@@ -224,16 +234,18 @@ method paint*(t: TabBase, c: Canvas) =
     c.fillRoundRect(rectF(r.x, r.y, r.w, r.h + 6), th.radius, fill)
     c.strokeRoundRect(rectF(r.x, r.y, r.w, r.h + 6), th.radius, th.border, 1)
     c.popClip()
-    c.textRect(t.tabText(i), t.font, rectF(r.x + 4, r.y, r.w - 8, r.h - 1),
-               if en: th.textMuted else: th.textDisabled, taCenter, vaCenter)
+    c.drawMnemonic(t.tabText(i), t.font, rectF(r.x + 4, r.y, r.w - 8, r.h - 1),
+                   if en: th.textMuted else: th.textDisabled, t.altHeld,
+                   taCenter, vaCenter)
   if selR.w > 0:
     c.pushClip(rectF(selR.x - 1, 0, selR.w + 2, h))
     let full = rectF(selR.x, selR.y, selR.w, selR.h + 6)
     c.fillRoundRect(full, th.radius, if t.fFillBody: th.surface else: th.window)
     c.strokeRoundRect(full, th.radius, th.borderStrong, 1)
     c.popClip()
-    c.textRect(t.tabText(t.fIndex), t.font, rectF(selR.x + 4, selR.y, selR.w - 8, selR.h),
-               if en: th.text else: th.textDisabled, taCenter, vaCenter)
+    c.drawMnemonic(t.tabText(t.fIndex), t.font,
+                   rectF(selR.x + 4, selR.y, selR.w - 8, selR.h),
+                   if en: th.text else: th.textDisabled, t.altHeld, taCenter, vaCenter)
     if t.focused:
       drawFocusRing(c, rectF(selR.x, selR.y, selR.w, selR.h), th)
   c.popClip()
@@ -320,6 +332,9 @@ method tabCount*(p: PageControl): int =
 method tabText*(p: PageControl, i: int): string =
   p.sheets[i].caption
 
+method tabEnabled*(p: PageControl, i: int): bool =
+  p.sheets[i].enabled
+
 proc syncPages(p: PageControl) =
   ## Keeps the index valid and shows only the active sheet.
   let sh = p.sheets
@@ -364,16 +379,17 @@ proc pageKey(ui: UiRoot, key: var Key, shift: ShiftState) =
   if c != nil: discard PageControl(c).handleTabKey(key, shift)
 
 proc ensureHook(p: PageControl) =
-  if p.fHooked: return
+  ## Registers the shared "pages" handler in the key-handler chain of the
+  ## form/host the page control is in (once per UiRoot).
   let h = p.host
   if not (h of UiRoot): return
   let ui = UiRoot(h)
-  p.fHooked = true
-  installDialogKeys(ui)             # keeps Enter/Esc of default/cancel buttons
-  let prev = ui.onUnhandledKey
-  ui.onUnhandledKey = proc(key: var Key, shift: ShiftState) =
-    pageKey(ui, key, shift)
-    if key != Key(0) and prev != nil: prev(key, shift)
+  if ui.hasKeyHandler("pages"): return
+  ui.addKeyHandler("pages", proc(key: var Key, shift: ShiftState) =
+    pageKey(ui, key, shift))
+
+method visibilityChanged*(p: PageControl) =
+  p.ensureHook()                    # fires when inserted into a form/host tree
 
 method padding*(p: PageControl): Spacing =
   p.syncPages()

@@ -1,11 +1,9 @@
 ## `FlowPanel` and `GridPanel` (VCL TFlowPanel / TGridPanel): panels that
-## place their children themselves, through the layout `customAlign` hook.
-##
-## Children whose `align` is `alNone` are switched to `alCustom` automatically
-## (when the panel is laid out), so plain `newButton(flow, ...)` works. A child
-## with another `align` (alTop, ...) keeps it and is laid out as usual before
-## the flow/grid takes the remaining space. Children's `margins` are honoured
-## and are part of their cell/slot; hidden children are skipped.
+## place their children themselves, through the layout `arrangeChildren` hook
+## (core/control.nim). Every visible child is positioned by the panel whatever
+## its `align` is (the property is left untouched); the align passes of the
+## normal layout are skipped for these panels. Children's `margins` are
+## honoured and are part of their cell/slot; hidden children are skipped.
 ##
 ## FlowPanel: children keep their own size and flow in child order.
 ## * `flowStyle = fsLeftRightTopBottom` (default): rows, wrapping when the next
@@ -56,15 +54,6 @@ func gsAbsolute*(v: float32): GridSize = GridSize(kind: gkAbsolute, value: v)
 func gsPercent*(v: float32): GridSize = GridSize(kind: gkPercent, value: v)
 func gsAuto*(): GridSize = GridSize(kind: gkAuto)
 
-proc adopt(p: Container) =
-  ## alNone children become alCustom so the panel's `customAlign` places them.
-  for c in p.children:
-    if c.align == alNone: c.align = alCustom
-
-proc firstCustom(p: Container): Control =
-  for c in p.children:
-    if c.visible and c.align == alCustom: return c
-
 # --------------------------------------------------------------- FlowPanel
 
 func flowStyle*(f: FlowPanel): FlowStyle = f.fStyle
@@ -81,17 +70,12 @@ proc `vGap=`*(f: FlowPanel, v: float32) =
   f.fVGap = v
   f.relayout()
 
-method padding*(f: FlowPanel): Spacing =
-  adopt(f)
-  procCall padding(Container(f))
-
-method customAlign*(f: FlowPanel, child: Control, avail: RectF) =
-  if child != f.firstCustom: return
+method arrangeChildren*(f: FlowPanel, avail: RectF): bool =
   var x = avail.x
   var y = avail.y
   var line = 0'f32            # extent of the current row/column across the flow
   for c in f.children:
-    if not c.visible or c.align != alCustom: continue
+    if not c.visible: continue
     let m = c.margins
     let w = c.width + m.horizontal
     let h = c.height + m.vertical
@@ -112,6 +96,7 @@ method customAlign*(f: FlowPanel, child: Control, avail: RectF) =
       c.setBounds(round(x + m.left), round(y + m.top), c.width, c.height)
       y += h + f.fVGap
       line = max(line, w)
+  true
 
 proc initFlowPanel*(f: FlowPanel, owner: Component = nil) =
   f.initPanel(owner)
@@ -145,7 +130,6 @@ proc setCell*(g: GridPanel, c: Control, row, col: int, rowSpan = 1, colSpan = 1)
   ## Places `c` explicitly (spans are clamped to the grid when laid out).
   g.fCells[c] = GridCell(row: row, col: col, rowSpan: max(rowSpan, 1),
                          colSpan: max(colSpan, 1))
-  if c.align == alNone: c.align = alCustom
   g.relayout()
 
 proc clearCell*(g: GridPanel, c: Control) =
@@ -162,7 +146,7 @@ proc placements(g: GridPanel): seq[(Control, GridCell)] =
   var taken = newSeq[bool](nr * nc)
   var kids: seq[Control]
   for c in g.children:
-    if c.visible and c.align == alCustom: kids.add c
+    if c.visible: kids.add c
   var res = initTable[Control, GridCell]()
   for c in kids:
     if c in g.fCells:
@@ -220,7 +204,7 @@ proc edges(sizes: seq[float32], origin: float32): seq[float32] =
     result.add round(acc)
 
 proc gridArea(g: GridPanel): RectF =
-  let p = g.padding
+  let p = Container(g).padding
   rectF(p.left, p.top, max(g.width - p.horizontal, 0), max(g.height - p.vertical, 0))
 
 proc layoutCells(g: GridPanel, area: RectF): (seq[float32], seq[float32],
@@ -239,12 +223,7 @@ proc cellRect*(g: GridPanel, row, col: int, rowSpan = 1, colSpan = 1): RectF =
   let c1 = clamp(c0 + max(colSpan, 1), c0 + 1, cx.len - 1)
   rectF(cx[c0], cy[r0], cx[c1] - cx[c0], cy[r1] - cy[r0])
 
-method padding*(g: GridPanel): Spacing =
-  adopt(g)
-  procCall padding(Container(g))
-
-method customAlign*(g: GridPanel, child: Control, avail: RectF) =
-  if child != g.firstCustom: return
+method arrangeChildren*(g: GridPanel, avail: RectF): bool =
   g.fArea = avail
   let (cx, cy, cells) = g.layoutCells(avail)
   for (c, cell) in cells:
@@ -255,6 +234,7 @@ method customAlign*(g: GridPanel, child: Control, avail: RectF) =
     let y1 = cy[cell.row + cell.rowSpan]
     c.setBounds(x0 + m.left, y0 + m.top, max(x1 - x0 - m.horizontal, 0),
                 max(y1 - y0 - m.vertical, 0))
+  true
 
 proc initGridPanel*(g: GridPanel, owner: Component = nil) =
   g.initPanel(owner)

@@ -6,6 +6,9 @@
 ## `newLabel` turns it off when an explicit width/height is given.
 ## With `wordWrap` the width is kept and only the height follows the text.
 ## Without `wordWrap`, text wider than the label is cut with an ellipsis.
+##
+## Mnemonic: `&` in the caption underlines a letter while Alt is held;
+## Alt+letter focuses `focusControl` (when set).
 
 import ./common
 
@@ -62,10 +65,11 @@ proc resetTextColor*(l: Label) =
 
 method preferredSize*(l: Label): SizeF =
   if not l.canMeasure: return sizeF(l.width, l.height)
+  let txt = displayText(l.caption)
   if l.fWordWrap and l.width > 0:
-    sizeF(l.width, ceil(l.measure(l.caption, l.font, l.width).h))
+    sizeF(l.width, ceil(l.measure(txt, l.font, l.width).h))
   else:
-    let s = l.measure(l.caption, l.font)
+    let s = l.measure(txt, l.font)
     sizeF(ceil(s.w) + 1, ceil(s.h))
 
 method paint*(l: Label, c: Canvas) =
@@ -75,9 +79,15 @@ method paint*(l: Label, c: Canvas) =
     if not l.isEnabled: t.textDisabled
     elif l.fHasTextColor: l.fTextColor
     else: t.text
-  c.textRect(l.caption, l.font, l.clientRect, col, l.fAlignment, l.fLayout,
-             wrap = l.fWordWrap)
+  c.drawMnemonic(l.caption, l.font, l.clientRect, col, l.altHeld, l.fAlignment,
+                 l.fLayout, wrap = l.fWordWrap)
   procCall paint(Control(l), c)
+
+method activateMnemonic*(l: Label, ch: char): bool =
+  if l.fFocusControl == nil or mnemonicOf(l.caption) != ch: return false
+  if not (l.fFocusControl.isVisible and l.fFocusControl.isEnabled): return false
+  setFocus(l.fFocusControl)
+  true
 
 method doClick*(l: Label) =
   if l.fFocusControl != nil: setFocus(l.fFocusControl)

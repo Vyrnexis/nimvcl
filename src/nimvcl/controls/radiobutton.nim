@@ -61,6 +61,12 @@ method canFocus*(r: RadioButton): bool = r.isVisible and r.isEnabled
 
 method preferredSize*(r: RadioButton): SizeF = indicatorPreferredSize(r)
 
+method activateMnemonic*(r: RadioButton, ch: char): bool =
+  if mnemonicOf(r.caption) != ch: return false
+  setFocus(r)
+  r.doClick()
+  true
+
 method doMouseEnter*(r: RadioButton) =
   r.fHot = true
   r.invalidate()
@@ -146,8 +152,8 @@ method paint*(r: RadioButton, c: Canvas) =
   else:
     c.fillEllipse(box, faceColor(t, st))
     c.strokeEllipse(box, borderColorFor(t, st), t.borderWidth)
-  c.textRect(r.caption, r.font, indicatorCaptionRect(r, t), textColorFor(t, st),
-             taLeft, vaCenter)
+  c.drawMnemonic(r.caption, r.font, indicatorCaptionRect(r, t), textColorFor(t, st),
+                 r.altHeld, taLeft, vaCenter)
   if r.focused:
     c.strokeEllipse(box, t.focusRing, t.focusRingWidth)
     if r.fChecked:

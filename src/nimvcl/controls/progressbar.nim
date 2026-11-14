@@ -2,8 +2,9 @@
 ## `stepIt`, horizontal or vertical, smooth rounded look.
 ##
 ## `style = pbsMarquee` shows a block sliding back and forth; it is driven by
-## a Timer that only runs while the bar is visible (it stops itself when the
-## bar is hidden or detached and is restarted by the next paint).
+## a Timer that only runs while the bar is showing: it is started and stopped by
+## `visibilityChanged` (the bar or an ancestor hidden/shown, the bar inserted
+## into or removed from a tree, the form shown/hidden), with no polling.
 ## `advanceMarquee` moves it one step (also what the timer calls).
 
 import ../core/timer
@@ -73,19 +74,18 @@ proc runsMarquee*(p: ProgressBar): bool =
   ## Whether the animation timer is currently running.
   p.fTimer != nil and p.fTimer.enabled
 
-proc wantMarquee(p: ProgressBar): bool =
-  p.fStyle == pbsMarquee and p.isVisible and p.host != nil
-
 proc syncTimer(p: ProgressBar) =
-  if p.wantMarquee:
+  ## The timer runs while the style is marquee and the bar is showing.
+  if p.fStyle == pbsMarquee and p.isShowing:
     if p.fTimer == nil:
       p.fTimer = newTimer(p, MarqueeMs)
-      p.fTimer.onTimer = proc(t: Timer) =
-        if not p.wantMarquee: t.enabled = false
-        else: p.advanceMarquee()
+      p.fTimer.onTimer = proc(t: Timer) = p.advanceMarquee()
     p.fTimer.enabled = true
   elif p.fTimer != nil:
     p.fTimer.enabled = false
+
+method visibilityChanged*(p: ProgressBar) =
+  p.syncTimer()
 
 proc `style=`*(p: ProgressBar, v: ProgressStyle) =
   if v == p.fStyle: return
@@ -114,7 +114,6 @@ method paint*(p: ProgressBar, c: Canvas) =
   let len = if horiz: inner.w else: inner.h
   var a, b: float32       # filled span along the main axis, from the start
   if p.fStyle == pbsMarquee:
-    p.syncTimer()
     let bw = len * 0.3
     a = (len - bw) * p.fPhase
     b = a + bw

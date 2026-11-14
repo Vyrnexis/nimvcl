@@ -12,8 +12,6 @@
 
 import std/[os, strutils]
 import nimvcl
-import nimvcl/controls/[progressbar, trackbar, spinedit, splitter, statusbar,
-                        toolbar, pagecontrol, flowpanel, dialogs]
 
 var
   status: StatusBar
@@ -231,7 +229,7 @@ proc buildMain(): Form =
   pc = newPageControl(f)
   pc.align = alClient
   pc.margins = spacing(0, 8, 8, 8)
-  buildProgressPage(newTabSheet(pc, "Progress & Sliders"))
+  buildProgressPage(newTabSheet(pc, "Progress && Sliders"))
   buildLayoutPage(newTabSheet(pc, "Layouts"))
   buildTabsPage(newTabSheet(pc, "Tabs"))
   buildDialogPage(newTabSheet(pc, "Dialogs"))

@@ -185,6 +185,14 @@ proc addEventObserver*(a: TApplication, o: EventObserver) =
   observers.add o
 
 proc notify(f: Form, pe: PlatformEvent) =
+  if f != nil:                   # Alt state, also for keys that went to a popup
+    case pe.kind
+    of ekKeyDown:
+      if pe.key == keyLAlt or pe.key == keyRAlt: f.ui.setAlt(true)
+    of ekKeyUp:
+      if pe.key == keyLAlt or pe.key == keyRAlt: f.ui.setAlt(false)
+    of ekWindowFocusLost: f.ui.setAlt(false)
+    else: discard
   for o in observers: o(f, pe)
 
 proc dispatch*(a: TApplication, pe: PlatformEvent) =
@@ -284,3 +292,20 @@ proc modalLoop(f: Form) =
 
 modalLoopProc = modalLoop
 terminateProc = proc() = Application.terminate()
+
+
+proc runModalLoop*(until: proc(): bool) =
+  ## Runs a nested event loop (painting, dispatching, queued procs) until
+  ## `until()` returns true or the application terminates. Input of every form
+  ## is gated meanwhile (`beginModalState`); popups close. Use it to wait for
+  ## something that has no form of its own, such as a native file dialog.
+  ## `until` is checked after every batch of events; something must wake the
+  ## loop (an event or `runOnUi`/`queue`) when it becomes true.
+  let a = Application
+  beginModalState()
+  try:
+    while not until() and not a.terminated:
+      a.paintForms()
+      a.pump(-1)
+  finally:
+    endModalState()

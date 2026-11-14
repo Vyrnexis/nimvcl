@@ -26,12 +26,13 @@
 ##   `multiSelect`.
 ## * `execute(onDone)`: starts the dialog and returns at once; `onDone(ok,
 ##   files)` runs later on the UI thread. `files` / `fileName` are set too.
-## * `executeModal(): bool`: runs a nested event loop (other windows keep
-##   handling events) until the dialog reports, then returns ok.
+## * `executeModal(): bool`: runs a nested modal loop (`runModalLoop`: the
+##   input of the application's forms is gated) until the dialog reports, then
+##   returns ok.
 
 import std/tables
 import ../core/[form, application]
-import ../platform/[window, dialogs]
+import ../platform/dialogs
 import ../dsl/formmacro
 import ./[common, label, button, edit, paintbox]
 
@@ -121,7 +122,6 @@ form MsgDlgForm:
   var showIcon: bool
   var buttonSet: MsgDlgButtons
   var buttonList: seq[Button]
-  var ownerForm: Form
   PaintBox icon:
     width = IconSize; height = IconSize
     onPaint = proc(sender: Control, canvas: Canvas) =
@@ -178,10 +178,6 @@ form MsgDlgForm:
       b.setBounds(x, by, b.width, BtnHeight)
       x += b.width + BtnGap
     self.setBounds(self.left, self.top, w, by + BtnHeight + DlgPad - 4)
-    if self.hasWindow:
-      if self.ownerForm != nil and self.ownerForm.hasWindow:
-        self.win.centerOn(self.ownerForm.win)
-      else: self.win.centerOnScreen()
   onShow: MsgDlgForm(sender).fit()
 
 proc runMessageDlg(text: string, kind: MsgDlgType, showIcon: bool,
@@ -189,7 +185,6 @@ proc runMessageDlg(text: string, kind: MsgDlgType, showIcon: bool,
                    title: string): ModalResult =
   let bs = if buttons == {}: {mbOK} else: buttons
   let d = newMsgDlgForm()
-  d.ownerForm = activeForm()
   d.caption = if title.len > 0: title else: defaultCaption(kind)
   d.setup(text, kind, showIcon, bs, default)
   result = d.showModal()
@@ -211,7 +206,6 @@ proc newMessageDlg*(text: string, dlgType = mtInformation,
   ## The dialog form without showing it (headless screenshots, tests).
   let bs = if buttons == {}: {mbOK} else: buttons
   result = newMsgDlgForm()
-  result.ownerForm = activeForm()
   result.caption = if title.len > 0: title else: defaultCaption(dlgType)
   result.setup(text, dlgType, true, bs, defaultButton)
 
@@ -220,7 +214,6 @@ proc newMessageDlg*(text: string, dlgType = mtInformation,
 form InputDlgForm:
   borderStyle = bsSingle
   position = poScreenCenter
-  var ownerForm: Form
   Label promptLbl:
     autoSize = false
     wordWrap = true
@@ -247,10 +240,6 @@ form InputDlgForm:
     self.cancelBtn.setBounds(w - DlgPad - 88, by, 88, BtnHeight)
     self.okBtn.setBounds(w - DlgPad - 88 * 2 - BtnGap, by, 88, BtnHeight)
     self.setBounds(self.left, self.top, w, by + BtnHeight + DlgPad - 4)
-    if self.hasWindow:
-      if self.ownerForm != nil and self.ownerForm.hasWindow:
-        self.win.centerOn(self.ownerForm.win)
-      else: self.win.centerOnScreen()
     self.activeControl = self.input
     self.input.selectAll()
   onShow: InputDlgForm(sender).fit()
@@ -258,7 +247,6 @@ form InputDlgForm:
 proc newInputDlg*(caption, prompt, value: string): InputDlgForm =
   ## The input dialog form without showing it.
   result = newInputDlgForm()
-  result.ownerForm = activeForm()
   result.caption = caption
   result.promptLbl.caption = prompt
   result.input.text = value
@@ -350,8 +338,7 @@ proc executeModal*(d: FileDialogBase): bool =
   d.start(d.kind, proc(ok: bool, files: seq[string]) =
     finished = true
     accepted = ok)
-  while not finished and not Application.terminated:
-    Application.processMessages(-1)
+  runModalLoop(proc(): bool = finished)
   result = accepted
 
 proc newOpenDialog*(owner: Component = nil): OpenDialog =

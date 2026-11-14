@@ -28,19 +28,19 @@
 ##
 ## MainMenu: hover switches between top menus while one is open; Alt+letter
 ## opens a menu; F10 opens the first one; while Alt is held the bar mnemonics
-## are underlined (tracked from the key events). Pressing and releasing Alt
-## alone does nothing (so Alt+Tab never opens a menu). Mnemonics inside open
-## dropdowns are always underlined. Button/Label captions do not use `&` yet.
+## are underlined (`UiRoot.altHeld`, `control.altHeld`). Pressing and releasing
+## Alt alone does nothing (so Alt+Tab never opens a menu). Mnemonics inside
+## open dropdowns are always underlined. The bar has priority over the `&`
+## mnemonics of other controls (see common.nim `drawMnemonic`).
 ##
 ## Shortcuts, F10, Alt+letter and the context-menu keys are handled in the
-## form's key-handler chain (`Form.addKeyHandler`, id "menus"), i.e. only for
+## key-handler chain (`UiRoot.addKeyHandler`, id "menus"), i.e. only for
 ## keys the focused control did not use. Needs `import nimvcl/controls/menus`
 ## to be linked in (the umbrella does).
 
 import std/strutils
 import ../core/[form, popup, application, timer]
 import ../graphics/context
-import ../platform/events
 import ./common
 
 type
@@ -82,7 +82,6 @@ type
   MainMenu* = ref object of Control
     fRoot: MenuItem
     fOpen, fHot: int
-    fAlt: bool
     fDrop: PopupWindow
 
 var
@@ -157,26 +156,6 @@ proc parseShortcut*(text: string): Shortcut =
 proc shortcut*(text: string): Shortcut = parseShortcut(text)
 
 # --------------------------------------------------------------- mnemonics
-
-func parseMnemonic*(caption: string): tuple[text: string, index: int, ch: char] =
-  ## Removes the `&` markers: `text` is what is drawn, `index` the byte
-  ## position of the mnemonic character in it (-1: none), `ch` that character
-  ## lowercased (ASCII only).
-  result.index = -1
-  var i = 0
-  while i < caption.len:
-    if caption[i] == '&':
-      if i + 1 < caption.len and caption[i + 1] == '&':
-        result.text.add '&'
-        i += 2
-      else:
-        if i + 1 < caption.len and result.index < 0:
-          result.index = result.text.len
-          result.ch = caption[i + 1].toLowerAscii
-        inc i
-    else:
-      result.text.add caption[i]
-      inc i
 
 # --------------------------------------------------------------- MenuItem
 
@@ -283,22 +262,6 @@ proc textSize(ctx: RenderContext, text: string, f: FontSpec): SizeF =
   if ctx == nil or ctx.isClosed: return sizeF(float32(text.len) * 7, 16)
   let (w, h) = ctx.measureDevice(text, f)
   sizeF(w / ctx.scale, h / ctx.scale)
-
-proc drawMnemonic(c: Canvas, caption: string, f: FontSpec, rect: RectF,
-                  col: Color, underline: bool) =
-  ## Left-aligned, vertically centred caption; the mnemonic char is underlined
-  ## when `underline`.
-  let (txt, idx, _) = parseMnemonic(caption)
-  c.textRect(txt, f, rect, col, taLeft, vaCenter)
-  if underline and idx >= 0 and idx < txt.len:
-    var n = 1
-    while idx + n < txt.len and (uint8(txt[idx + n]) and 0xC0) == 0x80: inc n
-    let before = c.measureText(txt[0 ..< idx], f).w
-    let w = c.measureText(txt[idx ..< idx + n], f).w
-    let size = c.measureText(txt, f)
-    let top = rect.y + (rect.h - size.h) / 2
-    let y = top + c.fontMetrics(f).ascent + 2
-    c.fillRect(rectF(rect.x + before, y, max(w, 1), 1), col)
 
 # ---------------------------------------------------------------- panel
 
@@ -681,7 +644,6 @@ proc addItem*(m: MainMenu, caption: string, onClick: MenuItemEvent = nil,
 
 func openIndex*(m: MainMenu): int = m.fOpen
   ## Index (in `items`) of the top menu whose dropdown is open, or -1.
-func altHeld*(m: MainMenu): bool = m.fAlt
 
 proc closeMenus*(m: MainMenu) =
   ## Closes an open dropdown.
@@ -742,11 +704,6 @@ proc openFirst*(m: MainMenu): bool =
       m.openDropdown(i, true)
       return true
 
-proc setAlt(m: MainMenu, v: bool) =
-  if v == m.fAlt: return
-  m.fAlt = v
-  m.invalidate()
-
 proc itemRect*(m: MainMenu, idx: int): RectF =
   ## Bar rectangle of top item `idx` in the control's coordinates (empty when hidden).
   for e in m.itemRects:
@@ -761,7 +718,7 @@ method paint*(m: MainMenu, c: Canvas) =
   let t = m.theme
   c.fillRect(m.clientRect, t.menuBg)
   c.fillRect(rectF(0, m.height - 1, m.width, 1), t.border)
-  let underline = m.fAlt or m.fOpen >= 0
+  let underline = m.altHeld or m.fOpen >= 0
   for e in m.itemRects:
     let it = m.fRoot[e.idx]
     let on = not it.fDisabled
@@ -862,16 +819,3 @@ proc newMainMenu*(parent: Container = nil): MainMenu =
   result.initMainMenu(parent)
   if parent != nil and parent of Form: Form(parent).menu = result
   elif parent != nil: parent.insertControl result
-
-proc menuObserver(f: Form, pe: PlatformEvent) =
-  if f == nil or f.menuBar == nil or not (f.menuBar of MainMenu): return
-  let bar = MainMenu(f.menuBar)
-  case pe.kind
-  of ekKeyDown:
-    if pe.key == keyLAlt or pe.key == keyRAlt: bar.setAlt(true)
-  of ekKeyUp:
-    if pe.key == keyLAlt or pe.key == keyRAlt: bar.setAlt(false)
-  of ekWindowFocusLost: bar.setAlt(false)
-  else: discard
-
-Application.addEventObserver(menuObserver)

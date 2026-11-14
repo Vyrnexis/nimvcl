@@ -48,6 +48,12 @@ method canFocus*(b: CheckBox): bool = b.isVisible and b.isEnabled
 
 method preferredSize*(b: CheckBox): SizeF = indicatorPreferredSize(b)
 
+method activateMnemonic*(b: CheckBox, ch: char): bool =
+  if mnemonicOf(b.caption) != ch: return false
+  setFocus(b)
+  b.doClick()
+  true
+
 method doMouseEnter*(b: CheckBox) =
   b.fHot = true
   b.invalidate()
@@ -126,8 +132,8 @@ method paint*(b: CheckBox, c: Canvas) =
     else:
       c.line(box.x + 4.5, box.y + 8, box.x + 11.5, box.y + 8, mark, w)
       dot(4.5, 8); dot(11.5, 8)
-  c.textRect(b.caption, b.font, indicatorCaptionRect(b, t), textColorFor(t, st),
-             taLeft, vaCenter)
+  c.drawMnemonic(b.caption, b.font, indicatorCaptionRect(b, t), textColorFor(t, st),
+                 b.altHeld, taLeft, vaCenter)
   if b.focused: drawFocusRing(c, box, t, rad, onFilled = on)
   procCall paint(Control(b), c)
 

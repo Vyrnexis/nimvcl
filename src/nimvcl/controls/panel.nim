@@ -55,7 +55,8 @@ method paint*(p: Panel, c: Canvas) =
                       t.borderWidth)
   if p.caption.len > 0:
     let col = if p.isEnabled: t.text else: t.textDisabled
-    c.textRect(p.caption, p.font, r.inflate(-t.spacing), col, p.fAlignment, vaCenter)
+    c.drawMnemonic(p.caption, p.font, r.inflate(-t.spacing), col, p.altHeld,
+                   p.fAlignment, vaCenter)
   procCall paint(Control(p), c)
 
 proc initPanel*(p: Panel, owner: Component = nil) =
@@ -99,15 +100,24 @@ method paint*(g: GroupBox, c: Canvas) =
     c.strokeRoundRect(frame, t.radius, t.border, t.borderWidth)
   else:
     let tx = t.spacing + 4
-    let tw = min(c.measureText(g.caption, g.font).w, max(g.width - 2 * tx, 0))
+    let tw = min(c.measureText(displayText(g.caption), g.font).w, max(g.width - 2 * tx, 0))
     let gapL = tx - 4
     let gapR = tx + tw + 4
     # three disjoint clips leave a gap in the top border for the caption
     c.pushClip(rectF(0, 0, gapL, ch)); c.strokeRoundRect(frame, t.radius, t.border, t.borderWidth); c.popClip()
     c.pushClip(rectF(gapR, 0, g.width - gapR, ch)); c.strokeRoundRect(frame, t.radius, t.border, t.borderWidth); c.popClip()
     c.pushClip(rectF(0, ch, g.width, g.height - ch)); c.strokeRoundRect(frame, t.radius, t.border, t.borderWidth); c.popClip()
-    c.textRect(g.caption, g.font, rectF(tx, 0, tw, ch), col, taLeft, vaCenter)
+    c.drawMnemonic(g.caption, g.font, rectF(tx, 0, tw, ch), col, g.altHeld, taLeft,
+                   vaCenter)
   procCall paint(Control(g), c)
+
+method activateMnemonic*(g: GroupBox, ch: char): bool =
+  ## Alt+letter focuses the first focusable control inside the box.
+  if mnemonicOf(g.caption) != ch: return false
+  let stops = tabStops(g)
+  if stops.len == 0: return false
+  setFocus(stops[0])
+  true
 
 proc initGroupBox*(g: GroupBox, owner: Component = nil) =
   g.initContainer(owner)

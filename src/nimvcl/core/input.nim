@@ -24,14 +24,24 @@
 ## Keyboard: key events go to the focused control (or the root when none);
 ## they do not bubble. With `keyPreview` the root sees them first. Unhandled
 ## Tab / Shift+Tab move focus; anything still unhandled reaches
-## `onUnhandledKey` (hook point for a default/cancel button in phase 3).
+## `onUnhandledKey` (the application's own hook), then the key-handler chain
+## (`addKeyHandler`: default/cancel buttons, menu shortcuts, PageControl
+## Ctrl+Tab, ... in registration order; forms and hosts share it), then
+## Alt+letter mnemonics (`&` captions). Menu bar mnemonics are in the chain, so
+## they win over control mnemonics.
+##
+## Alt: `altHeld` follows the Alt key events (cleared on focus loss) and
+## repaints the tree when it changes, so captions can underline their mnemonic.
 
-import std/algorithm
+import std/[algorithm, strutils]
 import ../graphics/[geometry, context, canvas]
 import ../platform/[window, events, cursors]
 import ./types, ./control, ./layout
 
 type
+  KeyHook* = proc(key: var Key, shift: ShiftState)
+    ## A handler for keys no control used. Sets `key` to `Key(0)` to consume it.
+
   UiRoot* = ref object of RootHost
     root*: Container
     win*: PlatformWindow
@@ -40,7 +50,9 @@ type
     keyPreview*: bool
     rootGetsMouse*: bool         ## the root itself is a mouse target (Form: true)
     autoSizeRoot*: bool          ## window size changes resize the root
-    onUnhandledKey*: proc(key: var Key, shift: ShiftState)
+    onUnhandledKey*: KeyHook     ## the application's own hook; runs before the chain
+    fKeyHandlers: seq[tuple[id: string, hook: KeyHook]]
+    fAlt: bool                   ## an Alt key is down (mnemonic underlines)
     windowInactive*: bool        ## the window lost focus (set by the Form)
     revealOnFocus*: bool         ## focus changes scroll the control into view
                                  ## (default true; off while a mouse press focuses)
@@ -50,6 +62,8 @@ type
     mouseInside: bool
     hoverStale: bool
     cursorApplied: bool
+
+func altHeld*(ui: UiRoot): bool = ui.fAlt
 
 proc newUiRoot*(root: Container): UiRoot =
   result = UiRoot(root: root, dirty: true, revealOnFocus: true)
@@ -282,7 +296,59 @@ proc mouseWheel(ui: UiRoot, p: PointF, dx, dy: float32, shift: ShiftState): bool
 
 # -------------------------------------------------------------- keyboard
 
+proc addKeyHandler*(ui: UiRoot, id: string, hook: KeyHook) =
+  ## Registers a handler for keys that neither the focused control nor the
+  ## root handled, in registration order. The same `id` replaces the earlier
+  ## handler (keeping its place). Several features share the chain; a hook set
+  ## on `onUnhandledKey` runs first.
+  for e in ui.fKeyHandlers.mitems:
+    if e.id == id:
+      e.hook = hook
+      return
+  ui.fKeyHandlers.add (id, hook)
+
+proc removeKeyHandler*(ui: UiRoot, id: string) =
+  for i in 0 ..< ui.fKeyHandlers.len:
+    if ui.fKeyHandlers[i].id == id:
+      ui.fKeyHandlers.delete(i)
+      return
+
+func hasKeyHandler*(ui: UiRoot, id: string): bool =
+  for e in ui.fKeyHandlers:
+    if e.id == id: return true
+
+proc findMnemonic(c: Control, ch: char): bool =
+  ## Depth-first: the first visible, enabled control that claims `ch`.
+  if not c.visible or not c.enabled: return false
+  if c.activateMnemonic(ch): return true
+  if c of Container:
+    for k in Container(c).children:
+      if findMnemonic(k, ch): return true
+
+proc runKeyChain(ui: UiRoot, k: var Key, shift: ShiftState) =
+  if ui.onUnhandledKey != nil:
+    ui.onUnhandledKey(k, shift)
+    if k == Key(0): return
+  var i = 0
+  while i < ui.fKeyHandlers.len:             # a handler may add handlers
+    ui.fKeyHandlers[i].hook(k, shift)
+    if k == Key(0): return
+    inc i
+  if shift * {ssCtrl, ssAlt, ssSuper} == {ssAlt}:
+    let u = uint32(k)
+    if u > 0x20 and u < 0x7f:
+      if findMnemonic(ui.root, char(u).toLowerAscii): k = Key(0)
+
+proc setAlt*(ui: UiRoot, v: bool) =
+  ## Records the state of the Alt key (the Application also feeds it with Alt
+  ## events of popup windows, which never reach `handle`).
+  if v == ui.fAlt: return
+  ui.fAlt = v
+  ui.dirty = true
+  ui.altChanged()
+
 proc keyDown(ui: UiRoot, key: Key, shift: ShiftState): bool =
+  if key == keyLAlt or key == keyRAlt: ui.setAlt(true)
   var k = key
   let target = if ui.fFocused != nil: ui.fFocused else: Control(ui.root)
   if ui.keyPreview and target != Control(ui.root):
@@ -293,12 +359,12 @@ proc keyDown(ui: UiRoot, key: Key, shift: ShiftState): bool =
   if k == keyTab and shift * {ssCtrl, ssAlt} == {}:
     ui.focusNext(ssShift notin shift)
     return true
-  if ui.onUnhandledKey != nil:
-    ui.onUnhandledKey(k, shift)
-    if k == Key(0): return true
+  ui.runKeyChain(k, shift)
+  if k == Key(0): return true
   ui.fFocused != nil
 
 proc keyUp(ui: UiRoot, key: Key, shift: ShiftState): bool =
+  if key == keyLAlt or key == keyRAlt: ui.setAlt(false)
   var k = key
   let target = if ui.fFocused != nil: ui.fFocused else: Control(ui.root)
   if ui.keyPreview and target != Control(ui.root):
@@ -314,6 +380,7 @@ proc setWindowActive*(ui: UiRoot, active: bool) =
   ## while inactive).
   if ui.windowInactive == not active: return
   ui.windowInactive = not active
+  if not active: ui.setAlt(false)
   if ui.fFocused != nil: ui.fFocused.invalidate()
 
 proc syncScale*(ui: UiRoot) =
@@ -364,6 +431,7 @@ proc handle*(ui: UiRoot, pe: PlatformEvent): bool =
     false
   of ekWindowFocusLost:
     ui.cancelInteraction()
+    ui.setAlt(false)
     false
   of ekWindowResized, ekWindowPixelSize, ekWindowScale:
     ui.syncMetrics()

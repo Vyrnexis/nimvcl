@@ -105,14 +105,15 @@ suite "hints":
     check not hintVisible()
 
   test "small jitter inside the control keeps the pending hint timer":
-    Application.hintPause = 200
+    Application.hintPause = 600
     f.move(20, 20)
-    settle(100)
+    settle(400)
     f.move(22, 21)
     f.move(23, 22)
     let t0 = getMonoTime()
-    check waitUntil(proc(): bool = hintVisible())
-    check (getMonoTime() - t0).inMilliseconds < 180      # not restarted by the jitter
+    check waitUntil(proc(): bool = hintVisible(), 1500)
+    # ~200 ms left if not restarted; a restart by the jitter would take 600
+    check (getMonoTime() - t0).inMilliseconds < 450
     f.move(40, 25)                                       # moving in the control keeps it visible
     check hintVisible() and hintText() == "Hint for A"
 
@@ -123,9 +124,8 @@ suite "hints":
     flush()
     f.move(20, 70)                                       # onto B
     check not hintVisible()
-    let t0 = getMonoTime()
+    # short pause (100 ms) instead of the full 500 ms; wide margin for load
     check waitUntil(proc(): bool = hintVisible(), 400)
-    check (getMonoTime() - t0).inMilliseconds < 400
     check hintText() == "Hint for B"
 
   test "the nearest ancestor's hint is used":

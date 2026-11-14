@@ -20,7 +20,9 @@
 ##    width += dw; right only => left += dw; neither => left += dw/2 (keeps its
 ##    proportional centre); left only => unchanged. Vertical likewise.
 ## 5. alCustom children are handed to `customAlign` with the remaining rect.
-## 6. Child containers whose size changed (or that are flagged) are laid out
+## 6. A container whose `arrangeChildren(area)` returns true positioned its
+##    children itself: steps 2-5 are skipped (children keep their `align`).
+## 7. Child containers whose size changed (or that are flagged) are laid out
 ##    recursively.
 ##
 ## Scrolling: aligned children (anything but alNone) are laid out against the
@@ -72,8 +74,11 @@ proc layout*(c: Container) =
   var r = rectF(pad.left, pad.top, max(c.width - pad.horizontal, 0),
                 max(c.height - pad.vertical, 0))
 
+  let owned = c.arrangeChildren(r)   # layout owner: skips the align passes
+
   # autoSize first (sizes only; positions come from the passes below)
   for ch in kids:
+    if owned: break
     if not ch.visible or not ch.autoSize: continue
     let ps = ch.preferredSize()
     case ch.align
@@ -84,6 +89,7 @@ proc layout*(c: Container) =
 
   for pass in [alTop, alBottom, alLeft, alRight]:
     for ch in kids:
+      if owned: break
       if not ch.visible or ch.align != pass: continue
       let m = ch.margins
       let k = ch.constraints
@@ -113,6 +119,7 @@ proc layout*(c: Container) =
       else: discard
 
   for ch in kids:
+    if owned: break
     if not ch.visible: continue
     let m = ch.margins
     case ch.align

@@ -30,7 +30,7 @@
 ##   `canMeasure(c) == false` and the zero size while the control is not in a
 ##   form that has a window; callers then keep their current size.
 
-import std/math
+import std/[math, strutils]
 import ../graphics/[geometry, color, font, canvas, context]
 import ../core/[types, control, theme, input]
 export math, geometry, color, font, canvas, types, control, theme, input
@@ -50,6 +50,68 @@ proc placeControl*[T: Control](c: T, parent: Container,
               (if height >= 0: height else: c.height))
   if parent != nil: parent.insertControl c
   c
+
+# ---------------------------------------------------------------- mnemonics
+
+func parseMnemonic*(caption: string): tuple[text: string, index: int, ch: char] =
+  ## Removes the `&` markers: `text` is what is drawn, `index` the byte
+  ## position of the mnemonic character in it (-1: none), `ch` that character
+  ## lowercased (ASCII only). `&&` is a literal `&`.
+  result.index = -1
+  var i = 0
+  while i < caption.len:
+    if caption[i] == '&':
+      if i + 1 < caption.len and caption[i + 1] == '&':
+        result.text.add '&'
+        i += 2
+      else:
+        if i + 1 < caption.len and result.index < 0:
+          result.index = result.text.len
+          result.ch = caption[i + 1].toLowerAscii
+        inc i
+    else:
+      result.text.add caption[i]
+      inc i
+
+func displayText*(caption: string): string =
+  ## The caption without `&` markers.
+  if '&' in caption: parseMnemonic(caption).text else: caption
+
+func mnemonicOf*(caption: string): char =
+  ## The lowercase mnemonic character of `caption`, '\0' when there is none.
+  if '&' in caption: parseMnemonic(caption).ch else: '\0'
+
+proc altHeld*(c: Control): bool =
+  ## An Alt key is down in the window of `c` (mnemonics are underlined).
+  let h = c.host
+  h of UiRoot and UiRoot(h).altHeld
+
+proc drawMnemonic*(c: Canvas, caption: string, f: FontSpec, rect: RectF,
+                   col: Color, underline: bool, align = taLeft, valign = vaCenter,
+                   wrap = false) =
+  ## Draws `caption` without its `&` markers; the mnemonic character is
+  ## underlined when `underline` (single line only, not when wrapped).
+  let (txt, idx, _) = parseMnemonic(caption)
+  c.textRect(txt, f, rect, col, align, valign, wrap = wrap)
+  if underline and not wrap and idx >= 0 and idx < txt.len:
+    var n = 1
+    while idx + n < txt.len and (uint8(txt[idx + n]) and 0xC0) == 0x80: inc n
+    let before = c.measureText(txt[0 ..< idx], f).w
+    let w = c.measureText(txt[idx ..< idx + n], f).w
+    let size = c.measureText(txt, f)
+    if size.w > rect.w: return           # elided: the position is not reliable
+    let x0 =
+      case align
+      of taLeft: rect.x
+      of taCenter: rect.x + (rect.w - size.w) / 2
+      of taRight: rect.right - size.w
+    let top =
+      case valign
+      of vaTop: rect.y
+      of vaCenter: rect.y + (rect.h - size.h) / 2
+      of vaBottom: rect.bottom - size.h
+    let y = top + c.fontMetrics(f).ascent + 2
+    c.fillRect(rectF(x0 + before, y, max(w, 1), 1), col)
 
 # --------------------------------------------------------------- measuring
 
@@ -138,7 +200,7 @@ proc indicatorPreferredSize*(c: Control): SizeF =
   ## Box + gap + caption; the current size when text cannot be measured.
   if not c.canMeasure: return sizeF(c.width, c.height)
   let t = c.theme
-  let s = c.measure(c.caption, c.font)
+  let s = c.measure(displayText(c.caption), c.font)
   let gap = if c.caption.len > 0: t.spacing else: 0'f32
   sizeF(IndicatorSize + gap + (if c.caption.len > 0: ceil(s.w) + 1 else: 0'f32),
         max(IndicatorSize + 4, ceil(s.h)))

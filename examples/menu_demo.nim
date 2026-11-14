@@ -18,7 +18,6 @@
 
 import std/[os, strutils, monotimes, times]
 import nimvcl
-import nimvcl/controls/[menus, hint]
 
 var
   status: Label

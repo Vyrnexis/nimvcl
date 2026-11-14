@@ -2,7 +2,9 @@
 
 A Delphi VCL-style UI library for Nim, drawn entirely with SDL3.
 
-Status: **draft for review**. Nothing is built yet.
+Status: phases 0-4 are done (the MVP), phase 5 (standard set) is nearly done:
+everything except ComboBox and Memo is built and tested (those are being
+added); see "Progress and deviations" at the end.
 
 ## 1. Goal
 
@@ -193,7 +195,7 @@ nimvcl/
 
 Each phase ends with something you can run, plus tests. The sizes are rough.
 
-**Phase 0: setup and spike (small)**
+**Phase 0: setup and spike (small)** (done)
 - Create the repo, the nimble file, CI, the MIT licence and a README.
 - Spike: a window with HiDPI, `waitEvent`, one `Text` drawn, and a rounded rect
   drawn with `renderGeometry`, at 100% and at a fractional scale.
@@ -201,14 +203,14 @@ Each phase ends with something you can run, plus tests. The sizes are rough.
   with a PR if needed.
 - *Done when:* the spike looks sharp at 1×, 1.5× and 2× on Wayland, and idle CPU is about 0%.
 
-**Phase 1: graphics (small to medium)**
+**Phase 1: graphics (small to medium)** (done)
 - `Canvas`, `Font` (with fallback), `TextLayout`, `Image` (sdl3_image), colors,
   the clip and translate stacks.
 - Settle the resource ownership rules (§2.7).
 - *Done when:* `examples/canvas_demo` draws every primitive and text sample, and
   the headless golden tests pass.
 
-**Phase 2: core (medium to large)**
+**Phase 2: core (medium to large)** (done)
 - `Component`, `Control`, `Container`, `Form`, `Application`, `Host`.
 - Mouse routing, hover, capture, cursors, focus, tab order, invalidation and
   repaint, VCL layout, `Theme`, `Timer`, `Application.queue`, `showModal`,
@@ -217,13 +219,13 @@ Each phase ends with something you can run, plus tests. The sizes are rough.
   constraints and autoSize; the demo shows nested panels resizing correctly;
   and host mode works inside a plain SDL3 example loop.
 
-**Phase 3: basic controls (medium)**
+**Phase 3: basic controls (medium)** (done)
 - `Label`, `Button` (default, cancel, flat), `CheckBox`, `RadioButton` (grouped),
   `Panel`, `GroupBox`, `PaintBox` (`onPaint`), `Image`, `Bevel`.
 - `Edit`: one line, selection, clipboard, undo, password mode, placeholder, IME.
 - *Done when:* a login-form demo is fully usable with the keyboard alone.
 
-**Phase 4: the `form` macro (medium)**
+**Phase 4: the `form` macro (medium)** (done)
 - Generates a `Form` subtype with typed fields for each named child, a
   constructor, property assignments, event closures with `self`, and nested
   children.
@@ -231,7 +233,7 @@ Each phase ends with something you can run, plus tests. The sizes are rough.
 - *Done when:* the phase 3 demo is rewritten with the macro at about the same
   amount of code as a DFM file, and the macro tests pass.
 
-**Phase 5: standard set (large)**
+**Phase 5: standard set (large)** (in progress: all but ComboBox and Memo done)
 - Scrolling: `ScrollBar` and `ScrollBox` (smooth wheel, touchpad).
 - `ListBox`, `ComboBox` (popup via `createPopupWindow`, using `xdg_popup` on
   Wayland), `Memo` (multi-line edit), `SpinEdit`, `TrackBar`, `ProgressBar`.
@@ -290,3 +292,33 @@ is incremental and can be reordered by what you want to build first.
   verify) and handed to builder agents. Independent tasks run in parallel.
 - Every task is reviewed through `git diff` plus the tests before the next
   phase starts.
+
+## 8. Progress and deviations
+
+Phases 0-4 are done. Phase 5 has: ScrollBar, ScrollBox, ListBox, ProgressBar,
+TrackBar, SpinEdit, Splitter, StatusBar, ToolBar, PageControl/TabControl,
+FlowPanel/GridPanel, MainMenu/PopupMenu, hints, message/input dialogs and the
+native file dialogs, popup windows, `&` mnemonics, a shared key-handler chain,
+modal ownership (`runModalLoop`). ComboBox and Memo are in progress; the
+"settings app" demo that uses every control comes after them. Phase 5
+additions that were not in the plan: layout-owner hook (`arrangeChildren`),
+visibility notification (`visibilityChanged`), umbrella `import nimvcl`.
+
+Deviations from the plan, decided while building (details in the module
+comments and `docs/`):
+- **Scroll semantics**: only `alNone` children live in content coordinates and
+  scroll; aligned children (scrollbars, `alClient` content) are laid out
+  against the viewport and do not scroll. Layout never reads the scroll offset.
+- **ListBox**: owner-draw items have a fixed height (`itemHeight`), no
+  variable-height rows.
+- **Scroll position is float32**: very long lists (more than about 700k rows)
+  scroll in quantised steps. Fine for the phase 5 targets; the 100k-row virtual
+  list of phase 6 is well inside the limit.
+- **Popups on offscreen/headless**: SDL cannot create real popup windows there,
+  so popups fall back to small top-level windows (`docs/popups-menus.md`).
+  Tests and screenshots use that path; Wayland uses `xdg_popup`, X11
+  override-redirect windows.
+- **Same-`align` siblings** are ordered by child order, not by Top/Left as in
+  the VCL.
+- **FlowPanel/GridPanel** position every visible child themselves and ignore
+  its `align` (the property is untouched).

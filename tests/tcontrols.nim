@@ -128,10 +128,10 @@ suite "controls":
     let f = newShown()
     let ok = newButton(nil, "OK", 10, 10, 80, 28)
     ok.isDefault = true               # not in a form yet: no hook possible
-    check f.ui.onUnhandledKey == nil
+    check not f.ui.hasKeyHandler("dialog")
     f.insertControl ok
     check f.paintIfDirty()
-    check f.ui.onUnhandledKey != nil
+    check f.ui.hasKeyHandler("dialog")
     var n = 0
     ok.onClick = proc(s: Control) = inc n
     f.tap(keyEnter)                   # nothing focused: the form gets the key

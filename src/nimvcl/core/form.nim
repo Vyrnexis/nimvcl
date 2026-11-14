@@ -31,9 +31,6 @@ type
   BorderStyle* = enum bsSizeable, bsSingle, bsNone
   FormStyle* = enum fsNormal, fsStayOnTop
 
-  KeyHook* = proc(key: var Key, shift: ShiftState)
-    ## A handler for keys no control used. Sets `key` to `Key(0)` to consume it.
-
   FormCloseEvent* = proc(sender: Form, action: var CloseAction)
   FormCloseQueryEvent* = proc(sender: Form, canClose: var bool)
 
@@ -41,9 +38,7 @@ type
     fUi: UiRoot
     fShown, fModal, fClosing, fSyncing: bool
     fModalResult: ModalResult
-    fKeyHandlers: seq[tuple[id: string, hook: KeyHook]]
-    fUserKeyHook: KeyHook
-    fKeyChain: bool
+    fOwner: Form                 ## the form a modal form is owned by / centred on
     menuBar*: Control            ## the form's `MainMenu` (set by controls/menus.nim)
     popupMenus*: seq[RootRef]    ## `PopupMenu`s attached to controls of this form (menus.nim)
     fPosition: FormPosition
@@ -57,6 +52,7 @@ var
   gForms: seq[Form]            # forms that currently own a window
   gMainForm: Form
   gModals: seq[Form]           # active modal forms, innermost last
+  gGates: int                  # nested modal states without a form (beginModalState)
   gActive: Form
   gForcedScale: float32
   modalLoopProc*: proc(f: Form)   ## installed by application.nim
@@ -80,8 +76,22 @@ proc findForm*(windowId: uint32): Form =
     if f.fUi.win != nil and f.fUi.win.id == windowId: return f
 
 proc acceptsInput*(f: Form): bool =
-  ## False while another form is modal.
-  gModals.len == 0 or gModals[^1] == f
+  ## False while another form is modal, or while a form-less modal state
+  ## (`beginModalState`) is active.
+  gGates == 0 and (gModals.len == 0 or gModals[^1] == f)
+
+proc beginModalState*() =
+  ## Gates the input of every form (a nested loop with no form of its own, e.g.
+  ## waiting for a native file dialog). Pair with `endModalState`; prefer
+  ## `runModalLoop` (application.nim), which does both.
+  inc gGates
+  if closePopupsProc != nil: closePopupsProc(nil)
+
+proc endModalState*() =
+  if gGates > 0: dec gGates
+
+func modalOwner*(f: Form): Form = f.fOwner
+  ## The form a modal form is owned by (set by `showModal`), else nil.
 
 func ui*(f: Form): UiRoot = f.fUi
 func ctx*(f: Form): RenderContext = f.fUi.ctx
@@ -94,6 +104,7 @@ proc initForm*(f: Form, owner: Component = nil) =
   ## For subclass constructors.
   f.initContainer(owner)
   f.fUi = newUiRoot(f)
+  f.fUi.hidden = true
   f.fUi.rootGetsMouse = true
   f.fUi.autoSizeRoot = true
   f.fPosition = poScreenCenter
@@ -152,46 +163,24 @@ proc `theme=`*(f: Form, t: Theme) =
 
 # ------------------------------------------------------------- key handlers
 
-proc installKeyChain(f: Form) =
-  if f.fKeyChain: return
-  f.fKeyChain = true
-  f.fUserKeyHook = f.fUi.onUnhandledKey      # a hook set before is kept, called first
-  f.fUi.onUnhandledKey = proc(key: var Key, shift: ShiftState) =
-    if f.fUserKeyHook != nil:
-      f.fUserKeyHook(key, shift)
-      if key == Key(0): return
-    var i = 0
-    while i < f.fKeyHandlers.len:            # a handler may add handlers
-      f.fKeyHandlers[i].hook(key, shift)
-      if key == Key(0): return
-      inc i
-
-func keyChainActive*(f: Form): bool = f.fKeyChain
-  ## True once `addKeyHandler` has installed the form's `onUnhandledKey` chain.
-
 proc addKeyHandler*(f: Form, id: string, hook: KeyHook) =
-  ## Registers a handler for keys that neither the focused control nor the
-  ## form handled, in registration order. Several features (default/cancel
-  ## buttons, menu shortcuts) share the form's single `ui.onUnhandledKey` hook
-  ## this way. The same `id` replaces the earlier handler. A hook that was
-  ## already set on `ui.onUnhandledKey` is kept and runs first.
-  f.installKeyChain()
-  for e in f.fKeyHandlers.mitems:
-    if e.id == id:
-      e.hook = hook
-      return
-  f.fKeyHandlers.add (id, hook)
+  ## Same as `f.ui.addKeyHandler` (input.nim): one chain per UiRoot, shared by
+  ## forms and hosts.
+  f.fUi.addKeyHandler(id, hook)
 
-proc removeKeyHandler*(f: Form, id: string) =
-  for i in 0 ..< f.fKeyHandlers.len:
-    if f.fKeyHandlers[i].id == id:
-      f.fKeyHandlers.delete(i)
-      return
+proc removeKeyHandler*(f: Form, id: string) = f.fUi.removeKeyHandler(id)
 
 # ----------------------------------------------------------------- window
 
+proc centerOnOwner(f: Form): bool =
+  let o = f.fOwner
+  if o != nil and o.fUi.win != nil and f.fUi.win != nil and f.fPosition != poDesigned:
+    f.fUi.win.centerOn(o.fUi.win)
+    result = true
+
 proc applyPosition(f: Form) =
   let w = f.fUi.win
+  if f.centerOnOwner(): return
   case f.fPosition
   of poScreenCenter: w.centerOnScreen()
   of poMainFormCenter:
@@ -231,7 +220,10 @@ proc releaseWindow(f: Form) =
   if i >= 0: gForms.delete(i)
   if gActive == f: gActive = nil
   if gMainForm == f: gMainForm = nil
+  let wasShown = f.fShown
   f.fShown = false
+  ui.hidden = true
+  if wasShown: Control(f).notifyVisibility()
 
 proc freeWindow*(f: Form) =
   ## Destroys the window without running `close` events (application shutdown).
@@ -268,12 +260,17 @@ proc show*(f: Form) =
   f.applyPosition()
   w.show()
   f.fShown = true
+  f.fUi.hidden = false
   f.fUi.dirty = true
+  Control(f).notifyVisibility()
   if f.onShow != nil: f.onShow(f)
+  discard f.centerOnOwner()      # onShow may have resized the form
 
 proc hide*(f: Form) =
   if not f.fShown: return
   f.fShown = false
+  f.fUi.hidden = true
+  Control(f).notifyVisibility()
   if closePopupsProc != nil: closePopupsProc(f)
   f.fUi.cancelInteraction()
   if f.fUi.win != nil: f.fUi.win.hide()
@@ -315,10 +312,13 @@ proc showModal*(f: Form): ModalResult =
   if f.fModal: return f.fModalResult
   f.fModalResult = mrNone
   f.ensureWindow()
-  let parent =
-    if gModals.len > 0: gModals[^1]
-    elif gMainForm != nil and gMainForm != f: gMainForm
+  func usable(o: Form): bool = o != nil and o != f and o.fShown and o.fUi.win != nil
+  let parent =                       # active form, else innermost modal, else main
+    if usable(gActive): gActive
+    elif gModals.len > 0 and usable(gModals[^1]): gModals[^1]
+    elif usable(gMainForm): gMainForm
     else: nil
+  f.fOwner = parent
   if closePopupsProc != nil: closePopupsProc(nil)   # menus of the form below
   f.fModal = true
   gModals.add f
@@ -330,6 +330,7 @@ proc showModal*(f: Form): ModalResult =
   let i = gModals.find(f)
   if i >= 0: gModals.delete(i)
   f.fModal = false
+  f.fOwner = nil
   if f.fUi.win != nil:
     f.fUi.win.clearModal()
     if f.fShown: f.hide()

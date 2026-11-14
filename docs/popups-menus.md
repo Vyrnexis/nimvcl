@@ -40,10 +40,35 @@ a `Container` sized by the caller. It has its own `UiRoot` and `RenderContext`.
 
 ## Key handlers
 
-`Form.addKeyHandler(id, hook)` chains handlers on `ui.onUnhandledKey` (keys the
-focused control did not use). Default/cancel buttons (id "dialog") and menu
-shortcuts (id "menus") use it. A hook set on `ui.onUnhandledKey` before is
-kept and runs first.
+One chain per `UiRoot` (forms and hosts share it): `ui.addKeyHandler(id, hook)`
+(`Form.addKeyHandler` forwards to it), `removeKeyHandler`, `hasKeyHandler`.
+Keys the focused control did not use go through, in this order: Tab focus
+traversal, the application's own `ui.onUnhandledKey` hook, the handlers in
+registration order (default/cancel buttons "dialog", menu shortcuts "menus",
+PageControl Ctrl+Tab "pages"), then Alt+letter control mnemonics. Registration
+order therefore only matters between handlers that claim the same key.
+
+## Mnemonics
+
+`&` in a caption underlines the next character while Alt is held (`&&` is a
+literal `&`). `parseMnemonic`, `displayText`, `mnemonicOf` and
+`drawMnemonic` are in `controls/common.nim`. The Alt state lives on `UiRoot`
+(`altHeld`; `control.altHeld`). Alt+letter calls the method
+`activateMnemonic(ch)` of the first visible, enabled control (tree order) that
+claims it, unless a menu bar item took the key first: Button clicks,
+CheckBox/RadioButton focus and toggle, Label focuses its `focusControl`,
+TabSheet captions select the page, GroupBox focuses its first control.
+
+## Modal forms
+
+`showModal` makes the form owned by the active form (else the innermost modal,
+else the main form): it is centred on it (unless `position = poDesigned`; the
+centring is redone after `onShow`, which may resize), set as an SDL modal
+child, and all other forms ignore input (`acceptsInput`). `form.modalOwner`.
+For waiting on something without a form use
+`runModalLoop(until: proc(): bool)` (application.nim; gates every form, closes
+popups); `beginModalState` / `endModalState` are the underlying pair. The file
+dialogs' `executeModal` uses it.
 
 ## Menus
 

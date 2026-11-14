@@ -92,16 +92,13 @@ suite "standard controls":
     let f = newShown()
     let p = newProgressBar(f, 10, 10, 200, 18)
     p.style = pbsMarquee
-    Application.processMessages()      # paint: starts the timer
-    check p.runsMarquee
+    check p.runsMarquee                # started by visibilityChanged, no paint needed
     let ph = p.marqueePhase
     pump(150)
     check p.marqueePhase != ph
     p.visible = false
-    pump(120)                          # next tick notices and stops
-    check not p.runsMarquee
+    check not p.runsMarquee            # stopped at once
     p.visible = true
-    Application.processMessages()
     check p.runsMarquee
     p.style = pbsNormal
     check not p.runsMarquee
@@ -571,15 +568,16 @@ suite "standard controls":
     check kids[2].left == 70 and kids[2].top == 0      # new column
     check kids[4].left == 140 and kids[4].top == 0
 
-  test "flowpanel: other alignments are kept":
+  test "flowpanel: positions every child itself, align is left untouched":
     let f = newShown()
     let fp = newFlowPanel(f, 0, 0, 200, 200)
     let header = newPlain(fp, 10, 30)
     header.align = alTop
     let a = newPlain(fp, 80, 25)
     lay f
-    check header.top == 0 and header.width == 200
-    check a.top == 30 and a.left == 0
+    check header.align == alTop and a.align == alNone
+    check header.top == 0 and header.left == 0 and header.width == 10
+    check a.top == 0 and a.left == 10
 
   # -------------------------------------------------------------- GridPanel
   test "gridpanel: absolute and percent tracks, in-order placement":
