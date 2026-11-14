@@ -66,7 +66,9 @@ proc theme*(a: TApplication): Theme = currentTheme()
 proc `theme=`*(a: TApplication, t: Theme) =
   ## Switches the global theme and repaints every form.
   setTheme(t)
-  for f in openForms(): f.invalidate()
+  for f in openForms():
+    f.relayoutAll()
+    f.invalidate()
 
 proc forceScale*(a: TApplication): float32 = forcedScale()
 proc `forceScale=`*(a: TApplication, s: float32) =
@@ -117,7 +119,7 @@ proc dispatch*(a: TApplication, pe: PlatformEvent) =
     of ekWindowFocusLost:
       f.windowActivated(false)
     of ekMouseMove, ekMouseDown, ekMouseUp, ekMouseWheel, ekKeyDown, ekKeyUp,
-       ekTextInput, ekWindowMouseLeave:
+       ekTextInput, ekTextEditing, ekWindowMouseLeave:
       if f.acceptsInput: discard f.ui.handle(pe)
       elif pe.kind == ekWindowMouseLeave: discard f.ui.handle(pe)
     of ekWindowResized, ekWindowPixelSize, ekWindowScale:

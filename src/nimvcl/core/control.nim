@@ -198,7 +198,10 @@ func anchors*(c: Control): Anchors = c.fAnchors
 func margins*(c: Control): Spacing = c.fMargins
 func constraints*(c: Control): SizeConstraints = c.fConstraints
 func autoSize*(c: Control): bool = c.fAutoSize
-func padding*(c: Container): Spacing = c.fPadding
+method padding*(c: Container): Spacing {.base.} =
+  ## Space reserved inside the client area by `layout`. Subclasses that need
+  ## a computed value (GroupBox: below the caption) override it.
+  c.fPadding
 
 func clientToParent*(c: Control, p: PointF): PointF =
   pointF(p.x + c.fLeft, p.y + c.fTop)
@@ -297,6 +300,13 @@ method doKeyUp*(c: Control, key: var Key, shift: ShiftState) {.base.} =
   if c.onKeyUp != nil: c.onKeyUp(c, key, shift)
 method doKeyPress*(c: Control, text: var string) {.base.} =
   if c.onKeyPress != nil: c.onKeyPress(c, text)
+method doTextEditing*(c: Control, text: string, cursor, selLen: int) {.base.} =
+  ## IME composition (SDL TEXT_EDITING) while focused: `text` is the
+  ## uncommitted composition ("" = cancelled/cleared), `cursor` the caret inside
+  ## it and `selLen` the length of the selected clause (both in characters;
+  ## `cursor` < 0 when the IME gave none). The composition is committed later
+  ## through `doKeyPress`. Base: ignores it.
+  discard
 method doEnter*(c: Control) {.base.} =
   ## Gained keyboard focus.
   if c.onEnter != nil: c.onEnter(c)
@@ -320,6 +330,11 @@ method canFocus*(c: Control): bool {.base.} =
   ## Whether the control can take keyboard focus. Base: false. Focusable
   ## controls override this (typically `c.isVisible and c.isEnabled`).
   false
+
+method isTabStop*(c: Control): bool {.base.} =
+  ## Whether Tab visits the control (combined with `canFocus` by the traversal).
+  ## Base: the `tabStop` property. RadioButton overrides it (one stop per group).
+  c.fTabStop
 
 method wantsTextInput*(c: Control): bool {.base.} =
   ## Whether the control edits text: the platform starts SDL text input
@@ -433,6 +448,7 @@ proc `caption=`*(c: Control, v: string) =
   c.fCaption = v
   c.invalidate()
   if c.fAutoSize: c.requestLayout()
+  if c of Container: markLayout(Container(c))   # computed padding may depend on it
 func text*(c: Control): string = c.fCaption
 proc `text=`*(c: Control, v: string) = c.caption = v
 
@@ -471,6 +487,7 @@ func parentFont*(c: Control): bool = c.fParentFont
 proc fontChanged(c: Control) =
   c.invalidate()
   if c.fAutoSize: c.requestLayout()
+  if c of Container: markLayout(Container(c))
 
 proc `font=`*(c: Control, v: FontSpec) =
   ## Sets an own font (and clears `parentFont`, like VCL).
@@ -485,12 +502,17 @@ proc `parentFont=`*(c: Control, v: bool) =
   c.fParentFont = v
   c.fontChanged()
 
+proc color*(c: Control): Color
+
+method inheritedColor*(c: Control): Color {.base.} =
+  ## What `color` resolves to while `parentColor` is true: the parent's
+  ## effective colour, at the root `theme.window`. Panels override it to
+  ## report the surface they fill with, so their children inherit it.
+  if c.fParent != nil: c.fParent.color else: c.theme.window
+
 proc color*(c: Control): Color =
-  ## Effective color: own when `parentColor` is false, else the parent's, else
-  ## (at the root) `theme.window`.
-  if not c.fParentColor: c.fColor
-  elif c.fParent != nil: c.fParent.color
-  else: c.theme.window
+  ## Effective color: own when `parentColor` is false, else `inheritedColor`.
+  if not c.fParentColor: c.fColor else: c.inheritedColor()
 
 func parentColor*(c: Control): bool = c.fParentColor
 
@@ -597,3 +619,9 @@ proc paintTree*(c: Control, canvas: Canvas) =
       ch.paintTree(canvas)
   canvas.popClip()
   canvas.popTranslate()
+
+proc relayoutAll*(c: Control) =
+  ## Marks `c` and every container below it for relayout (theme metric change).
+  if c of Container:
+    markLayout(Container(c))
+    for ch in Container(c).fChildren: relayoutAll(ch)

@@ -33,6 +33,7 @@ type
     rootGetsMouse*: bool         ## the root itself is a mouse target (Form: true)
     autoSizeRoot*: bool          ## window size changes resize the root
     onUnhandledKey*: proc(key: var Key, shift: ShiftState)
+    windowInactive*: bool        ## the window lost focus (set by the Form)
     fHovered, fCaptured, fFocused, fPressed: Control
     buttons: set[MouseButton]
     lastPos: PointF
@@ -151,7 +152,7 @@ proc collectTabStops(c: Container, acc: var seq[Control]) =
   for (_, i) in order:
     let ch = c[i]
     if not ch.visible or not ch.enabled: continue
-    if ch.tabStop and ch.canFocus(): acc.add ch
+    if ch.isTabStop() and ch.canFocus(): acc.add ch
     if ch of Container: collectTabStops(Container(ch), acc)
 
 proc tabStops*(root: Container): seq[Control] =
@@ -285,6 +286,13 @@ proc keyUp(ui: UiRoot, key: Key, shift: ShiftState): bool =
 
 # ------------------------------------------------------- metrics and events
 
+proc setWindowActive*(ui: UiRoot, active: bool) =
+  ## The window gained/lost focus: repaints the focused control (a caret hides
+  ## while inactive).
+  if ui.windowInactive == not active: return
+  ui.windowInactive = not active
+  if ui.fFocused != nil: ui.fFocused.invalidate()
+
 proc syncScale*(ui: UiRoot) =
   ## Re-reads the window's pixel density and rebuilds font caches if it changed.
   if ui.win == nil or ui.ctx == nil: return
@@ -322,6 +330,10 @@ proc handle*(ui: UiRoot, pe: PlatformEvent): bool =
     if ui.fFocused == nil: return false
     var s = pe.text
     ui.fFocused.doKeyPress(s)
+    true
+  of ekTextEditing:
+    if ui.fFocused == nil: return false
+    ui.fFocused.doTextEditing(pe.text, pe.editStart, pe.editLength)
     true
   of ekWindowMouseLeave:
     ui.mouseInside = false

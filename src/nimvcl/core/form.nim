@@ -138,6 +138,7 @@ proc theme*(f: Form): Theme = Control(f).theme
 proc `theme=`*(f: Form, t: Theme) =
   ## Per-form theme override (nil = the global theme).
   f.fUi.theme = t
+  f.relayoutAll()
   f.invalidate()
 
 # ----------------------------------------------------------------- window
@@ -289,6 +290,7 @@ proc showModal*(f: Form): ModalResult =
 
 proc windowActivated*(f: Form, active: bool) =
   ## Called by the application for focus gained/lost events.
+  f.fUi.setWindowActive(active)
   if active:
     gActive = f
     if f.onActivate != nil: f.onActivate(f)

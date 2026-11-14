@@ -17,7 +17,7 @@ type
     ekNone,            ## an event nimvcl does not care about
     ekQuit, ekWake, ekTimer,
     ekMouseMove, ekMouseDown, ekMouseUp, ekMouseWheel,
-    ekKeyDown, ekKeyUp, ekTextInput,
+    ekKeyDown, ekKeyUp, ekTextInput, ekTextEditing,
     ekWindowClose, ekWindowResized, ekWindowPixelSize, ekWindowScale,
     ekWindowExposed, ekWindowShown, ekWindowHidden, ekWindowMoved,
     ekWindowMouseLeave, ekWindowFocusGained, ekWindowFocusLost
@@ -32,7 +32,8 @@ type
     shift*: ShiftState      ## keyboard modifiers (+ mouse buttons for motion)
     key*: Key
     repeat*: bool
-    text*: string           ## ekTextInput
+    text*: string           ## ekTextInput, ekTextEditing
+    editStart*, editLength*: int  ## ekTextEditing: selected part of the composition (characters; start -1 = no cursor)
     timerId*: int           ## ekTimer
 
 var
@@ -144,6 +145,11 @@ proc translate*(ev: Event): PlatformEvent =
   elif t == uint32(EVENT_TEXT_INPUT):
     let s = if ev.text.text == nil: "" else: $ev.text.text
     return PlatformEvent(kind: ekTextInput, windowId: ev.text.windowID, text: s)
+  elif t == uint32(EVENT_TEXT_EDITING):
+    let e = ev.edit
+    return PlatformEvent(kind: ekTextEditing, windowId: e.windowID,
+      text: (if e.text == nil: "" else: $e.text),
+      editStart: int(e.start), editLength: int(e.length))
   elif t == uint32(EVENT_WINDOW_CLOSE_REQUESTED): return simple(ekWindowClose)
   elif t == uint32(EVENT_WINDOW_RESIZED): return simple(ekWindowResized)
   elif t == uint32(EVENT_WINDOW_PIXEL_SIZE_CHANGED): return simple(ekWindowPixelSize)
