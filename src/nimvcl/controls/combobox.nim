@@ -216,9 +216,7 @@ proc autoCompleteText(c: ComboBox) =
   for i in 0 ..< c.fList.count:
     let s = c.fList.itemText(i)
     if s.len > t.len and s.toLowerAscii.startsWith(low):
-      var full = s                       # the item's own spelling replaces the typed text
-      e.select(0, t.len)
-      procCall doKeyPress(Edit(e), full)
+      e.replaceRange(0, t.len, s)        # the item's own spelling replaces the typed text
       e.select(t.len, s.len - t.len)
       return
 
@@ -360,6 +358,9 @@ method doExit*(e: ComboEdit) =
   procCall doExit(Edit(e))
   e.combo.invalidate()
 
+method focusTarget*(c: ComboBox): Control =
+  if c.fStyle == csDropDown: c.fEdit else: c
+
 method canFocus*(c: ComboBox): bool =
   c.fStyle == csDropDownList and c.isVisible and c.isEnabled
 
@@ -400,16 +401,6 @@ method doResize*(c: ComboBox) =
 method doEnter*(c: ComboBox) =
   procCall doEnter(Container(c))
   c.invalidate()
-
-# ------------------------------------------------------------------ DropList
-
-method paint*(l: DropList, cv: Canvas) =
-  procCall paint(ListBox(l), cv)
-  # the list is focused (selection colours) but the popup has no focus ring
-  let t = l.theme
-  let r = l.clientRect
-  cv.strokeRoundRect(r, t.radius, t.surface, t.focusRingWidth)
-  cv.strokeRoundRect(r, t.radius, t.borderStrong, t.borderWidth)
 
 # --------------------------------------------------------------------- paint
 
@@ -469,6 +460,7 @@ proc initComboBox*(c: ComboBox, owner: Component = nil) =
   c.fLastIndex = -1
   c.fList = DropList()
   c.fList.initListBox()
+  c.fList.showFocusRect = false
   c.fList.tabStop = false
   c.fEdit = ComboEdit(combo: c)
   c.fEdit.initEdit(c)

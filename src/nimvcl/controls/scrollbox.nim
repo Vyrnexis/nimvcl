@@ -37,11 +37,20 @@ proc `contentSize=`*(b: ScrollBox, s: SizeF) =
   b.setContentSize(s.w, s.h)
 
 proc measureContent(b: ScrollBox) =
+  # Children sit in client coordinates; scroll coordinates start at the padded
+  # viewport origin, so the content spans from the padding to the last child
+  # plus the opposite padding.
   var w, h = 0'f32
+  var any = false
   for ch in b.children:
     if ch.align != alNone or not ch.visible: continue
+    any = true
     w = max(w, ch.left + ch.width)
     h = max(h, ch.top + ch.height)
+  let p = b.padding
+  if any:
+    w = max(w - p.left + p.right, 0)
+    h = max(h - p.top + p.bottom, 0)
   b.fDirty = false
   b.setContentSize(w, h)
 
@@ -65,7 +74,8 @@ method revealControl*(b: ScrollBox, d: Control) =
   if top == nil or top.align != alNone or not d.isVisible: return
   let r = b.rectInAncestor(d)
   let o = b.scrollPos
-  b.scrollIntoView(r.offset(o.x, o.y))
+  let p = b.padding
+  b.scrollIntoView(r.offset(o.x - p.left, o.y - p.top))
 
 proc initScrollBox*(b: ScrollBox, owner: Component = nil) =
   b.initScrollingControl(owner, scrollsChildren = true)

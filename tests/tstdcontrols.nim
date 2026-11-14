@@ -7,7 +7,7 @@ import nimvcl/core/[types, control, form, application, input, layout]
 import nimvcl/platform/[events, window]
 import nimvcl/controls/[common, button, edit, panel, progressbar, trackbar,
                         spinedit, splitter, statusbar, toolbar, pagecontrol,
-                        flowpanel]
+                        flowpanel, label]
 
 func `==`(a, b: RectF): bool =
   a.x == b.x and a.y == b.y and a.w == b.w and a.h == b.h
@@ -639,3 +639,27 @@ suite "standard controls":
     lay f
     check k.boundsRect == rectF(0, 0, 100, 50)
     check a.boundsRect == rectF(100, 0, 100, 50)
+
+  test "spinedit: a label focuses the inner edit; the focus ring is the spin's, not the edit's":
+    let f = newForm(nil, 300, 120)
+    f.show()
+    let sp = newSpinEdit(f, 5, 10, 30, 100)
+    let l = newLabel(f, "&Count", 10, 8)
+    l.focusControl = sp
+    f.tap(key('c'), {ssAlt})
+    check sp.edit.focused and f.activeControl == Control(sp.edit)
+    check sp.edit.borderStyle == ebNone                 # one border around edit + buttons
+    discard f.paintIfDirty()
+    check sp.height == currentTheme().controlHeight and sp.edit.height == sp.height - 4
+    check sp.buttons.height == sp.height - 4
+    # focus changes repaint the spin (it draws the ring)
+    discard f.paintIfDirty()
+    check not f.ui.needsPaint
+    sp.edit.setFocus()
+    f.activeControl = nil
+    check f.ui.needsPaint
+    discard f.paintIfDirty()
+    check not f.ui.needsPaint
+    f.activeControl = sp
+    check f.ui.needsPaint
+

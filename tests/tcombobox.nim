@@ -6,7 +6,7 @@ import std/[unittest, strutils]
 import nimvcl/core/[types, control, form, application, input, popup]
 import nimvcl/platform/[events, window]
 import nimvcl/graphics/[context, geometry]
-import nimvcl/controls/[combobox, listbox, edit]
+import nimvcl/controls/[combobox, listbox, edit, label]
 
 var
   changes = 0
@@ -331,3 +331,28 @@ suite "combobox":
     a.dropDown()
     f.settle()
     check f.screenshotWithPopups("build/tcombo_shot.bmp")
+
+  test "focus requests reach the edit of a dropdown combo (label mnemonic, setFocus, activeControl)":
+    let f = newShown()
+    let c = f.mk(csDropDown)
+    let l = newLabel(f, "&City", 10, 50)
+    l.focusControl = c
+    let d = f.mk(csDropDownList, y = 90)
+    check not c.canFocus
+    setFocus(c)
+    check c.edit.focused and f.activeControl == Control(c.edit)
+    f.activeControl = d
+    check d.focused
+    f.activeControl = c
+    check c.edit.focused
+    f.activeControl = nil
+    f.tap(key('c'), {ssAlt})
+    check c.edit.focused
+    check Control(d).focusTarget == Control(d)       # list style takes the focus itself
+
+  test "the drop-down list draws no focus ring of its own":
+    let f = newShown()
+    let c = f.mk(csDropDownList)
+    check not c.dropList.showFocusRect
+    check newListBox().showFocusRect                  # a stand-alone list keeps it
+

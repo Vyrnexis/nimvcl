@@ -147,9 +147,11 @@ method controlLost*(ui: UiRoot, c: Control) =
 proc canTakeFocus*(c: Control): bool =
   c != nil and c.isVisible and c.isEnabled and c.canFocus()
 
-proc focusControl*(ui: UiRoot, c: Control) =
-  ## Moves keyboard focus to `c` (nil clears it). Controls that are hidden,
-  ## disabled or not `canFocus` are refused.
+proc focusControl*(ui: UiRoot, target: Control) =
+  ## Moves keyboard focus to `target` (nil clears it), or to what it forwards
+  ## the focus to (`focusTarget`). Controls that are hidden, disabled or not
+  ## `canFocus` are refused.
+  let c = if target == nil: nil else: target.focusTarget
   if c == ui.fFocused: return
   if c != nil and not canTakeFocus(c): return
   let old = ui.fFocused

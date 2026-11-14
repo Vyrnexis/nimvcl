@@ -70,7 +70,7 @@ type
     fSel: HashSet[int]
     fIndex, fAnchor, fHot: int
     fVer: int                    # bumped on every selection/focus change
-    fMulti, fExtended, fSorted, fDragging, fMouseIn: bool
+    fMulti, fExtended, fSorted, fDragging, fMouseIn, fShowFocusRect: bool
     fStyle: ListBoxStyle
     fItemHeight, fExtent, fLastIh: float32
     fMouseY: float32
@@ -102,6 +102,13 @@ func extendedSelect*(lb: ListBox): bool = lb.fExtended
 func sorted*(lb: ListBox): bool = lb.fSorted
 func style*(lb: ListBox): ListBoxStyle = lb.fStyle
 func horizontalExtent*(lb: ListBox): float32 = lb.fExtent
+func showFocusRect*(lb: ListBox): bool = lb.fShowFocusRect
+  ## Whether a focused list draws the accent focus ring (default true). Lists
+  ## embedded in other controls (a combo's drop-down) turn it off.
+proc `showFocusRect=`*(lb: ListBox, v: bool) =
+  if v != lb.fShowFocusRect:
+    lb.fShowFocusRect = v
+    lb.invalidate()
 
 proc itemText*(lb: ListBox, i: int): string =
   ## Text of item `i` ("" when out of range).
@@ -624,8 +631,9 @@ method paint*(lb: ListBox, c: Canvas) =
     else:
       lb.drawItemText(c, row, lb.itemText(i), st)
   c.popClip()
-  c.strokeRoundRect(r, t.radius, if focused: t.focusRing else: t.borderStrong,
-                    if focused: t.focusRingWidth else: t.borderWidth)
+  let ring = focused and lb.fShowFocusRect
+  c.strokeRoundRect(r, t.radius, if ring: t.focusRing else: t.borderStrong,
+                    if ring: t.focusRingWidth else: t.borderWidth)
   procCall paint(Control(lb), c)
 
 proc initListBox*(lb: ListBox, owner: Component = nil) =
@@ -638,6 +646,7 @@ proc initListBox*(lb: ListBox, owner: Component = nil) =
   lb.fExtended = true
   lb.typeAheadTimeout = 1000
   lb.fSel = initHashSet[int]()
+  lb.fShowFocusRect = true
   lb.padding = spacing(1)
 
 proc newListBox*(parent: Container = nil, left = 0'f32, top = 0'f32,

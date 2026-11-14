@@ -74,7 +74,6 @@ method paint*(b: SpinButtons, c: Canvas) =
   let t = b.theme
   let en = b.isEnabled
   let r = b.clientRect
-  c.fillRoundRect(r, t.radius, t.surface)
   for dir in [1, -1]:
     let half = if dir == 1: rectF(0, 0, r.w, r.h / 2) else: rectF(0, r.h / 2, r.w, r.h / 2)
     var fill = clTransparent
@@ -87,11 +86,23 @@ method paint*(b: SpinButtons, c: Canvas) =
     let ctr = pointF(r.w / 2, half.y + half.h / 2)
     c.drawArrow(ctr, 3.5, if dir == 1: adUp else: adDown,
                 if en: t.text else: t.textDisabled)
-  c.line(3, r.h / 2, r.w - 3, r.h / 2, t.border, 1)
-  c.strokeRoundRect(r, t.radius, t.borderStrong, t.borderWidth)
   procCall paint(Control(b), c)
 
 # ------------------------------------------------------------- SpinEdit
+
+method paint*(s: SpinEdit, c: Canvas) =
+  ## One field: the face, the border and the focus ring around the edit AND the
+  ## buttons (the edit child is borderless, the buttons draw only their arrows).
+  let t = s.theme
+  let enabled = s.isEnabled
+  let r = s.clientRect
+  let foc = s.edit.focused and enabled
+  c.fillRoundRect(r, t.radius, if enabled: t.surface else: t.surfaceAlt)
+  c.strokeRoundRect(r, t.radius,
+                    if not enabled: t.border elif foc: t.accent else: t.borderStrong,
+                    t.borderWidth)
+  if foc: drawFocusRing(c, r, t)
+  procCall paint(Control(s), c)
 
 func minValue*(s: SpinEdit): int = s.fMin
 func maxValue*(s: SpinEdit): int = s.fMax
@@ -159,6 +170,8 @@ method doExit*(s: SpinEdit) =
   s.stopRepeat()
   procCall doExit(Control(s))
 
+method focusTarget*(s: SpinEdit): Control = s.edit
+
 proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
   s.initContainer(owner)
   s.fMin = 0
@@ -167,7 +180,9 @@ proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
   s.setBounds(0, 0, 100, currentTheme().controlHeight)
   s.repeat = newTimer(s, RepeatDelayMs)
   s.repeat.onTimer = proc(t: Timer) = s.repeatTick()
+  s.padding = spacing(2)
   let e = newEdit(s)
+  e.borderStyle = ebNone
   e.align = alClient
   e.text = "0"
   s.edit = e
@@ -189,7 +204,10 @@ proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
     else: return
     e.selectAll()
     key = Key(0)
-  e.onExit = proc(sender: Control) = s.commit()
+  e.onEnter = proc(sender: Control) = s.invalidate()      # the focus ring is the spin's
+  e.onExit = proc(sender: Control) =
+    s.commit()
+    s.invalidate()
   let b = SpinButtons()
   b.initControl(s)
   b.setBounds(0, 0, SpinButtonWidth, s.height)

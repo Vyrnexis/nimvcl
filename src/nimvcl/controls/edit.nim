@@ -20,6 +20,11 @@
 ## the commit arrives as text input. It is dropped when focus is lost.
 ##
 ## Indexes in the public API are byte indexes into the UTF-8 `text`.
+##
+## Programmatic editing: `insertText(s)` replaces the selection and
+## `replaceRange(start, length, s)` replaces a byte range (both snap to
+## characters, apply the model's filters, are one undo step and fire
+## `onChange`); `text=` replaces everything and clears the undo history.
 
 import std/[unicode, monotimes, times, math]
 import ../graphics/[geometry, color, font, canvas, context]
@@ -296,6 +301,19 @@ proc canUndo*(e: Edit): bool = e.model.canUndo
 proc canRedo*(e: Edit): bool = e.model.canRedo
 proc undo*(e: Edit): bool {.discardable.} = e.model.undo()
 proc redo*(e: Edit): bool {.discardable.} = e.model.redo()
+
+proc insertText*(e: Edit, s: string): bool {.discardable.} =
+  ## Replaces the selection with `s` (caret after it) as one undo step, with the
+  ## model's filters (`numbersOnly`, `charCase`, `maxLength`). Fires `onChange`.
+  ## Returns false when nothing changed (read-only, everything filtered out).
+  e.model.insert(s)
+
+proc replaceRange*(e: Edit, start, length: int, s: string): bool {.discardable.} =
+  ## Replaces `length` bytes from `start` (snapped to characters) with `s`; the
+  ## caret ends after the new text. `length` 0 inserts, empty `s` deletes.
+  e.model.select(start, length)
+  if s.len == 0: e.model.deleteSelection()
+  else: e.model.insert(s)
 
 proc copyToClipboard*(e: Edit) =
   ## Copies the selection (never for password edits).

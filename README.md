@@ -47,6 +47,7 @@ when isMainModule:
 ## Demos
 
 ```
+nim c -r examples/settings_demo.nim   # a preferences app using (nearly) every control
 nim c -r examples/std_demo.nim        # the phase 5 controls
 nim c -r examples/menu_demo.nim       # menus, popups, hints
 nim c -r examples/controls_demo.nim   # basic controls

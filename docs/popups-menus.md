@@ -82,3 +82,13 @@ gives right-click / Shift+F10 / Menu key. Radio items: `radioItem` plus
 `Application.showHint`, `Application.hintPause` (600 ms), `hintShortPause`
 (100 ms, within `hintRecentWindow` 1000 ms of the last hint). Hides on leave,
 click, wheel, key, focus loss; never while a menu is open.
+
+## Focus requests
+
+`setFocus(c)`, `form.activeControl = c`, a Label's `focusControl` and mnemonics
+all go through `Control.focusTarget`: a composite that is not focusable itself
+forwards to its inner edit (an editable `ComboBox`, `SpinEdit`), so
+`label.focusControl = combo` works for every combo style. `ListBox.showFocusRect`
+(default true) turns the accent focus ring off for lists embedded in another
+control (the combo's drop-down).
+

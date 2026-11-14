@@ -453,3 +453,35 @@ suite "edit":
     f.settle()
     let ps = e.preferredSize()
     check ps.h >= 20 and ps.h <= 40
+
+  test "insertText and replaceRange: one undo step, filters apply, onChange fires":
+    let f = newShown()
+    let e = f.mkEdit("hello world")
+    var n = 0
+    e.onChange = proc(s: Control) = inc n
+    e.select(0, 5)
+    check e.insertText("HOWDY")                  # replaces the selection
+    check e.text == "HOWDY world" and e.caretPos == 5 and e.selLength == 0
+    check n == 1
+    check e.replaceRange(6, 5, "there")          # byte range of "world"
+    check e.text == "HOWDY there" and e.caretPos == 11
+    check e.replaceRange(5, 0, ",")              # length 0 inserts
+    check e.text == "HOWDY, there"
+    check e.replaceRange(5, 1, "")               # empty text deletes
+    check e.text == "HOWDY there" and e.caretPos == 5
+    check e.undo()
+    check e.text == "HOWDY, there"
+    e.caretPos = e.text.len                      # undo restored the selection
+    e.maxLength = 12
+    check not e.insertText("long")               # filtered out entirely: no change
+    e.readOnly = true
+    check not e.insertText("x") and not e.replaceRange(0, 1, "y")
+    check e.text == "HOWDY, there"
+    # utf-8: a byte range inside a character snaps to character boundaries
+    e.readOnly = false
+    e.maxLength = 0
+    e.text = "aéb"
+    check e.replaceRange(2, 1, "E")              # 2 is inside 'é' (bytes 1..2)
+    check e.text.len > 0 and validateUtf8(e.text) == -1
+    check n >= 5
+

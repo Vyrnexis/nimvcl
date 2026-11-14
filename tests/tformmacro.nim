@@ -102,6 +102,18 @@ form Third of Derived:
 form Empty:
   discard
 
+form Paged:
+  PageControl pages:
+    align = alClient
+    TabSheet one:
+      caption = "One"
+      Edit first:
+        left = 10; top = 10
+    TabSheet two:
+      caption = "Two"
+      Edit second:
+        left = 10; top = 10
+
 # ---------------------------------------------------------------------- tests
 
 suite "form macro":
@@ -217,3 +229,13 @@ suite "form macro":
     check f.badge.parent == Container(f)
     f.badge.count = 7
     check f.badge.count == 7
+
+  test "TabSheet is a form macro child: pages are created in order under the PageControl":
+    let f = newPaged()
+    check f.pages.pageCount == 2
+    check f.one.parent == Container(f.pages) and f.two.parent == Container(f.pages)
+    check f.pages.sheets[0] == f.one and f.pages.sheets[1] == f.two
+    check f.one.caption == "One" and f.two.caption == "Two"
+    check f.first.parent == Container(f.one) and f.second.parent == Container(f.two)
+    check f.pages.tabIndex == 0 and f.one.visible and not f.two.visible
+

@@ -420,3 +420,14 @@ proc newTabSheet*(pc: PageControl, caption = ""): TabSheet =
     if pc.fIndex < 0: pc.fIndex = 0
     pc.syncPages()
     pc.invalidate()
+
+proc newTabSheet*(parent: Container, caption = ""): TabSheet =
+  ## Container-typed overload (the `form` macro creates children through it):
+  ## a PageControl parent gets a page like above, any other parent a plain sheet.
+  if parent of PageControl:
+    result = newTabSheet(PageControl(parent), caption)
+  else:
+    new result
+    result.initTabSheet(parent)
+    result.caption = caption
+    if parent != nil: parent.insertControl result

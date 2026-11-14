@@ -190,6 +190,24 @@ suite "ScrollBox":
     settle f
     check sb.vScrollBar.visible and sb.hScrollBar.visible
 
+  test "padding: children revealed at the top come back to scroll 0, content ends at the padding":
+    # children use client coordinates; the viewport is the padded client area
+    let f = newShown()
+    let sb = newScrollBox(f, 10, 10, 200, 100)
+    sb.padding = spacing(12)
+    let first = newControl(); first.setBounds(12, 12, 100, 28)
+    let last = newControl(); last.setBounds(12, 300, 100, 28)
+    sb.insertControl first
+    sb.insertControl last
+    settle f
+    check sb.contentSize.h == 328'f32          # last bottom, minus top pad, plus bottom pad
+    sb.revealControl(last)
+    check last.top + last.height - sb.scrollPos.y == sb.viewport.bottom   # bottom edge flush
+    sb.revealControl(first)
+    check sb.scrollPos.y == 0                             # was 12 (first row clipped by the padding)
+    settle f
+    check first.top - sb.scrollOffset.y >= sb.viewport.y   # fully inside the viewport
+
   test "scrollbar modes":
     let f = newShown()
     let sb = newScrollBox(f, 0, 0, 200, 100)

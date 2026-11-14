@@ -385,6 +385,13 @@ method canFocus*(c: Control): bool {.base.} =
   ## controls override this (typically `c.isVisible and c.isEnabled`).
   false
 
+method focusTarget*(c: Control): Control {.base.} =
+  ## The control that really takes the focus when `c` is asked to (`setFocus`,
+  ## `activeControl =`, a Label's `focusControl`, a mnemonic). Base: `c`. A
+  ## composite that is not focusable itself (an editable ComboBox, SpinEdit)
+  ## forwards to its inner edit.
+  c
+
 method isTabStop*(c: Control): bool {.base.} =
   ## Whether Tab visits the control (combined with `canFocus` by the traversal).
   ## Base: the `tabStop` property. RadioButton overrides it (one stop per group).
