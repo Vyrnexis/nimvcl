@@ -20,12 +20,12 @@ template queued(body: untyped) =
       body)
 
 proc focusName(l: LoginForm): string =
-  let c = l.form.activeControl
+  let c = l.activeControl
   if c == nil: "-" else: c.name
 
 proc newShown(): LoginForm =
-  result = buildLoginForm()
-  result.form.show()
+  result = newLoginForm()
+  result.show()
 
 suite "login demo, keyboard only":
   setup:
@@ -38,86 +38,86 @@ suite "login demo, keyboard only":
     let l = newShown()
     var order = @[l.focusName]
     for i in 1 .. 6:
-      l.form.tap(keyTab)
+      l.tap(keyTab)
       order.add l.focusName
     check order == @["user", "password", "remember", "production", "ok", "cancel", "user"]
-    l.form.tap(keyTab, {ssShift})                     # Shift+Tab goes back
+    l.tap(keyTab, {ssShift})                     # Shift+Tab goes back
     check l.focusName == "cancel"
 
   test "typing, Space and arrows":
     let l = newShown()
-    l.form.typeText "bob"
-    l.form.tap(keyTab)
-    l.form.typeText "pw"
-    l.form.tap(keyTab)
-    check l.userEdit.text == "bob" and l.passEdit.text == "pw"
+    l.typeText "bob"
+    l.tap(keyTab)
+    l.typeText "pw"
+    l.tap(keyTab)
+    check l.user.text == "bob" and l.password.text == "pw"
     check l.remember.checked
-    l.form.tap(keySpace)
+    l.tap(keySpace)
     check not l.remember.checked
-    l.form.tap(keySpace)
+    l.tap(keySpace)
     check l.remember.checked
-    l.form.tap(keyTab)
+    l.tap(keyTab)
     check l.focusName == "production"
-    l.form.tap(keyDown)
+    l.tap(keyDown)
     check l.staging.checked and not l.production.checked and l.focusName == "staging"
-    l.form.tap(keyTab)                                # one stop per group
+    l.tap(keyTab)                                # one stop per group
     check l.focusName == "ok"
-    l.form.tap(keyLeft, {})                           # no effect on a button
+    l.tap(keyLeft, {})                           # no effect on a button
     check l.staging.checked
 
   test "Enter in an edit presses the default button; success opens the modal welcome":
     let l = newShown()
-    l.form.typeText "  carol  "
-    l.form.tap(keyTab)
-    l.form.typeText "secret"
+    l.typeText "  carol  "
+    l.tap(keyTab)
+    l.typeText "secret"
     queued:
       let m = modalForm()
       m.tap(keyEnter)                                 # its OK is default and focused
-    l.form.tap(keyEnter)                              # from the password edit
+    l.tap(keyEnter)                              # from the password edit
     check l.welcomeShown == 1 and l.welcomeResult == mrOk
     check l.greeted == "carol"
     check "carol" in l.status.caption
-    check l.form.visible and modalForm() == nil
+    check l.visible and modalForm() == nil
 
   test "validation: empty user returns focus to the user edit":
     let l = newShown()
-    l.form.tap(keyTab)                                # to password
-    l.form.typeText "x"
-    l.form.tap(keyEnter)
+    l.tap(keyTab)                                # to password
+    l.typeText "x"
+    l.tap(keyEnter)
     check l.welcomeShown == 0
     check "user name" in l.status.caption
     check l.focusName == "user"
 
   test "validation: empty password focuses the password edit":
     let l = newShown()
-    l.form.typeText "dave"
-    l.form.tap(keyEnter)
+    l.typeText "dave"
+    l.tap(keyEnter)
     check l.welcomeShown == 0
     check "password" in l.status.caption
     check l.focusName == "password"
 
   test "a focused OK button is activated by Space":
     let l = newShown()
-    l.form.tap(keyEnter)                              # error, focus stays on user
+    l.tap(keyEnter)                              # error, focus stays on user
     check l.focusName == "user"
-    for i in 1 .. 4: l.form.tap(keyTab)
+    for i in 1 .. 4: l.tap(keyTab)
     check l.focusName == "ok"
     l.status.caption = ""
-    l.form.tap(keySpace)
+    l.tap(keySpace)
     check l.status.caption.len > 0                    # OK ran (validation error)
 
   test "Esc presses Cancel from any control":
     let l = newShown()
-    l.form.typeText "x"
-    l.form.tap(keyEscape)                             # from an edit
-    check not l.form.visible
+    l.typeText "x"
+    l.tap(keyEscape)                             # from an edit
+    check not l.visible
 
   test "Esc from the radio group closes too":
     let l = newShown()
-    for i in 1 .. 3: l.form.tap(keyTab)
+    for i in 1 .. 3: l.tap(keyTab)
     check l.focusName == "production"
-    l.form.tap(keyEscape)
-    check not l.form.visible
+    l.tap(keyEscape)
+    check not l.visible
 
   test "label focusControl moves focus":
     let l = newShown()

@@ -17,105 +17,93 @@
 import std/[os, strutils]
 import nimvcl
 
-type
-  LoginForm* = ref object
-    form*: Form
-    userLabel*, passLabel*, serverLabel*, status*: Label
-    userEdit*, passEdit*: Edit
-    remember*: CheckBox
-    production*, staging*: RadioButton
-    ok*, cancel*: Button
-    welcomeShown*: int            ## how many times the welcome form was shown
-    welcomeResult*: ModalResult   ## what the last welcome form returned
-    greeted*: string              ## user name of the last successful login
+form WelcomeForm:
+  caption = "Welcome"
+  width = 320; height = 160
+  position = poMainFormCenter
+  borderStyle = bsSingle
+  Label message:
+    left = 24; top = 24
+    font = font(size = 18, style = {fsBold})
+  Label detail:
+    left = 24; top = 62
+    textColor = self.theme.textMuted
+  Button ok:
+    caption = "OK"; left = 206; top = 104; width = 90
+    isDefault = true
+    modalResult = mrOk
+  onShow: self.activeControl = self.ok
 
-proc showError(l: LoginForm, msg: string) =
-  l.status.textColor = l.form.theme.danger
-  l.status.caption = msg
+form LoginForm:
+  caption = "Sign in"
+  width = 420; height = 392
+  borderStyle = bsSingle
+  var welcomeShown: int            ## how many times the welcome form was shown
+  var welcomeResult: ModalResult   ## what the last welcome form returned
+  var greeted: string              ## user name of the last successful login
+  Label:
+    caption = "Sign in"; left = 20; top = 14
+    font = font(size = 20, style = {fsBold})
+  GroupBox group:
+    caption = "Account"; left = 20; top = 54; width = 380; height = 238
+    Label userLabel:
+      caption = "User name"; left = 16; top = 34
+      focusControl = self.user
+    Edit user:
+      left = 16; top = 56; width = 348; height = 28
+      placeholder = "name@example.com"
+    Label passLabel:
+      caption = "Password"; left = 16; top = 90
+      focusControl = self.password
+    Edit password:
+      left = 16; top = 112; width = 348; height = 28
+      placeholder = "Password"; passwordChar = '*'
+    CheckBox remember:
+      caption = "Remember me"; checked = true; left = 16; top = 154
+    Label:
+      caption = "Server"; left = 16; top = 186
+    RadioButton production:
+      caption = "Production"; checked = true; left = 16; top = 208
+    RadioButton staging:
+      caption = "Staging"; left = 140; top = 208
+  Button ok:
+    caption = "OK"; left = 212; top = 306; width = 90
+    isDefault = true
+    onClick: self.login()
+  Button cancel:
+    caption = "Cancel"; left = 310; top = 306; width = 90
+    isCancel = true
+    onClick: self.close()
+  Label status:
+    caption = "Enter your credentials."; left = 20; top = 352
+    textColor = self.theme.textMuted
+  onShow: self.activeControl = self.user
 
-proc showWelcome(l: LoginForm) =
-  let d = newForm(nil, 320, 160)
-  d.caption = "Welcome"
-  d.position = poMainFormCenter
-  d.borderStyle = bsSingle
-  let server = if l.production.checked: "Production" else: "Staging"
-  let msg = newLabel(d, "Welcome, " & l.greeted & "!", 24, 24)
-  msg.font = font(size = 18, style = {fsBold})
-  let sub = newLabel(d, "Signed in to " & server & (if l.remember.checked: " (remembered)" else: ""),
-                     24, 62)
-  sub.textColor = d.theme.textMuted
-  let ok = newButton(d, "OK", 206, 104, 90)
-  ok.isDefault = true
-  ok.modalResult = mrOk
-  d.onShow = proc(s: Control) = d.activeControl = ok
-  inc l.welcomeShown
-  l.welcomeResult = d.showModal()
+  proc showError(self: LoginForm, msg: string) =
+    self.status.textColor = self.theme.danger
+    self.status.caption = msg
 
-proc login(l: LoginForm) =
-  let user = l.userEdit.text.strip()
-  if user.len == 0:
-    l.showError "Please enter your user name."
-    setFocus(l.userEdit)
-    return
-  if l.passEdit.text.len == 0:
-    l.showError "Please enter your password."
-    setFocus(l.passEdit)
-    return
-  l.greeted = user
-  l.status.textColor = l.form.theme.textMuted
-  l.status.caption = "Signed in as " & user
-  l.showWelcome()
+  proc showWelcome(self: LoginForm) =
+    let d = newWelcomeForm()
+    d.message.caption = "Welcome, " & self.greeted & "!"
+    d.detail.caption = "Signed in to " & (if self.production.checked: "Production" else: "Staging") &
+                       (if self.remember.checked: " (remembered)" else: "")
+    inc self.welcomeShown
+    self.welcomeResult = d.showModal()
 
-proc buildLoginForm*(): LoginForm =
-  let l = LoginForm()
-  let f = newForm(nil, 420, 392)
-  l.form = f
-  f.caption = "Sign in"
-  f.borderStyle = bsSingle
-
-  let title = newLabel(f, "Sign in", 20, 14)
-  title.font = font(size = 20, style = {fsBold})
-
-  let g = newGroupBox(f, "Account", 20, 54, 380, 238)
-  g.name = "group"
-
-  l.userEdit = newEdit(g, "", 16, 56, 348, 28)
-  l.userEdit.name = "user"
-  l.userEdit.placeholder = "name@example.com"
-  l.userLabel = newLabel(g, "User name", 16, 34)
-  l.userLabel.focusControl = l.userEdit
-
-  l.passEdit = newEdit(g, "", 16, 112, 348, 28)
-  l.passEdit.name = "password"
-  l.passEdit.placeholder = "Password"
-  l.passEdit.passwordChar = '*'
-  l.passLabel = newLabel(g, "Password", 16, 90)
-  l.passLabel.focusControl = l.passEdit
-
-  l.remember = newCheckBox(g, "Remember me", true, 16, 154)
-  l.remember.name = "remember"
-
-  l.serverLabel = newLabel(g, "Server", 16, 186)
-  l.production = newRadioButton(g, "Production", true, 16, 208)
-  l.production.name = "production"
-  l.staging = newRadioButton(g, "Staging", false, 140, 208)
-  l.staging.name = "staging"
-
-  l.ok = newButton(f, "OK", 212, 306, 90)
-  l.ok.name = "ok"
-  l.ok.isDefault = true
-  l.cancel = newButton(f, "Cancel", 310, 306, 90)
-  l.cancel.name = "cancel"
-  l.cancel.isCancel = true
-
-  l.status = newLabel(f, "Enter your credentials.", 20, 352)
-  l.status.name = "status"
-  l.status.textColor = f.theme.textMuted
-
-  l.ok.onClick = proc(s: Control) = l.login()
-  l.cancel.onClick = proc(s: Control) = f.close()
-  f.onShow = proc(s: Control) = f.activeControl = l.userEdit
-  l
+  proc login(self: LoginForm) =
+    let name = self.user.text.strip()
+    if name.len == 0:
+      self.showError "Please enter your user name."
+      setFocus(self.user)
+    elif self.password.text.len == 0:
+      self.showError "Please enter your password."
+      setFocus(self.password)
+    else:
+      self.greeted = name
+      self.status.textColor = self.theme.textMuted
+      self.status.caption = "Signed in as " & name
+      self.showWelcome()
 
 proc main() =
   let shot = getEnv("NIMVCL_SCREENSHOT")
@@ -123,20 +111,20 @@ proc main() =
   Application.init()
   if scaleEnv.len > 0: Application.forceScale = parseFloat(scaleEnv).float32
   if getEnv("NIMVCL_DARK") == "1": Application.theme = themeDark()
-  let l = buildLoginForm()
+  let l = newLoginForm()
   if shot.len > 0:
-    l.form.show()
+    l.show()
     if getEnv("NIMVCL_FILL") == "1":
-      l.userEdit.text = "alice@example.com"
-      l.passEdit.text = "secret"
+      l.user.text = "alice@example.com"
+      l.password.text = "secret"
       l.staging.checked = true
-      setFocus(l.passEdit)
+      setFocus(l.password)
     if getEnv("NIMVCL_ERROR") == "1": l.ok.click()
-    if not l.form.screenshot(shot): quit "screenshot failed: " & sdlError()
-    echo "wrote ", shot, "  scale ", l.form.ctx.scale
+    if not l.screenshot(shot): quit "screenshot failed: " & sdlError()
+    echo "wrote ", shot, "  scale ", l.ctx.scale
     Application.shutdown()
   else:
-    Application.run(l.form)
+    Application.run(l)
 
 when isMainModule:
   main()

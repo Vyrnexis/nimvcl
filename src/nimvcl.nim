@@ -7,10 +7,12 @@ import nimvcl/platform/[sdlutil, events, window]
 import nimvcl/core/[types, component, theme, control, layout, input, form,
                     timer, application, host]
 import nimvcl/controls/[common, label, button, checkbox, radiobutton, panel,
-                        paintbox, bevel, imagectl, edit]
+                        paintbox, bevel, imagectl, edit, frame]
+import nimvcl/dsl/formmacro
 
 export color, geometry, font, image, context, canvas, sdlutil, events, window
 export types, component, theme, control, layout, input, form, timer,
        application, host
 export common, label, button, checkbox, radiobutton, panel, paintbox, bevel,
-       imagectl, edit
+       imagectl, edit, frame
+export formmacro

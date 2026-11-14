@@ -80,7 +80,7 @@ proc newRenderContext*(renderer: Renderer, scale: float32 = 1): RenderContext =
 
 func renderer*(ctx: RenderContext): Renderer = ctx.renderer
 func scale*(ctx: RenderContext): float32 = ctx.scale
-func frame*(ctx: RenderContext): int = ctx.frame
+func frameCount*(ctx: RenderContext): int = ctx.frame   # not `frame`: that is the frame macro
 func isClosed*(ctx: RenderContext): bool = ctx.closed
 
 func fontCount*(ctx: RenderContext): int = ctx.fonts.len
