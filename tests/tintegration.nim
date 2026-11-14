@@ -1,4 +1,4 @@
-## Cross-cutting phase 5 round 2: umbrella import, key-handler chain,
+## Integration tests across modules: umbrella import, key-handler chain,
 ## layout-owner hook, visibility notification, mnemonics, modal ownership.
 ## Headless (offscreen SDL).
 

@@ -19,6 +19,6 @@ jobs:
       - name: Install dependencies
         run: nimble install -d -y
       - name: Build examples
-        run: for f in examples/*.nim; do nim c --outdir:build "$f"; done
+        run: nimble examples
       - name: Test
-        run: if ls tests/t*.nim >/dev/null 2>&1; then nimble test; fi
+        run: nimble test

@@ -4,7 +4,7 @@ Audited revision: nim-lang/sdl3 `533d22196dab2ea637ea0131171ed3f8db61fe90`
 (`sdl3.nimble` version 1.1, "Based on SDL 3.4.18"; `sdl3_ttf.nim` "Based on SDL_ttf 3.2.2").
 Tested against system SDL3 3.4.20, SDL3_ttf 3.2.2, SDL3_image 3.4.8, Nim 2.2.10.
 Method: read the declarations the plan relies on, then compiled and ran
-`examples/spike.nim`. Items marked (spike) were exercised at runtime; the rest
+`examples/spike.nim` (a throwaway phase 0 program, since removed). Items marked (spike) were exercised at runtime; the rest
 are from reading the declarations only.
 
 ## Install note (not a binding bug, but affects `nimble install`)
@@ -98,7 +98,7 @@ are from reading the declarations only.
 ## Presence check of APIs the plan relies on
 
 All of these exist with usable signatures (present = declared in the binding;
-(spike) = also run in `examples/spike.nim`).
+(spike) = also run in `examples/spike.nim` (a throwaway phase 0 program, since removed)).
 
 | API | Binding | Notes |
 |---|---|---|

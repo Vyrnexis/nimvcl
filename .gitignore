@@ -1,7 +1,13 @@
+# build output
 build/
 nimcache/
 testresults/
 outputGotten.txt
 *.exe
+# compiled examples and tests sit next to their sources if built without --outdir
 /examples/*
 !/examples/*.nim
+/tests/*
+!/tests/*.nim
+!/tests/golden/
+!/tests/macro_fail/
