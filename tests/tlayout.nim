@@ -288,6 +288,122 @@ suite "anchors":
     layout r
     check c.box == b(10, 10, 50, 20)
 
+suite "anchors: design baseline":
+  proc design(): (Container, Control, Control) =
+    ## A 400x300 form with an akRight|akBottom button and an akLeft+akRight edit.
+    let r = newContainer()
+    r.setBounds(0, 0, 400, 300)
+    let btn = newControl()
+    btn.setBounds(320, 260, 70, 30)
+    btn.anchors = {akRight, akBottom}
+    btn.parent = r
+    let ed = newControl()
+    ed.setBounds(10, 10, 380, 24)
+    ed.anchors = {akLeft, akTop, akRight}
+    ed.parent = r
+    (r, btn, ed)
+
+  test "window manager resizes before the first layout":
+    let (r, btn, ed) = design()
+    let ui = newUiRoot(r)
+    ui.resize(1000, 700)             # what a tiling WM does
+    layout r
+    check btn.box == b(920, 660, 70, 30)
+    check ed.box == b(10, 10, 980, 24)
+    ui.resize(400, 300)
+    layout r
+    check btn.box == b(320, 260, 70, 30)
+    check ed.box == b(10, 10, 380, 24)
+
+  test "explicit resize before the first layout is the design size, after it is a resize":
+    let (r, btn, _) = design()
+    r.setBounds(0, 0, 500, 300)      # still designing: baseline 500x300
+    layout r
+    check btn.left == 320
+    r.setBounds(0, 0, 600, 300)
+    layout r
+    check btn.left == 420
+
+  test "1000 random resizes do not drift":
+    let (r, btn, ed) = design()
+    let c = newControl()
+    c.setBounds(33, 41, 51, 23)
+    c.anchors = {}                   # centred: odd deltas round
+    c.parent = r
+    layout r
+    var seed = 12345'u32
+    proc rnd(): float32 =
+      seed = seed * 1664525'u32 + 1013904223'u32
+      float32(100 + (seed shr 8) mod 1500)
+    for i in 1..1000:
+      r.setBounds(0, 0, rnd(), rnd())
+      layout r
+      check btn.left == 320 + (r.width - 400)
+      check ed.width == 380 + (r.width - 400)
+      check c.left == round(33 + (r.width - 400) / 2)
+    r.setBounds(0, 0, 400, 300)
+    layout r
+    check btn.box == b(320, 260, 70, 30)
+    check ed.box == b(10, 10, 380, 24)
+    check c.box == b(33, 41, 51, 23)
+
+  test "nested alClient panel: baseline is the first laid-out size":
+    let r = newContainer()
+    r.setBounds(0, 0, 400, 300)
+    let panel = newContainer()
+    panel.align = alClient
+    panel.parent = r
+    let btn = newControl()
+    btn.setBounds(300, 200, 50, 20)
+    btn.anchors = {akRight, akBottom}
+    btn.parent = panel
+    let ui = newUiRoot(r)
+    ui.resize(800, 600)              # panel is first laid out at 800x600
+    layout r
+    check panel.box == b(0, 0, 800, 600)
+    check btn.box == b(300, 200, 50, 20)    # never explicitly sized: no delta
+    ui.resize(900, 650)
+    layout r
+    check btn.box == b(400, 250, 50, 20)
+
+  test "explicitly sized alClient panel gets the delta":
+    let r = newContainer()
+    r.setBounds(0, 0, 400, 300)
+    let panel = newContainer()
+    panel.setBounds(0, 0, 400, 300)  # designed at 400x300
+    panel.align = alClient
+    panel.parent = r
+    let btn = newControl()
+    btn.setBounds(300, 200, 50, 20)
+    btn.anchors = {akRight, akBottom}
+    btn.parent = panel
+    let ui = newUiRoot(r)
+    ui.resize(800, 600)
+    layout r
+    check btn.box == b(700, 500, 50, 20)
+
+  test "child added after the first layout is relative to the current size":
+    let r = newContainer()
+    r.setBounds(0, 0, 400, 300)
+    let ui = newUiRoot(r)
+    ui.resize(800, 600)
+    layout r
+    let c = newControl()
+    c.setBounds(700, 500, 50, 20)
+    c.anchors = {akRight, akBottom}
+    c.parent = r
+    layout r
+    check c.box == b(700, 500, 50, 20)
+    ui.resize(900, 650)
+    layout r
+    check c.box == b(800, 550, 50, 20)
+    c.setBounds(10, 10, 50, 20)      # explicit move re-baselines
+    layout r
+    check c.box == b(10, 10, 50, 20)
+    ui.resize(800, 600)
+    layout r
+    check c.box == b(-90, -40, 50, 20)
+
 suite "rounding":
   test "fractional margins and heights snap and stack without gaps":
     let r = root(100, 100)

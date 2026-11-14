@@ -22,7 +22,7 @@
 #
 # Build: nim c --outdir:build examples/settings_demo.nim
 
-import std/[os, strutils, tables]
+import std/[os, strutils, tables, math]
 import nimvcl
 
 const
@@ -38,26 +38,55 @@ proc swatchColor(i: int): Color =
   let v = Swatches[clamp(i, 0, Swatches.high)]
   rgb((v shr 16) and 0xff, (v shr 8) and 0xff, v and 0xff)
 
-proc glyphOpen(c: Canvas, r: RectF, col: Color) =
-  c.strokeRoundRect(rectF(r.x + 1, r.y + 4, r.w - 2, r.h - 7), 2, col, 1.5)
-  c.line(r.x + 1, r.y + 4, r.x + 6, r.y + 4, col, 1.5)
+proc makeIcon(inside: proc(u, v: float): bool): Image =
+  ## A 16x16 logical icon drawn at 2x (32 px), 3x3 supersampled, in a mid blue
+  ## that reads on both themes.
+  const N = 32
+  result = newImage(N, N)
+  for y in 0 ..< N:
+    for x in 0 ..< N:
+      var hit = 0
+      for sy in 0 .. 2:
+        for sx in 0 .. 2:
+          if inside((x.float + (sx.float + 0.5) / 3) / N, (y.float + (sy.float + 0.5) / 3) / N):
+            inc hit
+      if hit > 0: result.setPixel(x, y, rgba(0x4c, 0x8b, 0xe8, hit * 255 div 9))
 
-proc glyphSave(c: Canvas, r: RectF, col: Color) =
-  c.strokeRoundRect(rectF(r.x + 2, r.y + 2, r.w - 4, r.h - 4), 2, col, 1.5)
-  c.fillRect(rectF(r.x + 5, r.y + 2, r.w - 10, 5), col)
+proc inRect(u, v, x0, y0, x1, y1: float): bool = u >= x0 and u <= x1 and v >= y0 and v <= y1
+proc ring(u, v, r, w: float): bool =
+  let d = sqrt((u - 0.5) * (u - 0.5) + (v - 0.5) * (v - 0.5))
+  d <= r and d >= r - w
 
-proc glyphWrap(c: Canvas, r: RectF, col: Color) =
-  c.line(r.x + 2, r.y + 4, r.right - 2, r.y + 4, col, 1.5)
-  c.line(r.x + 2, r.y + 8, r.right - 4, r.y + 8, col, 1.5)
-  c.line(r.x + 2, r.y + 12, r.x + 8, r.y + 12, col, 1.5)
+proc iconOpen(u, v: float): bool =
+  inRect(u, v, 0.08, 0.32, 0.92, 0.84) or inRect(u, v, 0.08, 0.18, 0.42, 0.34)
+proc iconSave(u, v: float): bool =
+  inRect(u, v, 0.1, 0.1, 0.9, 0.9) and not inRect(u, v, 0.28, 0.1, 0.72, 0.38) and
+    not inRect(u, v, 0.26, 0.56, 0.74, 0.9)
+proc iconWrap(u, v: float): bool =
+  inRect(u, v, 0.1, 0.2, 0.9, 0.3) or inRect(u, v, 0.1, 0.45, 0.75, 0.55) or
+    inRect(u, v, 0.1, 0.7, 0.45, 0.8)
+proc iconMoon(u, v: float): bool =
+  ring(u, v, 0.42, 0.07) or (u < 0.5 and ring(u, v, 0.42, 0.42))
+proc iconExit(u, v: float): bool =
+  inRect(u, v, 0.1, 0.12, 0.2, 0.88) or inRect(u, v, 0.1, 0.12, 0.5, 0.22) or
+    inRect(u, v, 0.1, 0.78, 0.5, 0.88) or inRect(u, v, 0.3, 0.45, 0.68, 0.55) or
+    (u >= 0.62 and u <= 0.92 and abs(v - 0.5) <= (0.92 - u) * 0.95)
+proc iconAbout(u, v: float): bool =
+  ring(u, v, 0.44, 0.07) or inRect(u, v, 0.45, 0.44, 0.55, 0.74) or
+    ((u - 0.5) * (u - 0.5) + (v - 0.29) * (v - 0.29) <= 0.0049)
 
-proc glyphMoon(c: Canvas, r: RectF, col: Color) =
-  ## A half-filled disc (light/dark).
-  let d = rectF(r.x + 2, r.y + 2, r.w - 4, r.h - 4)
-  c.strokeEllipse(d, col, 1.5)
-  c.pushClip(rectF(d.x, d.y, d.w / 2, d.h))
-  c.fillEllipse(d, col)
-  c.popClip()
+const
+  iOpen = 0
+  iSave = 1
+  iWrap = 2
+  iDark = 3
+  iExit = 4
+  iAbout = 5
+
+proc makeIcons(): ImageList =
+  result = newImageList(16, 16)
+  for f in [iconOpen, iconSave, iconWrap, iconMoon, iconExit, iconAbout]:
+    result.add makeIcon(f)
 
 type
   Swatch = ref object of PaintBox
@@ -107,24 +136,23 @@ form SettingsForm:
   var applyTimer: Timer
   var mainMenu: MainMenu
   var catMenu: PopupMenu
-  var themeLight, themeDarkItem, toolbarItem: MenuItem
+  var themeDarkItem, toolbarItem: MenuItem
   var undoItem, redoItem: MenuItem
+  var actions: ActionList                  ## shared by the menu, toolbar and shortcuts
+  var openAct, saveAct, wrapAct, darkAct, exitAct, aboutAct: Action
+  var icons: ImageList
 
   ToolBar toolbar:
     ToolButton openTool:
-      caption = "Open"; hint = "Open a settings file (Ctrl+O)"
-      glyph = glyphOpen
+      caption = "Open"
     ToolButton saveTool:
-      caption = "Save"; hint = "Save the settings as a file (Ctrl+S)"
-      glyph = glyphSave
+      caption = "Save"
     ToolButton:
       kind = tbsDivider
     ToolButton wrapTool:
-      caption = "Wrap"; kind = tbsCheck; hint = "Word wrap in the editor"
-      glyph = glyphWrap
+      caption = "Wrap"
     ToolButton darkTool:
-      caption = "Dark"; kind = tbsCheck; hint = "Dark theme"
-      glyph = glyphMoon
+      caption = "Dark"
   StatusBar statusBar:
     height = 26
   Panel footer:
@@ -164,35 +192,45 @@ form SettingsForm:
     align = alClient
     hint = "Ctrl+Tab switches the page"
     margins = spacing(0, 4, 10, 10)
+    # The pages are designed at 692x457 (their size on the 900x640 form); the
+    # anchors then adapt them to whatever size the window manager gives.
     TabSheet generalPage:
       caption = "&General"
-      Label nameLabel:
-        caption = "&Name"; left = 16; top = 14
-        focusControl = self.nameEdit
-      Edit nameEdit:
-        left = 16; top = 36; width = 300
-        placeholder = "Your full name"
-        hint = "The name shown in documents"
-      Label emailLabel:
-        caption = "E&mail"; left = 340; top = 14
-        focusControl = self.emailEdit
-      Edit emailEdit:
-        left = 340; top = 36; width = 300
-        placeholder = "name@example.com"
-        hint = "Used for notifications"
-      Label langLabel:
-        caption = "&Language"; left = 16; top = 80
-        focusControl = self.language
-      ComboBox language:
-        style = csDropDownList
-        left = 16; top = 102; width = 300
-        hint = "User interface language"
-      Label countryLabel:
-        caption = "C&ountry"; left = 340; top = 80
-        focusControl = self.country
-      ComboBox country:
-        left = 340; top = 102; width = 300
-        hint = "Type to complete the country name"
+      width = 692; height = 457
+      GridPanel identGrid:
+        left = 16; top = 14; width = 660; height = 112
+        anchors = {akLeft, akTop, akRight}
+        borderStyle = pbNone
+        Label nameLabel:
+          caption = "&Name"; autoSize = false; layout = vaBottom
+          margins = spacing(0, 0, 0, 3)
+          focusControl = self.nameEdit
+        Label emailLabel:
+          caption = "E&mail"; autoSize = false; layout = vaBottom
+          margins = spacing(12, 0, 0, 3)
+          focusControl = self.emailEdit
+        Edit nameEdit:
+          placeholder = "Your full name"
+          margins = spacing(0, 0, 0, 0)
+          hint = "The name shown in documents"
+        Edit emailEdit:
+          placeholder = "name@example.com"
+          margins = spacing(12, 0, 0, 0)
+          hint = "Used for notifications"
+        Label langLabel:
+          caption = "&Language"; autoSize = false; layout = vaBottom
+          margins = spacing(0, 0, 0, 3)
+          focusControl = self.language
+        Label countryLabel:
+          caption = "C&ountry"; autoSize = false; layout = vaBottom
+          margins = spacing(12, 0, 0, 3)
+          focusControl = self.country
+        ComboBox language:
+          style = csDropDownList
+          hint = "User interface language"
+        ComboBox country:
+          margins = spacing(12, 0, 0, 0)
+          hint = "Type to complete the country name"
       CheckBox updates:
         caption = "Check for &updates"; checked = true; left = 16; top = 152
         hint = "Look for new versions at startup"
@@ -203,14 +241,15 @@ form SettingsForm:
         caption = "Send usage s&tatistics"; left = 16; top = 208
         hint = "Anonymous, never shared"
       Label autosaveLabel:
-        caption = "Auto-save ever&y (minutes)"; left = 340; top = 152
+        caption = "Auto-save ever&y (min)"; left = 240; top = 152
         focusControl = self.autosave
       SpinEdit autosave:
-        left = 340; top = 174; width = 120
+        left = 240; top = 174; width = 120
         minValue = 0; maxValue = 120; value = 10
         hint = "0 turns auto-save off"
       GroupBox startupGroup:
-        caption = "On startup"; left = 16; top = 252; width = 624; height = 120
+        caption = "On startup"; left = 16; top = 252; width = 660; height = 120
+        anchors = {akLeft, akTop, akRight}
         RadioButton startLast:
           caption = "Open the last &document"; checked = true; left = 16; top = 32
           hint = "Restore the previous session"
@@ -222,17 +261,21 @@ form SettingsForm:
           hint = "Nothing is opened"
     TabSheet appearancePage:
       caption = "A&ppearance"
+      width = 692; height = 457
       Label fontLabel:
         caption = "Font &size"; left = 16; top = 14
         focusControl = self.fontSize
       TrackBar fontSize:
-        left = 16; top = 36; width = 300
+        left = 16; top = 36; width = 560
+        anchors = {akLeft, akTop, akRight}
         min = 8; max = 32; position = 14; frequency = 4
         hint = "Editor font size"
       Label fontValue:
-        caption = "14 pt"; left = 330; top = 40
+        caption = "14 pt"; left = 600; top = 40
+        anchors = {akTop, akRight}
       GroupBox previewGroup:
-        caption = "Preview"; left = 16; top = 84; width = 624; height = 84
+        caption = "Preview"; left = 16; top = 84; width = 660; height = 84
+        anchors = {akLeft, akTop, akRight}
         Label preview:
           caption = "The quick brown fox jumps over the lazy dog"
           left = 16; top = 34
@@ -244,27 +287,33 @@ form SettingsForm:
         left = 16; top = 206; width = 200
         hint = "Colour theme"
       Label accentLabel:
-        caption = "Accent colour"; left = 260; top = 184
+        caption = "Accent colour"; left = 240; top = 184
       FlowPanel swatchPanel:
-        left = 260; top = 206; width = 380; height = 36
+        left = 240; top = 206; width = 436; height = 36
+        anchors = {akLeft, akTop, akRight}
         hGap = 6
       Label applyingLabel:
         caption = "Applying..."; left = 16; top = 268
         visible = false
       ProgressBar applying:
         left = 16; top = 290; width = 300
+        anchors = {akLeft, akTop, akRight}
         style = pbsMarquee; visible = false
         hint = "Applying the settings"
     TabSheet editorPage:
       caption = "Ed&itor"
+      width = 692; height = 457
       Memo sample:
-        left = 16; top = 14; width = 624; height = 170
+        left = 16; top = 14; width = 660; height = 250
+        anchors = {akLeft, akTop, akRight, akBottom}
         hint = "A sample document"
       CheckBox wrap:
-        caption = "&Word wrap"; left = 16; top = 196
+        caption = "&Word wrap"; left = 16; top = 276
+        anchors = {akLeft, akBottom}
         hint = "Wrap long lines in the editor"
       GridPanel optionsGrid:
-        left = 16; top = 232; width = 624; height = 96
+        left = 16; top = 312; width = 660; height = 96
+        anchors = {akLeft, akRight, akBottom}
         Label tabLabel:
           caption = "T&ab width"; autoSize = false; layout = vaCenter
           margins = spacing(0, 2)
@@ -286,6 +335,7 @@ form SettingsForm:
           hint = "Add a final line break on save"
     TabSheet advancedPage:
       caption = "Advan&ced"
+      width = 692; height = 457
       ScrollBox advanced:
         align = alClient
         autoContentSize = true
@@ -326,9 +376,7 @@ form SettingsForm:
     let was = self.loading
     self.loading = true
     Application.theme = if dark: themeDark() else: themeLight()
-    self.themeLight.checked = not dark
-    self.themeDarkItem.checked = dark
-    self.darkTool.down = dark
+    self.darkAct.checked = dark          # menu item and tool button follow
     self.themeCombo.itemIndex = ord(dark)
     self.loading = was
     self.touch "Theme: " & (if dark: "dark" else: "light")
@@ -350,7 +398,7 @@ form SettingsForm:
   proc setWrap*(self: SettingsForm, on: bool) =
     self.sample.wordWrap = on
     self.wrap.checked = on
-    self.wrapTool.down = on
+    self.wrapAct.checked = on            # View menu item and tool button follow
     self.touch "Word wrap " & (if on: "on" else: "off")
 
   proc applyNow(self: SettingsForm) =
@@ -459,14 +507,50 @@ form SettingsForm:
     let c = self.activeControl
     if c != nil and (c of Edit or c of Memo): c else: nil
 
+  proc buildActions(self: SettingsForm) =
+    ## One Action per command: the menu items, tool buttons, the Wrap check box
+    ## and the keyboard shortcuts all share its caption, hint, icon, enabled
+    ## and checked state.
+    self.icons = makeIcons()
+    let al = newActionList(self)
+    self.actions = al
+    al.images = self.icons
+    proc make(caption, hint: string, icon: int, sc = noShortcut,
+              autoCheck = false): Action =
+      result = newAction(al, caption, nil, sc)
+      result.hint = hint
+      result.imageIndex = icon
+      result.autoCheck = autoCheck
+    self.openAct = make("&Open settings...", "Open a settings file (Ctrl+O)", iOpen,
+                        shortcut("Ctrl+O"))
+    self.saveAct = make("Save &as...", "Save the settings as a file (Ctrl+S)", iSave,
+                        shortcut("Ctrl+S"))
+    self.wrapAct = make("&Word wrap", "Word wrap in the editor", iWrap,
+                        shortcut("Ctrl+W"), true)
+    self.darkAct = make("&Dark theme", "Dark theme", iDark, shortcut("Ctrl+D"), true)
+    self.exitAct = make("E&xit", "Close the preferences (Ctrl+Q)", iExit, shortcut("Ctrl+Q"))
+    self.aboutAct = make("&About", "About this demo (F1)", iAbout, shortcut("F1"))
+    self.openAct.onExecute = proc(a: Action) = self.openSettings()
+    self.saveAct.onExecute = proc(a: Action) = self.saveSettingsAs()
+    self.wrapAct.onExecute = proc(a: Action) = self.setWrap(a.checked)
+    self.darkAct.onExecute = proc(a: Action) = self.setDark(a.checked)
+    self.exitAct.onExecute = proc(a: Action) = self.close()
+    self.aboutAct.onExecute = proc(a: Action) = self.showAbout()
+    for (b, a) in [(self.openTool, self.openAct), (self.saveTool, self.saveAct),
+                   (self.wrapTool, self.wrapAct), (self.darkTool, self.darkAct)]:
+      b.action = a
+      b.showCaption = false              # icons only; the hints say the rest
+    self.wrap.action = self.wrapAct      # the Editor page's check box shares it too
+
   proc buildMenus(self: SettingsForm) =
+    self.buildActions()
     let mm = newMainMenu(self)
     self.mainMenu = mm
     let file = mm.addItem("&File")
-    file.addItem("&Open settings...", proc(s: MenuItem) = self.openSettings(), shortcut("Ctrl+O"))
-    file.addItem("Save &as...", proc(s: MenuItem) = self.saveSettingsAs(), shortcut("Ctrl+S"))
+    file.add(newMenuItem()).action = self.openAct
+    file.add(newMenuItem()).action = self.saveAct
     file.addSeparator()
-    file.addItem("E&xit", proc(s: MenuItem) = self.close(), shortcut("Ctrl+Q"))
+    file.add(newMenuItem()).action = self.exitAct
     let edit = mm.addItem("&Edit")
     proc undoRedo(redo: bool) =
       let c = self.focusActiveEditable()
@@ -482,13 +566,9 @@ form SettingsForm:
       setFocus(self.nameEdit)
     edit.addItem("&Preferences", preferences, shortcut("F2"))
     let view = mm.addItem("&View")
-    self.themeLight = view.addItem("&Light", proc(s: MenuItem) = self.setDark(false))
-    self.themeDarkItem = view.addItem("&Dark", proc(s: MenuItem) = self.setDark(true))
-    for t in [self.themeLight, self.themeDarkItem]:
-      t.radioItem = true
-      t.groupIndex = 1
-    self.themeLight.checked = true
-    view.addSeparator()
+    self.themeDarkItem = view.add(newMenuItem())
+    self.themeDarkItem.action = self.darkAct
+    view.add(newMenuItem()).action = self.wrapAct
     proc toggleToolbar(s: MenuItem) =
       self.toolbar.visible = s.checked
       self.say(if s.checked: "Toolbar shown" else: "Toolbar hidden")
@@ -496,7 +576,7 @@ form SettingsForm:
     self.toolbarItem.autoCheck = true
     self.toolbarItem.checked = true
     let help = mm.addItem("&Help")
-    help.addItem("&About", proc(s: MenuItem) = self.showAbout(), shortcut("F1"))
+    help.add(newMenuItem()).action = self.aboutAct
 
     let pm = newPopupMenu(self)
     self.catMenu = pm
@@ -553,6 +633,11 @@ form SettingsForm:
     let g = self.optionsGrid
     g.columns = @[gsPercent(50), gsPercent(50)]
     g.rows = @[gsAbsolute(32), gsAbsolute(32), gsAbsolute(32)]
+    let ig = self.identGrid
+    ig.columns = @[gsPercent(50), gsPercent(50)]
+    let ch = currentTheme().controlHeight
+    ig.rows = @[gsAbsolute(24), gsAbsolute(ch), gsAbsolute(24), gsAbsolute(ch)]
+    ig.height = 24 + ch + 24 + ch
     g.setCell(self.tabLabel, 0, 0)
     g.setCell(self.tabSize, 0, 1)
     g.setCell(self.lineNumbers, 1, 0)
@@ -596,10 +681,6 @@ form SettingsForm:
     self.wrap.onChange = proc(s: Control) =
       if not self.loading and self.sample.wordWrap != self.wrap.checked:
         self.setWrap(self.wrap.checked)
-    self.wrapTool.onClick = proc(s: Control) = self.setWrap(self.wrapTool.down)
-    self.darkTool.onClick = proc(s: Control) = self.setDark(self.darkTool.down)
-    self.openTool.onClick = proc(s: Control) = self.openSettings()
-    self.saveTool.onClick = proc(s: Control) = self.saveSettingsAs()
     self.applyBtn.onClick = proc(s: Control) = self.applyNow()
     self.okBtn.onClick = proc(s: Control) =
       self.applyNow()
@@ -653,7 +734,8 @@ proc main() =
     let size = getEnv("NIMVCL_SIZE")          # e.g. 640x480
     if size.len > 0:
       let wh = size.split('x')
-      f.setBounds(f.left, f.top, parseFloat(wh[0]).float32, parseFloat(wh[1]).float32)
+      # like a tiling window manager: the window gets its size from outside
+      f.win.setLogicalSize(parseFloat(wh[0]).float32, parseFloat(wh[1]).float32)
       f.syncMetrics()
     let page = getEnv("NIMVCL_PAGE")
     if page.len > 0: f.cats.itemIndex = parseInt(page)

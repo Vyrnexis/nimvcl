@@ -2,9 +2,10 @@
 ## plus non-pixel tests of the stacks, caches and resource lifetime.
 ## Env NIMVCL_UPDATE_GOLDEN=1 rewrites the golden BMPs.
 
-import std/[unittest, os, strutils, math]
+import std/[unittest, os, strutils, math, monotimes, times]
 import sdl3 except Color
 import nimvcl
+import nimvcl/graphics/aa
 
 const
   GoldenDir = currentSourcePath().parentDir / "golden"
@@ -397,6 +398,91 @@ suite "canvas state":
     t.ctx.close()                              # second close is a no-op
     destroyRenderer t.renderer
     destroySurface t.surf
+
+suite "round rect fast path":
+  setup:
+    doAssert initSdl(InitFlags(0)), sdlError()
+    doAssert initTtf(), sdlError()
+  teardown:
+    quitTtf()
+    quitSdl()
+
+  proc grab(t: Target): ptr Surface =
+    let raw = renderReadPixels(t.renderer, nil)
+    result = convertSurface(raw, PIXELFORMAT_RGBA32)
+    destroySurface raw
+
+  test "rect+corner path matches the single-shape geometry":
+    # Reference: the whole shape through renderGeometry (the old code path).
+    for sc in [1.0'f32, 1.5'f32, 2.0'f32]:
+      for stroke in [false, true]:
+        for alpha in [255'u8, 120'u8]:
+          for (w, h, rad, bw) in [(60'f32, 30'f32, 6'f32, 1'f32), (41'f32, 25'f32, 4'f32, 2'f32),
+                                  (30'f32, 30'f32, 15'f32, 1'f32), (50'f32, 20'f32, 8'f32, 1'f32),
+                                  (20'f32, 12'f32, 2'f32, 1'f32), (24'f32, 14'f32, 3'f32, 1'f32),
+                                  (33'f32, 17'f32, 7'f32, 1'f32), (16'f32, 16'f32, 8'f32, 1'f32), (37'f32, 19'f32, 6'f32, 1'f32), (40'f32, 24'f32, 4'f32, 1'f32), (20'f32, 12'f32, 3'f32, 1'f32),
+                                  (31'f32, 18'f32, 5'f32, 1'f32), (26'f32, 15'f32, 4'f32, 1'f32),
+                                  (44'f32, 23'f32, 9'f32, 1'f32), (28'f32, 28'f32, 12'f32, 1'f32),
+                                  (45'f32, 31'f32, 10'f32, 1'f32), (23'f32, 21'f32, 6'f32, 1'f32)]:
+            let col = rgba(40, 110, 220, int(alpha))
+            var a, b: ptr Surface
+            withTarget(t, 70, 40, sc):
+              let c = beginFrame(t.ctx)
+              c.clear rgb(250, 250, 250)
+              if stroke: c.strokeRoundRect(rectF(5, 4, w, h), rad, col, bw)
+              else: c.fillRoundRect(rectF(5, 4, w, h), rad, col)
+              c.endFrame()
+              a = grab(t)
+            withTarget(t, 70, 40, sc):
+              let c = beginFrame(t.ctx)
+              c.clear rgb(250, 250, 250)
+              var g: GeoBuf
+              let x0 = round(5 * sc)
+              let y0 = round(4 * sc)
+              let x1 = round((5 + w) * sc)
+              let y1 = round((4 + h) * sc)
+              if stroke: g.addStrokeRoundRect(x0, y0, x1 - x0, y1 - y0, rad * sc, max(bw * sc, 1), col)
+              else: g.addFillRoundRect(x0, y0, x1 - x0, y1 - y0, rad * sc, col)
+              discard renderGeometry(t.renderer, nil, g.verts, g.idx)
+              c.endFrame()
+              b = grab(t)
+            defer:
+              destroySurface a
+              destroySurface b
+            var worst = 0
+            for y in 0 ..< a.h:
+              for x in 0 ..< a.w * 4:
+                let d = abs(int(a.pixels[y * a.pitch + x]) - int(b.pixels[y * b.pitch + x]))
+                worst = max(worst, d)
+            check worst <= 2
+
+  when defined(release):
+    test "perf: fillRoundRect 1100x600":
+      withTarget(t, 1100, 600, 1.0):
+        let c = beginFrame(t.ctx)
+        let t0 = getMonoTime()
+        for i in 0 ..< 100:
+          c.fillRoundRect(rectF(0, 0, 1100, 600), 6, rgb(40, 110, 220))
+          discard flushRenderer(t.renderer)
+        let per = (getMonoTime() - t0).inNanoseconds.float / 100 / 1e6
+        var g: GeoBuf
+        let t1 = getMonoTime()
+        for i in 0 ..< 100:
+          g.clear()
+          g.addFillRoundRect(0, 0, 1100, 600, 6, rgb(40, 110, 220))
+          discard renderGeometry(t.renderer, nil, g.verts, g.idx)
+          discard flushRenderer(t.renderer)
+        let old = (getMonoTime() - t1).inNanoseconds.float / 100 / 1e6
+        let t2 = getMonoTime()
+        for i in 0 ..< 100:
+          c.fillRect(rectF(0, 0, 1100, 600), rgb(40, 110, 220))
+          discard flushRenderer(t.renderer)
+        let plain = (getMonoTime() - t2).inNanoseconds.float / 100 / 1e6
+        c.endFrame()
+        echo "plain fillRect 1100x600: ", plain.formatFloat(ffDecimal, 3), " ms/call"
+        echo "fillRoundRect 1100x600 r=6: new ", per.formatFloat(ffDecimal, 3),
+             " ms/call, single-shape geometry (old) ", old.formatFloat(ffDecimal, 3), " ms/call"
+        check per < old
 
 suite "images and platform helpers":
   setup:

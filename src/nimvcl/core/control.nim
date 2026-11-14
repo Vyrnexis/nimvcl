@@ -63,6 +63,12 @@ type
     fTabOrder: int
     fParent: Container
     fHost: RootHost
+    # Anchor design baseline (see layout.nim): the child's rect when it was
+    # last positioned explicitly, and the parent size that rect was relative
+    # to (`designBaseSet` false = the parent's `designSize`).
+    designRect*: RectF
+    designBase*: SizeF
+    designBaseSet*: bool
     # events
     onClick*, onDblClick*, onMouseEnter*, onMouseLeave*: NotifyEvent
     onEnter*, onExit*, onResize*: NotifyEvent
@@ -84,6 +90,9 @@ type
     layouting*: bool            ## true while `layout` runs (suppresses feedback)
     lastLayoutSize*: SizeF      ## container size at the previous layout
     layoutInitialized*: bool    ## false until the first layout recorded a size
+    designSize*: SizeF          ## size the anchored children were designed for
+    designSet*: bool            ## `designSize` valid (explicit size or first layout)
+    hostSized*: bool            ## host/window is resizing this root (not a design size)
     fScrollX, fScrollY: float32 ## scroll offset applied to alNone children
 
   NotifyEvent* = proc(sender: Control)
@@ -331,6 +340,7 @@ method doResize*(c: Control) {.base.} =
   if c.onResize != nil: c.onResize(c)
 method doClick*(c: Control) {.base.} =
   if c.onClick != nil: c.onClick(c)
+  if c.actionLink != nil: c.actionLink.clientClicked()   # linked Action runs
 method doDblClick*(c: Control) {.base.} =
   if c.onDblClick != nil: c.onDblClick(c)
 method doMouseDown*(c: Control, button: MouseButton, shift: ShiftState,
@@ -470,6 +480,19 @@ func sameFont(a, b: FontSpec): bool =
 func sameColor(a, b: Color): bool =
   a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a
 
+proc recordDesign(c: Control) =
+  ## An explicit (non-layout) placement: it becomes the anchor baseline. A
+  ## container's own explicit size is its design size until its first layout
+  ## (window-manager resizes go through `hostSized` and are excluded).
+  c.designRect = rectF(c.fLeft, c.fTop, c.fWidth, c.fHeight)
+  let p = c.fParent
+  if p != nil:
+    if p.layoutInitialized:
+      c.designBase = sizeF(p.fWidth, p.fHeight)
+      c.designBaseSet = true
+    else:
+      c.designBaseSet = false
+
 proc setBounds*(c: Control, l, t, w, h: float32) =
   ## Sets position and size. Width/height are clamped to >= 0 and to
   ## `constraints` (like VCL's ConstrainedResize). Fires `doResize` when the
@@ -484,6 +507,13 @@ proc setBounds*(c: Control, l, t, w, h: float32) =
   c.fWidth = nw
   c.fHeight = nh
   let quiet = c.parentLayouting   # the parent's layout repaints/relayouts once
+  if not quiet:
+    c.recordDesign()
+    if c of Container:
+      let k = Container(c)
+      if not k.layoutInitialized and not k.hostSized:
+        k.designSize = sizeF(nw, nh)
+        k.designSet = true
   if not quiet:
     c.invalidateInParent(old)
     c.invalidateInParent(c.visualRect)
@@ -675,6 +705,7 @@ proc insertControl*(c: Container, child: Control, index = -1) =
   let at = if index < 0 or index > c.fChildren.len: c.fChildren.len else: index
   c.fChildren.insert(child, at)
   child.fParent = c
+  child.recordDesign()     # added later: positions are relative to NOW
   markLayout(c)
   c.invalidate(child.visualRect)
   c.childBoundsChanged(child)

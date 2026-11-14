@@ -9,7 +9,8 @@ the last pieces. The API can still change. See [PLAN.md](PLAN.md).
 ## Features
 
 - Control tree with VCL-style properties and events: `align`, `anchors`,
-  `margins`, `padding`, `constraints`, `autoSize`, `onClick` and friends.
+  `margins`, `padding`, `constraints`, `autoSize`, `onClick` and friends. Anchors are relative to the
+  design size, so they also work when a tiling WM resizes the window first.
 - Flat light and dark themes, HiDPI and fractional scaling, one SDL3 window per
   `Form`, modal forms, multiple windows, `Timer`, `Application.queue`.
 - Host mode: embed the UI in an existing SDL3 application.
@@ -18,6 +19,9 @@ the last pieces. The API can still change. See [PLAN.md](PLAN.md).
   SpinEdit, TrackBar, ProgressBar, Splitter, StatusBar, ToolBar, PageControl and
   TabControl, FlowPanel and GridPanel, PaintBox, Image, Bevel, Frame.
 - Main menu, popup menus, hints, `&` mnemonics, shortcuts.
+- `ActionList` / `Action`: one command shared by menu items, tool buttons,
+  buttons, check boxes and shortcuts (caption, hint, icon, enabled, checked),
+  with `onUpdate` on idle; `ImageList` icons in toolbars and menus.
 - Dialogs: `showMessage`, `messageDlg`, `inputQuery`, native Open, Save and
   folder dialogs.
 - A `form` macro that declares a form with typed fields for its controls.

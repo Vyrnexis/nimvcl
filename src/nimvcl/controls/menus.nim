@@ -41,7 +41,8 @@
 import std/strutils
 import ../core/[form, popup, application, timer]
 import ../graphics/context
-import ./common
+import ./common, ./imagelist
+export imagelist
 
 type
   Shortcut* = object
@@ -53,8 +54,10 @@ type
     fShortcut: Shortcut
     fChecked, fRadio, fAutoCheck, fDisabled, fHidden: bool
     fGroup: int
+    fImageIndex: int
     fItems: seq[MenuItem]
     fParent: MenuItem
+    fImages: ImageList          ## on a menu's root item: the menu's icons
     onClick*: MenuItemEvent
 
   MenuItemEvent* = proc(sender: MenuItem)
@@ -71,6 +74,8 @@ type
     popup: PopupWindow
     entries: seq[MenuItem]
     rowY, rowH: seq[float32]
+    gutter: float32
+    images: ImageList
     hot: int
     pressed: bool
     sub: PopupWindow
@@ -85,6 +90,7 @@ type
     fDrop: PopupWindow
 
 var
+  menuOpening*: proc()   ## called just before a dropdown/popup menu is built (actions refresh here)
   submenuDelay* = 150    ## ms a hovered submenu item waits before opening it (0: at once)
 
 const
@@ -111,7 +117,7 @@ func isSet*(s: Shortcut): bool = s.key != Key(0)
 
 func `==`*(a, b: Shortcut): bool = a.key == b.key and a.shift == b.shift
 
-func normalizeKey(k: Key): Key =
+func normalizeKey*(k: Key): Key =
   let v = uint32(k)
   if v >= uint32('A') and v <= uint32('Z'): Key(v + 32) else: k
 
@@ -161,6 +167,7 @@ proc shortcut*(text: string): Shortcut = parseShortcut(text)
 
 proc initMenuItem*(m: MenuItem, owner: Component = nil) =
   m.initComponent(owner)
+  m.fImageIndex = -1
 
 proc newMenuItem*(caption = "", onClick: MenuItemEvent = nil,
                   shortcut = noShortcut, owner: Component = nil): MenuItem =
@@ -174,6 +181,16 @@ func caption*(m: MenuItem): string = m.fCaption
 proc `caption=`*(m: MenuItem, v: string) = m.fCaption = v
 func shortcut*(m: MenuItem): Shortcut = m.fShortcut
 proc `shortcut=`*(m: MenuItem, v: Shortcut) = m.fShortcut = v
+func imageIndex*(m: MenuItem): int = m.fImageIndex
+  ## Icon index into the menu's `images` (-1: none).
+proc `imageIndex=`*(m: MenuItem, v: int) = m.fImageIndex = v
+func images*(m: MenuItem): ImageList =
+  ## The icons used for this item: those of the nearest menu root up the chain.
+  var x = m
+  while x != nil:
+    if x.fImages != nil: return x.fImages
+    x = x.fParent
+proc `images=`*(m: MenuItem, v: ImageList) = m.fImages = v
 func checked*(m: MenuItem): bool = m.fChecked
 proc `checked=`*(m: MenuItem, v: bool) = m.fChecked = v
 func radioItem*(m: MenuItem): bool = m.fRadio
@@ -244,6 +261,12 @@ proc click*(m: MenuItem) =
   elif m.fAutoCheck:
     m.fChecked = not m.fChecked
   if m.onClick != nil: m.onClick(m)
+  if m.actionLink != nil: m.actionLink.clientClicked()
+
+method shortcutHandled*(l: ActionLinkBase): bool {.base.} =
+  ## True when the linked action fires its shortcut itself (so the menu must
+  ## not fire it a second time).
+  false
 
 proc findShortcut*(m: MenuItem, sc: Shortcut): MenuItem =
   ## First enabled, visible leaf item below `m` with this shortcut.
@@ -253,6 +276,7 @@ proc findShortcut*(m: MenuItem, sc: Shortcut): MenuItem =
       result = it.findShortcut(sc)
       if result != nil: return
     elif it.fShortcut.isSet and it.fShortcut == sc and not it.isSeparator:
+      if it.actionLink != nil and it.actionLink.shortcutHandled: continue
       return it
 
 # ------------------------------------------------------------ measurement
@@ -280,6 +304,7 @@ proc rowAt(p: MenuPanel, x, y: float32): int =
 
 proc newPanel(owner: Form, root: MenuItem): MenuPanel =
   ## Builds the panel and sizes it with the owner's RenderContext.
+  if menuOpening != nil: menuOpening()
   new result
   result.initContainer()
   result.ownerForm = owner
@@ -293,6 +318,13 @@ proc newPanel(owner: Form, root: MenuItem): MenuPanel =
   var y = 1 + PadV
   var maxCap, maxSc = 0'f32
   var anySub = false
+  result.images = root.images
+  result.gutter = Gutter
+  if result.images != nil:
+    for it in root:
+      if not it.fHidden and it.imageIndex >= 0:
+        result.gutter = max(Gutter, ceil(result.images.width) + 14)
+        break
   for it in root:
     if it.fHidden: continue
     result.entries.add it
@@ -304,7 +336,7 @@ proc newPanel(owner: Form, root: MenuItem): MenuPanel =
       maxCap = max(maxCap, textSize(ctx, parseMnemonic(it.caption).text, f).w)
       maxSc = max(maxSc, textSize(ctx, $it.shortcut, f).w)
       if it.hasSubmenu: anySub = true
-  let w = 2 + Gutter + maxCap + (if maxSc > 0: TextGap + maxSc else: 0'f32) +
+  let w = 2 + result.gutter + maxCap + (if maxSc > 0: TextGap + maxSc else: 0'f32) +
           (if anySub: ArrowW else: RightPad)
   result.setBounds(0, 0, ceil(max(w, MinPanelW)), ceil(y + PadV + 1))
 
@@ -419,14 +451,25 @@ method paint*(p: MenuPanel, c: Canvas) =
     if hot: c.fillRoundRect(r.inflate(-2), 3, t.menuHover)
     let col = if not on: t.textDisabled elif hot: t.menuHoverText else: t.text
     let midY = r.y + r.h / 2
-    if it.checked:
+    let g = p.gutter
+    let hasIcon = p.images != nil and p.images.image(it.imageIndex) != nil
+    if hasIcon:
+      let iw = p.images.width
+      let ih = p.images.height
+      if it.checked:           # a checked icon item gets a sunken frame
+        let fr = rectF(r.x + (g - iw) / 2 - 3, midY - ih / 2 - 3, iw + 6, ih + 6)
+        c.fillRoundRect(fr, 3, mix(t.menuBg, t.accent, 0.22))
+        c.strokeRoundRect(fr, 3, mix(t.menuBorder, t.accent, 0.6), 1)
+      p.images.draw(c, it.imageIndex, floor(r.x + (g - iw) / 2),
+                    floor(midY - ih / 2), on)
+    elif it.checked:
       if it.radioItem:
-        c.fillEllipse(rectF(r.x + Gutter / 2 - 3.5, midY - 3.5, 7, 7), col)
+        c.fillEllipse(rectF(r.x + g / 2 - 3.5, midY - 3.5, 7, 7), col)
       else:
-        let cx = r.x + Gutter / 2 - 1
+        let cx = r.x + g / 2 - 1
         c.line(cx - 4, midY, cx - 1.5, midY + 3, col, 1.6)
         c.line(cx - 1.5, midY + 3, cx + 4, midY - 3.5, col, 1.6)
-    drawMnemonic(c, it.caption, f, rectF(r.x + Gutter, r.y, r.w - Gutter, r.h), col, true)
+    drawMnemonic(c, it.caption, f, rectF(r.x + g, r.y, r.w - g, r.h), col, true)
     if it.hasSubmenu:
       let ax = w - ArrowW / 2 - 2
       c.fillPolygon([pointF(ax - 3, midY - 4), pointF(ax - 3, midY + 4),
@@ -545,6 +588,8 @@ proc newPopupMenu*(owner: Component = nil): PopupMenu =
 
 func items*(m: PopupMenu): MenuItem = m.fRoot
   ## The root item; its sub-items are the menu's entries.
+func images*(m: PopupMenu): ImageList = m.fRoot.fImages
+proc `images=`*(m: PopupMenu, v: ImageList) = m.fRoot.fImages = v
 proc add*(m: PopupMenu, item: MenuItem): MenuItem {.discardable.} = m.fRoot.add item
 proc addItem*(m: PopupMenu, caption: string, onClick: MenuItemEvent = nil,
               shortcut = noShortcut): MenuItem {.discardable.} =
@@ -637,6 +682,8 @@ proc initMainMenu*(m: MainMenu, owner: Component = nil) =
   m.align = alTop
 
 func items*(m: MainMenu): MenuItem = m.fRoot
+func images*(m: MainMenu): ImageList = m.fRoot.fImages
+proc `images=`*(m: MainMenu, v: ImageList) = m.fRoot.fImages = v
 proc add*(m: MainMenu, item: MenuItem): MenuItem {.discardable.} = m.fRoot.add item
 proc addItem*(m: MainMenu, caption: string, onClick: MenuItemEvent = nil,
               shortcut = noShortcut): MenuItem {.discardable.} =

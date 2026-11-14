@@ -142,6 +142,56 @@ proc addStrokeRoundRect*(g: var GeoBuf, x, y, w, h, r, bw: float32, c: Color) =
   if w > 0 and h > 0:
     g.strokeShape(roundRectShape(x, y, w, h, r), max(round(min(bw, min(w, h) / 2)), 1'f32), c)
 
+proc cornerCentres(x, y, w, h, r: float32): (array[4, float32], array[4, float32]) =
+  ([x + r, x + w - r, x + w - r, x + r], [y + r, y + r, y + h - r, y + h - r])
+
+proc addClippedArc(g: var GeoBuf, cx, cy, rad, a0: float32, seg: int, c: Color,
+                   alpha: float32): cint =
+  ## Quarter arc of `seg + 1` vertices from angle a0 to a0 + pi/2, clipped half
+  ## a pixel short of both axes through the corner centre (a0 + e .. a0 + pi/2 - e).
+  result = g.verts.len.cint
+  let e = arcsin(0.5 / rad.float)
+  for i in 0 .. seg:
+    # same angles as the single-shape ring except the two end vertices
+    let a = if i == 0: a0 + e
+            elif i == seg: a0 + PI / 2 - e
+            else: a0 + (PI / 2) * i.float / seg.float
+    discard g.addVert(cx + rad * cos(a).float32, cy + rad * sin(a).float32, c, alpha)
+
+proc addFillRoundCorners*(g: var GeoBuf, x, y, w, h, r: float32, c: Color) =
+  ## The anti-aliased part of a rounded rect whose opaque interior the caller
+  ## fills with plain rects: four corner wedges and the four feather strips.
+  ## Needs whole-pixel x, y, w, h, r with r <= min(w, h) / 2 and r >= 2.
+  ## Everything is cut on HALF-pixel lines (cx - 0.5, cy - 0.5 ...) so that no
+  ## pixel centre sits on a boundary between this geometry and the rects: the
+  ## software renderer's tie-breaking for those is not reliable. See
+  ## `Canvas.fillRoundRect` for the rect layout.
+  let seg = segFor(r)
+  let (cx, cy) = cornerCentres(x, y, w, h, r)
+  let a0 = [PI, 1.5 * PI, 0.0, 0.5 * PI]
+  let sx = [-1'f32, 1, 1, -1]
+  let sy = [-1'f32, -1, 1, 1]
+  for k in 0 .. 3:
+    let ctr = g.addVert(cx[k] + sx[k] * 0.5, cy[k] + sy[k] * 0.5, c, 1)
+    let inner = g.addClippedArc(cx[k], cy[k], r - 0.5, a0[k], seg, c, 1)
+    let outer = g.addClippedArc(cx[k], cy[k], r + 0.5, a0[k], seg, c, 0)
+    for i in 0 ..< seg.cint:
+      g.tri ctr, inner + i, inner + i + 1
+      g.tri inner + i, outer + i, inner + i + 1
+      g.tri inner + i + 1, outer + i, outer + i + 1
+  # feather strips along the four straight edges (half a pixel each side)
+  template strip(ax, ay, bx, by, nx, ny: float32) =
+    let i0 = g.addVert(ax - nx * 0.5, ay - ny * 0.5, c, 1)
+    let i1 = g.addVert(bx - nx * 0.5, by - ny * 0.5, c, 1)
+    let o0 = g.addVert(ax + nx * 0.5, ay + ny * 0.5, c, 0)
+    let o1 = g.addVert(bx + nx * 0.5, by + ny * 0.5, c, 0)
+    g.tri i0, o0, i1
+    g.tri i1, o0, o1
+  strip(x + r - 0.5, y, x + w - r + 0.5, y, 0, -1)
+  strip(x + r - 0.5, y + h, x + w - r + 0.5, y + h, 0, 1)
+  strip(x, y + r - 0.5, x, y + h - r + 0.5, -1, 0)
+  strip(x + w, y + r - 0.5, x + w, y + h - r + 0.5, 1, 0)
+
 proc addFillEllipse*(g: var GeoBuf, x, y, w, h: float32, c: Color) =
   if w > 0 and h > 0: g.fillShape(ellipseShape(x, y, w, h), c)
 

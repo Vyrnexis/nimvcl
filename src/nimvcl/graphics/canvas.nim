@@ -105,6 +105,14 @@ func dev(c: Canvas, v: float32): float32 {.inline.} = round(v * c.ctx.scale)
 proc setColor(c: Canvas, col: Color) =
   discard setRenderDrawColor(renderer(c.ctx), col.r, col.g, col.b, col.a)
 
+proc solidMode(c: Canvas, col: Color) {.inline.} =
+  ## Opaque fills skip blending (a plain store instead of per-pixel blending,
+  ## several times faster on the software renderer); `blendMode` restores it.
+  if col.a == 255: discard setRenderDrawBlendMode(renderer(c.ctx), BLENDMODE_NONE)
+
+proc blendMode(c: Canvas, col: Color) {.inline.} =
+  if col.a == 255: discard setRenderDrawBlendMode(renderer(c.ctx), BLENDMODE_BLEND)
+
 # Device-pixel rect with snapped edges.
 func snapRect(c: Canvas, r: RectF): FRect =
   let s = c.ctx.scale
@@ -131,7 +139,9 @@ proc fillRect*(c: Canvas, rect: RectF, color: Color) =
   let r = c.snapRect(rect)
   if r.w <= 0 or r.h <= 0 or color.a == 0: return
   c.setColor color
+  c.solidMode color
   discard renderFillRect(renderer(c.ctx), r)
+  c.blendMode color
 
 proc frameRect*(c: Canvas, rect: RectF, color: Color, width: float32 = 1) =
   ## Rectangular border of `width` logical px drawn INSIDE `rect`. The border
@@ -141,6 +151,8 @@ proc frameRect*(c: Canvas, rect: RectF, color: Color, width: float32 = 1) =
   if r.w <= 0 or r.h <= 0 or color.a == 0: return
   let bw = min(max(round(width * c.ctx.scale), 1'f32), min(r.w, r.h) / 2)
   c.setColor color
+  c.solidMode color
+  defer: c.blendMode color
   let rr = renderer(c.ctx)
   if r.h <= 2 * bw or r.w <= 2 * bw:
     discard renderFillRect(rr, r)
@@ -150,11 +162,33 @@ proc frameRect*(c: Canvas, rect: RectF, color: Color, width: float32 = 1) =
   discard renderFillRect(rr, FRect(x: r.x, y: r.y + bw, w: bw, h: r.h - 2 * bw))         # left
   discard renderFillRect(rr, FRect(x: r.x + r.w - bw, y: r.y + bw, w: bw, h: r.h - 2 * bw)) # right
 
+func wholePx(v: float32): bool {.inline.} = abs(v - round(v)) < 1e-3
+
 proc fillRoundRect*(c: Canvas, rect: RectF, radius: float32, color: Color) =
   ## Anti-aliased filled rounded rect; edges snapped to device pixels.
+  ## With a whole-pixel radius of 3 device px or more the interior is plain rects and only the four
+  ## corner discs go through the geometry renderer (much cheaper on the
+  ## software renderer); other radii use one full anti-aliased shape.
   if color.a == 0: return
   let r = c.snapRect(rect)
-  c.ctx.geo.addFillRoundRect(r.x, r.y, r.w, r.h, radius * c.ctx.scale, color)
+  if r.w <= 0 or r.h <= 0: return
+  let rad = clamp(radius * c.ctx.scale, 0'f32, min(r.w, r.h) / 2)
+  if rad >= 3 and wholePx(rad):
+    let rr = round(rad)
+    c.setColor color
+    c.solidMode color
+    # The geometry renderer samples pixel (px, py) at (px + 1, py + 1), so a
+    # single-shape fill covers cols x .. x+w-2 and rows y .. y+h-2 fully, with a
+    # half-covered feather pixel around. The corner geometry owns everything up
+    # to half a pixel short of the corner centres; the rects take the rest.
+    let rd = renderer(c.ctx)
+    discard renderFillRect(rd, FRect(x: r.x, y: r.y + rr - 1, w: r.w - 1, h: r.h - 2 * rr + 1))
+    discard renderFillRect(rd, FRect(x: r.x + rr - 1, y: r.y, w: r.w - 2 * rr + 1, h: rr - 1))
+    discard renderFillRect(rd, FRect(x: r.x + rr - 1, y: r.y + r.h - rr, w: r.w - 2 * rr + 1, h: rr - 1))
+    c.blendMode color
+    c.ctx.geo.addFillRoundCorners(r.x, r.y, r.w, r.h, rr, color)
+  else:
+    c.ctx.geo.addFillRoundRect(r.x, r.y, r.w, r.h, radius * c.ctx.scale, color)
   c.flushGeo()
 
 proc strokeRoundRect*(c: Canvas, rect: RectF, radius: float32, color: Color,

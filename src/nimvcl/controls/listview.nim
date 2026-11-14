@@ -47,6 +47,19 @@
 ## `onSelectItem(sender, item, selected)` fires per item whose selection
 ## changed (only when assigned), `onChange` once per change of the focus /
 ## selection, `onClick`, `onDblClick` are the usual mouse events.
+## `onItemDblClick(sender, index, column)` fires on a double click that hits an
+## item (not the header, not empty space); `column` is the report-view column
+## under the pointer (-1 in other views). `onDblClick` is unchanged. In any
+## mouse handler `lastMousePos` is the client position of the last mouse
+## event and `hitTestAt(lastMousePos)` tells the item and part under it.
+##
+## Setting the selection from code: `itemIndex = i` selects EXACTLY item `i`
+## (clearing any other selection, moving focus and anchor, scrolling it into
+## view); `setSelection(indices, focus)` replaces the whole selection in one
+## step (multi-select; single mode keeps the first index) and `clearSelection()`
+## empties it. Both are O(n) in the indices given, fire `onChange` ONCE, and
+## call `onSelectItem` only for items whose state changed (only when assigned).
+## Both are safe with 100,000 selected rows in virtual (`onData`) mode.
 ##
 ## Check boxes: `checkboxes = true`; click on the box or Space toggles
 ## (`onItemChecked`); `item.checked`, `itemChecked(i)`, `setChecked(i, v)`.
@@ -104,6 +117,7 @@ type
   ListItemEvent* = proc(sender: Control, item: ListItem)
   ListSelectEvent* = proc(sender: Control, item: ListItem, selected: bool)
   ListColumnEvent* = proc(sender: Control, column: ListColumn)
+  ListItemDblClickEvent* = proc(sender: Control, index, column: int)
   ListAllowEvent* = proc(sender: Control, item: ListItem, allow: var bool)
   ListEditedEvent* = proc(sender: Control, item: ListItem, text: var string)
   ListDrawItemEvent* = proc(sender: Control, canvas: Canvas, item: ListItem,
@@ -140,6 +154,7 @@ type
     onChange*: NotifyEvent
     onSelectItem*: ListSelectEvent
     onItemChecked*: ListItemEvent
+    onItemDblClick*: ListItemDblClickEvent
     onColumnClick*: ListColumnEvent
     onColumnResize*: ListColumnEvent
     onData*: ListItemEvent
@@ -417,6 +432,10 @@ proc itemAt*(lv: ListView, p: PointF): int =
     i = int(floor(cx / float64(lv.cellW))) * rpc + row
   if i < 0 or i >= lv.count: -1 else: i
 
+proc lastMousePos*(lv: ListView): PointF =
+  ## Client position of the last mouse move / press (for `onDblClick` etc.).
+  pointF(lv.fMouseX, lv.fMouseY)
+
 proc hitTestAt*(lv: ListView, p: PointF): tuple[index: int, part: ListHit] =
   ## The item and the part of it under `p` (client coordinates).
   let i = lv.itemAt(p)
@@ -596,6 +615,31 @@ proc `itemIndex=`*(lv: ListView, i: int) =
   lv.setFocusRow(n)
   lv.fAnchor = n
   lv.makeVisible(n)
+  lv.notify(v, sn)
+
+proc setSelection*(lv: ListView, indices: openArray[int], focus = -1) =
+  ## Replaces the selection with `indices` (out-of-range entries are ignored)
+  ## in one step: one `onChange`, `onSelectItem` only for items that changed.
+  ## `focus` becomes the focused item and anchor (-1: the first index given, or
+  ## none); it is scrolled into view when it is valid. Single mode keeps only
+  ## the first index. An empty list clears the selection.
+  let v = lv.fVer
+  let sn = lv.snap()
+  var s = initHashSet[int]()
+  var first = -1
+  for i in indices:
+    if i >= 0 and i < lv.count:
+      if first < 0: first = i
+      if not lv.fMulti and s.len == 1: break
+      s.incl i
+  if s != lv.fSel:
+    lv.fSel = s
+    lv.touch()
+  var f = focus
+  if f < 0 or f >= lv.count: f = first
+  lv.setFocusRow(f)
+  lv.fAnchor = f
+  if f >= 0 and focus >= 0: lv.makeVisible(f)
   lv.notify(v, sn)
 
 proc setSelected*(lv: ListView, i: int, v: bool) =
@@ -1032,6 +1076,8 @@ method doMouseDown*(lv: ListView, button: MouseButton, shift: ShiftState,
                     x, y: float32) =
   lv.cancelSlow()
   lv.fDownIdx = -1
+  lv.fMouseX = x
+  lv.fMouseY = y
   if button == mbLeft:
     let p = pointF(x, y)
     let hb = lv.columnBorderAt(p)
@@ -1111,9 +1157,22 @@ method doMouseUp*(lv: ListView, button: MouseButton, shift: ShiftState,
         lv.onColumnClick(lv, lv.fColumns[down])
   procCall doMouseUp(Control(lv), button, shift, x, y)
 
+proc reportColumnAtX(lv: ListView, px: float32): int =
+  if lv.fStyle != vsReport: return -1
+  var x = lv.viewport.x - lv.scrollPos.x
+  for k, c in lv.fColumns:
+    if px >= x and px < x + c.fWidth: return k
+    x += c.fWidth
+  -1
+
 method doDblClick*(lv: ListView) =
   lv.cancelSlow()
   procCall doDblClick(Control(lv))
+  if lv.onItemDblClick != nil:
+    let p = lv.lastMousePos
+    if not (lv.headerHeight > 0 and lv.headerRect.contains(p)):
+      let i = lv.itemAt(p)
+      if i >= 0: lv.onItemDblClick(lv, i, lv.reportColumnAtX(p.x))
 
 proc moveFocus(lv: ListView, target: int, shift: ShiftState) =
   ## Keyboard navigation to item `target` (already clamped).

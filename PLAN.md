@@ -137,7 +137,18 @@ replaceable (SDL_GPU, tests) and stops SDL types from leaking into the public AP
   Siblings are processed in VCL order: top, bottom, left, right, then client,
   each shrinking the remaining rectangle.
 - `anchors` (`{akLeft, akTop, akRight, akBottom}`) for `alNone` controls; when
-  the parent resizes, anchored edges keep their distance.
+  the parent resizes, anchored edges keep their distance. Anchors are relative
+  to the DESIGN size (VCL): a container's design size is the size it was given
+  explicitly (`setBounds`/`width=`/`height=` outside a layout) before its first
+  layout, else its size at its first layout; window-manager resizes (host
+  driven, `hostSized`) never count, so a tiling WM that resizes the window
+  before the first layout still moves/stretches anchored children. Each child
+  keeps the rect it was last placed at explicitly plus the parent size it
+  belongs to (children added after the first layout are relative to the size
+  at that moment). Positions are computed as design rect + TOTAL size change,
+  never incrementally, so repeated resizes do not drift and returning to the
+  design size restores the design positions exactly. Children with the default
+  anchors `{akLeft, akTop}` are never touched.
 - `margins` per child and `padding` on the parent. `constraints` (min and max
   width and height). `autoSize`, where the control reports `measure()`.
 - Later containers: `FlowPanel` and `GridPanel` (phase 6), `Splitter`.

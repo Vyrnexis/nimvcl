@@ -44,6 +44,24 @@ suite "listbox":
   teardown:
     for f in openForms(): f.freeWindow()
 
+  test "setSelection: one onChange, focus, single mode":
+    let f = newShown()
+    let lb = mkList(f, 30)
+    lb.multiSelect = true
+    var changes = 0
+    lb.onChange = proc(s: Control) = inc changes
+    lb.setSelection([4, 2, 2, 50, -3], focus = 4)
+    check lb.selectedIndices == @[2, 4] and lb.itemIndex == 4 and changes == 1
+    lb.setSelection([2, 4], 4)
+    check changes == 1
+    lb.setSelection([10, 11])
+    check lb.itemIndex == 10 and lb.selCount == 2 and changes == 2
+    lb.setSelection([])
+    check lb.selCount == 0 and lb.itemIndex == -1 and changes == 3
+    lb.multiSelect = false
+    lb.setSelection([6, 7])
+    check lb.selectedIndices == @[6]
+
   test "items API and index bookkeeping":
     let f = newForm(nil, 400, 300)
     f.show()

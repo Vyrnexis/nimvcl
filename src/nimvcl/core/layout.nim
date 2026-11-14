@@ -14,11 +14,22 @@
 ##    children are skipped. Several alClient children all get the same rect.
 ##    NOTE: VCL orders same-align siblings by their position (Top/Left); we use
 ##    CHILD ORDER (z-order), which is deterministic and needs no sorting.
-## 4. alNone children are only adjusted by `anchors` when the container's size
-##    changed since its previous layout (`lastLayoutSize`; the first layout just
-##    records it). dw/dh = size change. Horizontal: left+right anchored =>
-##    width += dw; right only => left += dw; neither => left += dw/2 (keeps its
-##    proportional centre); left only => unchanged. Vertical likewise.
+## 4. alNone children are positioned by `anchors` relative to the DESIGN size
+##    (VCL): every child remembers its `designRect` (its rect when it was last
+##    placed explicitly: `setBounds`/`left=`/... outside a layout, or when it was
+##    inserted) and the parent size that rect belongs to. A container's design
+##    size (`designSize`) is its own explicitly set size until its first layout
+##    (window-manager resizes, `hostSized`, do not count); a container never
+##    explicitly sized uses its size at its first layout. Children placed before
+##    the container's first layout follow `designSize`; children added/placed
+##    after it are relative to the size at that moment. At layout, with
+##    dw/dh = current size - base size, from the DESIGN rect: left+right
+##    anchored => width += dw; right only => left += dw; neither => left += dw/2
+##    (keeps its proportional centre); left only => unchanged. Vertical
+##    likewise. Positions come from baseline + TOTAL delta (never incremental),
+##    so any sequence of resizes is drift-free and returning to the design size
+##    restores the design positions exactly. Children with the default anchors
+##    {akLeft, akTop} are never touched. autoSize children keep their size.
 ## 5. alCustom children are handed to `customAlign` with the remaining rect.
 ## 6. A container whose `arrangeChildren(area)` returns true positioned its
 ##    children itself: steps 2-5 are skipped (children keep their `align`).
@@ -48,17 +59,26 @@ proc snap(v: float32): float32 {.inline.} = round(v)
 proc place(ch: Control, x, y, w, h: float32) =
   ch.setBounds(snap(x), snap(y), snap(w), snap(h))
 
-proc applyAnchors(ch: Control, dw, dh: float32) =
+proc applyAnchors(ch: Control, base: SizeF, cw, chh: float32) =
+  ## Positions `ch` from its DESIGN rect plus the total size change since
+  ## `base` (never incrementally: no rounding drift).
+  let dw = cw - base.w
+  let dh = chh - base.h
   var
-    l = ch.left
-    t = ch.top
+    l = ch.designRect.x
+    t = ch.designRect.y
+    w = ch.designRect.w
+    h = ch.designRect.h
+  let a = ch.anchors
+  if ch.autoSize:                  # the size is owned by preferredSize
     w = ch.width
     h = ch.height
-  let a = ch.anchors
-  if akLeft in a and akRight in a: w += dw
+  if akLeft in a and akRight in a:
+    if not ch.autoSize: w += dw
   elif akRight in a: l += dw
   elif akLeft notin a: l += dw / 2
-  if akTop in a and akBottom in a: h += dh
+  if akTop in a and akBottom in a:
+    if not ch.autoSize: h += dh
   elif akBottom in a: t += dh
   elif akTop notin a: t += dh / 2
   ch.place(l, t, w, h)
@@ -69,6 +89,9 @@ proc layout*(c: Container) =
   if c.layouting: return
   c.beforeLayout()
   c.layouting = true
+  if not c.designSet:            # never explicitly sized: first layout is the design
+    c.designSize = sizeF(c.width, c.height)
+    c.designSet = true
   let kids = c.children          # copy: handlers may touch the tree
   let pad = c.padding
   var r = rectF(pad.left, pad.top, max(c.width - pad.horizontal, 0),
@@ -82,7 +105,10 @@ proc layout*(c: Container) =
     if not ch.visible or not ch.autoSize: continue
     let ps = ch.preferredSize()
     case ch.align
-    of alNone, alCustom: ch.place(ch.left, ch.top, ps.w, ps.h)
+    of alNone, alCustom:
+      ch.place(ch.left, ch.top, ps.w, ps.h)
+      ch.designRect.w = ch.width
+      ch.designRect.h = ch.height
     of alTop, alBottom: ch.place(ch.left, ch.top, ch.width, ps.h)
     of alLeft, alRight: ch.place(ch.left, ch.top, ps.w, ch.height)
     of alClient: discard
@@ -127,10 +153,9 @@ proc layout*(c: Container) =
       ch.place(r.x + m.left, r.y + m.top, max(r.w - m.horizontal, 0),
                max(r.h - m.vertical, 0))
     of alNone:
-      if c.layoutInitialized:
-        let dw = c.width - c.lastLayoutSize.w
-        let dh = c.height - c.lastLayoutSize.h
-        if dw != 0 or dh != 0: ch.applyAnchors(dw, dh)
+      if ch.anchors != DefaultAnchors:   # left+top never moves
+        let base = if ch.designBaseSet: ch.designBase else: c.designSize
+        ch.applyAnchors(base, c.width, c.height)
     of alCustom:
       c.customAlign(ch, r)
     else: discard

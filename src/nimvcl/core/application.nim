@@ -50,6 +50,7 @@ type
     initialised: bool
     onIdle*: proc()                       ## after each batch of events, before blocking
     onException*: proc(e: ref Exception)  ## handler errors; default re-raises
+    idleHooks: seq[tuple[id: string, hook: proc()]]
 
   EventObserver* = proc(f: Form, pe: PlatformEvent)
     ## Sees every event after it was routed. `f` is the form it belongs to (the
@@ -235,6 +236,22 @@ proc safeDispatch(a: TApplication, pe: PlatformEvent) =
   try: a.dispatch(pe)
   except CatchableError as e: a.handleError(e)
 
+proc addIdleHook*(a: TApplication, id: string, hook: proc()) =
+  ## Registers `hook` to run, like `onIdle`, after each batch of events (once per
+  ## wake-up of the loop, never continuously). Same `id` replaces. Used by
+  ## actions (`onUpdate`).
+  for h in a.idleHooks.mitems:
+    if h.id == id:
+      h.hook = hook
+      return
+  a.idleHooks.add (id, hook)
+
+proc removeIdleHook*(a: TApplication, id: string) =
+  for i in 0 ..< a.idleHooks.len:
+    if a.idleHooks[i].id == id:
+      a.idleHooks.delete(i)
+      return
+
 proc pump(a: TApplication, timeoutMs: int) =
   ## Waits up to `timeoutMs` (-1 = forever) for one event, drains the pending
   ## ones, runs queued procs and the idle hook.
@@ -245,6 +262,9 @@ proc pump(a: TApplication, timeoutMs: int) =
   a.runQueued()
   if a.onIdle != nil:
     try: a.onIdle()
+    except CatchableError as e: a.handleError(e)
+  for h in a.idleHooks:
+    try: h.hook()
     except CatchableError as e: a.handleError(e)
 
 proc processMessages*(a: TApplication, timeoutMs = 0) =
@@ -274,6 +294,7 @@ proc run*(a: TApplication, mainForm: Form = nil) =
   if mainForm != nil:
     setMainForm(mainForm)
     mainForm.show()
+  for h in a.idleHooks: h.hook()      # initial action state before the first frame
   while not a.terminated and openForms().len > 0:
     a.paintForms()
     a.pump(-1)

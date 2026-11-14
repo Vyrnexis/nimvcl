@@ -177,7 +177,6 @@ form CustomersForm:
   var store*: CustomerStore
   var rebuilding: bool                     ## true while the list is re-filled by code
   var dataCalls*: int                      ## how often `onData` ran (tests)
-  var lastMouse: PointF
   var searchTimer*: Timer
   var mainMenu: MainMenu
   var editItem, deleteItem: MenuItem
@@ -260,25 +259,19 @@ form CustomersForm:
     ## `fallbackRow` >= 0 and nothing survived, that row is selected instead.
     self.rebuilding = true
     let l = self.list
-    l.itemIndex = -1                        # selection is by row number: reset it
+    l.clearSelection()                      # selection is by row number: reset it
     l.itemsCount = self.store.view.len
     var focusRow = -1
-    var first = -1
+    var rows: seq[int]
     if keep.len > 0 or focus != 0:
       for i, r in self.store.view:
         let id = self.store.rows[r].id
         if id == focus: focusRow = i
-        if id in keep:
-          if first < 0: first = i
-          l.setSelected(i, true)
-    if focusRow < 0: focusRow = first
+        if id in keep: rows.add i
+    if focusRow < 0 and rows.len > 0: focusRow = rows[0]
     if focusRow >= 0:
-      if first < 0: l.itemIndex = focusRow         # focus without a selection
-      else:
-        # itemIndex= selects exactly one row, so re-select the others after it
-        let others = l.selectedIndices
-        l.itemIndex = focusRow
-        for i in others: l.setSelected(i, true)
+      if rows.len == 0: rows.add focusRow          # focus without a selection
+      l.setSelection(rows, focusRow)
     elif fallbackRow >= 0 and l.count > 0:
       l.itemIndex = min(fallbackRow, l.count - 1)
     self.rebuilding = false
@@ -411,11 +404,7 @@ form CustomersForm:
     l.onColumnClick = proc(s: Control, col: ListColumn) = self.columnClicked(col.index)
     l.onChange = proc(s: Control) =
       if not self.rebuilding: self.updateStatus()
-    l.onMouseMove = proc(s: Control, sh: ShiftState, x, y: float32) =
-      self.lastMouse = pointF(x, y)
-    l.onDblClick = proc(s: Control) =
-      # a double click on the header (two sorts) must not open the editor
-      if l.hitTestAt(self.lastMouse).index >= 0: self.editCurrent()
+    l.onItemDblClick = proc(s: Control, index, column: int) = self.editCurrent()
     l.onKeyDown = proc(s: Control, k: var Key, sh: ShiftState) =
       if sh * {ssCtrl, ssAlt, ssShift} != {}: return
       if k == keyEnter:

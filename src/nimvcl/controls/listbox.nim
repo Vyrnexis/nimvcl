@@ -26,7 +26,9 @@
 ## `extendedSelect` a click or Space toggles and arrows only move the focus.
 ## `selected(i)`, `setSelected`, `selCount`, `selectedIndices`, `selectAll`,
 ## `clearSelection`. Dragging with the left button selects like arrows do.
-## Assigning `itemIndex` selects exactly that row and scrolls it into view.
+## Assigning `itemIndex` selects exactly that row (dropping any other
+## selection) and scrolls it into view. `setSelection(indices, focus = -1)`
+## replaces the whole selection in one step with one `onChange`.
 ## Deleting the focused row sets `itemIndex` to -1.
 ## `onChange` fires when `itemIndex` or the selection changes (user or code);
 ## `onClick`, `onDblClick` are the usual mouse events.
@@ -244,6 +246,29 @@ proc `itemIndex=`*(lb: ListBox, i: int) =
   lb.setFocusRow(n)
   lb.fAnchor = n
   lb.makeVisible(n)
+  lb.notify(v)
+
+proc setSelection*(lb: ListBox, indices: openArray[int], focus = -1) =
+  ## Replaces the selection with `indices` (out-of-range entries are ignored)
+  ## in one step and one `onChange`. `focus` becomes the focused item and
+  ## anchor (-1: the first index given, or none); it is scrolled into view when
+  ## given. Single mode keeps only the first index.
+  let v = lb.fVer
+  var s = initHashSet[int]()
+  var first = -1
+  for i in indices:
+    if i >= 0 and i < lb.count:
+      if first < 0: first = i
+      if not lb.fMulti and s.len == 1: break
+      s.incl i
+  if s != lb.fSel:
+    lb.fSel = s
+    lb.touch()
+  var f = focus
+  if f < 0 or f >= lb.count: f = first
+  lb.setFocusRow(f)
+  lb.fAnchor = f
+  if f >= 0 and focus >= 0: lb.makeVisible(f)
   lb.notify(v)
 
 proc setSelected*(lb: ListBox, i: int, v: bool) =

@@ -233,7 +233,7 @@ suite "settings demo":
     check f.applied == 1 and not f.visible
 
   # ------------------------------------------------------------ menus
-  test "View menu: dark theme repaints the whole UI, radio items follow":
+  test "View menu: dark theme repaints the whole UI, the check items follow":
     let f = newShown()
     let bg = currentTheme().surface
     check f.pixel(600, 520).near(bg)
@@ -242,7 +242,7 @@ suite "settings demo":
     f.clickMenuItem(f.themeDarkItem)
     check f.menu.openIndex == -1
     check Application.theme.surface != bg
-    check f.themeDarkItem.checked and not f.themeLight.checked
+    check f.themeDarkItem.checked and f.darkAct.checked
     check f.darkTool.down and f.themeCombo.itemIndex == 1
     discard f.paintIfDirty()
     let dk = currentTheme()
@@ -253,7 +253,7 @@ suite "settings demo":
       check f.pixel(int(o.x), int(o.y)).lum < 110
     # back to light through the toolbar toggle
     f.click(f.darkTool)
-    check not f.darkTool.down and f.themeLight.checked
+    check not f.darkTool.down and not f.themeDarkItem.checked and not f.darkAct.checked
     check Application.theme.surface == bg
     discard f.paintIfDirty()
     check f.pixel(600, 520).near(bg)
@@ -265,7 +265,7 @@ suite "settings demo":
     f.themeCombo.itemIndex = 1
     check f.themeDarkItem.checked and Application.theme.surface != themeLight().surface
     f.openMenu('v')
-    f.clickMenuItem(f.themeLight)
+    f.clickMenuItem(f.themeDarkItem)       # toggles dark off
     check f.themeCombo.itemIndex == 0 and not f.darkTool.down
     f.openMenu('v')
     f.clickMenuItem(f.toolbarItem)
@@ -310,6 +310,22 @@ suite "settings demo":
     check f.sample.wordWrap and f.wrapTool.down
     f.click(f.darkTool)
     check f.darkTool.down and f.themeDarkItem.checked
+    f.finish()
+
+  test "Wrap and Dark are one Action: menu item, tool button, check box and shortcut share it":
+    let f = newShown()
+    check f.wrapAct.clientCount == 3 and f.darkAct.clientCount == 2
+    f.tap('w', {ssCtrl})                  # the shortcut belongs to the action list
+    check f.sample.wordWrap and f.wrapAct.checked and f.wrapTool.down and f.wrap.checked
+    f.openMenu('v')
+    check f.menu.items[2][1].checked      # View > Word wrap
+    f.clickMenuItem(f.menu.items[2][1])
+    check not f.sample.wordWrap and not f.wrapTool.down and not f.wrap.checked
+    f.wrapAct.enabled = false             # one switch disables every client
+    check not f.wrapTool.enabled and not f.wrap.enabled
+    f.wrapAct.enabled = true
+    f.tap('d', {ssCtrl})
+    check f.darkTool.down and f.themeDarkItem.checked and f.themeCombo.itemIndex == 1
     f.finish()
 
   # ------------------------------------------------------------ splitter

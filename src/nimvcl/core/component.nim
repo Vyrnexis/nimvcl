@@ -2,11 +2,20 @@
 ## Ownership is for lookup (and later streaming) only; memory is managed by ORC.
 
 type
+  ActionLinkBase* = ref object of RootObj
+    ## Hook between a client (control or menu item) and an `Action`
+    ## (controls/actions.nim). Clients just report clicks to it.
+
   Component* = ref object of RootObj
     name*: string
     tag*: int
     owner*: Component            ## read-only by convention; use `insertComponent`
     components*: seq[Component]  ## owned components; mutate via insert/remove
+    actionLink*: ActionLinkBase  ## set by `client.action = a` (controls/actions.nim)
+
+method clientClicked*(l: ActionLinkBase) {.base.} =
+  ## The linked client was clicked (after its own state change and `onClick`).
+  discard
 
 proc removeComponent*(owner, c: Component)
 

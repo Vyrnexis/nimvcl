@@ -393,7 +393,10 @@ proc syncScale*(ui: UiRoot) =
 
 proc resize*(ui: UiRoot, w, h: float32) =
   ## Sets the root's size (logical px) and relayouts.
-  ui.root.setBounds(0, 0, w, h)
+  let r = ui.root
+  r.hostSized = true      # a window resize is not the design size
+  try: r.setBounds(0, 0, w, h)
+  finally: r.hostSized = false
   ui.dirty = true
 
 proc syncMetrics*(ui: UiRoot) =

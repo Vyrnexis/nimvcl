@@ -77,6 +77,18 @@ See the module comment of `controls/menus.nim`. `form.menu = mainMenu` (or
 gives right-click / Shift+F10 / Menu key. Radio items: `radioItem` plus
 `groupIndex` (clicking unchecks the others of the group in the same parent).
 
+## Menu icons and actions
+
+`MainMenu.images` / `PopupMenu.images` (an `ImageList`) plus `MenuItem.imageIndex`
+add an icon column to the dropdowns (disabled items are drawn faded; a checked
+item with an icon gets a sunken frame instead of a check mark). `ToolBar.images`
+with `ToolButton.imageIndex` does the same for toolbars (`glyph` and `image` keep
+working and win). `item.action = a` links a menu item to an `Action`
+(controls/actions.nim): the item mirrors its caption, shortcut, icon, enabled and
+checked state, clicking it runs the action, and the action list (not the item)
+fires the shortcut. `menus.menuOpening` is called just before a dropdown is
+built (actions refresh their `onUpdate` there).
+
 ## Hints
 
 `Application.showHint`, `Application.hintPause` (600 ms), `hintShortPause`

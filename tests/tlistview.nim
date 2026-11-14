@@ -595,6 +595,73 @@ suite "listview":
     Application.processMessages(10)
     check not lv.isEditing
 
+  test "onItemDblClick: items only (with the report column), not header or empty area":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 3)
+    var hits: seq[(int, int)]
+    var plain = 0
+    lv.onItemDblClick = proc(s: Control, index, column: int) = hits.add (index, column)
+    lv.onDblClick = proc(s: Control) = inc plain
+    let r = lv.captionRect(1)
+    let p = lv.fpos(pointF(r.x + 2, r.y + r.h / 2))
+    f.click(p.x, p.y, clicks = 2)
+    check hits == @[(1, 0)]
+    # a cell of the second column
+    let p2 = lv.fpos(pointF(lv.viewport.x + 140 + 20, r.y + r.h / 2))
+    f.click(p2.x, p2.y, clicks = 2)
+    check hits.len == 2 and hits[1] == (1, 1)
+    # header and empty space below the items
+    let ph = lv.fpos(pointF(30, 10))
+    f.click(ph.x, ph.y, clicks = 2)
+    let pe = lv.fpos(pointF(30, 150))
+    f.click(pe.x, pe.y, clicks = 2)
+    check hits.len == 2
+    check plain == 4                          # onDblClick still fires everywhere
+    check lv.lastMousePos.y > 100             # last event: the empty area
+
+  test "setSelection / clearSelection / selectedIndices: one onChange":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 50)
+    lv.multiSelect = true
+    var changes, items = 0
+    lv.onChange = proc(s: Control) = inc changes
+    lv.onSelectItem = proc(s: Control, it: ListItem, sel: bool) = inc items
+    lv.setSelection([5, 3, 9, 3, 99, -1], focus = 9)
+    check lv.selectedIndices == @[3, 5, 9]
+    check lv.itemIndex == 9 and changes == 1 and items == 3
+    lv.setSelection([3, 5, 9], 9)             # same selection: no event
+    check changes == 1
+    lv.setSelection([20, 21])                 # focus defaults to the first index
+    check lv.selectedIndices == @[20, 21] and lv.itemIndex == 20
+    check changes == 2 and items == 3 + 3 + 2
+    lv.clearSelection()
+    check lv.selCount == 0 and changes == 3
+    lv.itemIndex = 4                          # selects exactly one
+    lv.setSelection([])
+    check lv.selCount == 0 and lv.itemIndex == -1
+    lv.multiSelect = false
+    lv.setSelection([7, 8])
+    check lv.selectedIndices == @[7]
+
+  test "setSelection with 100,000 selected virtual rows is fast":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 0)
+    lv.multiSelect = true
+    lv.ownerData = true
+    lv.onData = proc(s: Control, it: ListItem) = it.caption = "r" & $it.index
+    lv.itemsCount = 100_000
+    var changes = 0
+    lv.onChange = proc(s: Control) = inc changes
+    var all = newSeq[int](100_000)
+    for i in 0 ..< all.len: all[i] = i
+    let t0 = getMonoTime()
+    lv.setSelection(all, 500)
+    lv.clearSelection()
+    let ms = (getMonoTime() - t0).inMilliseconds
+    check changes == 2
+    check lv.selCount == 0
+    check ms < 1500
+
   test "custom draw item / sub item, hot track, grid lines":
     let f = newShown()
     let lv = mkList(f, vsReport, 6)

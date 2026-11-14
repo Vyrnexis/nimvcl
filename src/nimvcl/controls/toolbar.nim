@@ -11,7 +11,9 @@
 ##   (blank gap) or `tbsDivider` (a thin vertical line).
 ## * Content: `caption` (shown unless `showCaption` is false), plus an icon
 ##   either as `glyph` (a callback that draws into a rectangle, in the given
-##   colour) or `image`.
+##   colour), an `image`, or an `imageIndex` into the bar's `images`
+##   (`ToolBar.images`, an ImageList; drawn faded when disabled). Glyph wins
+##   over image, image over imageIndex.
 ## * `groupIndex` > 0 puts check buttons into a radio group (siblings with the
 ##   same index): pressing one releases the others; `allowAllUp` lets the
 ##   pressed one be released again.
@@ -21,9 +23,9 @@
 ## `flat` (ToolBar) draws buttons without a face until hovered (default).
 
 import ../graphics/image
-import ./common
+import ./common, ./imagelist
 
-export image
+export image, imagelist
 
 type
   ToolButtonKind* = enum tbsButton, tbsCheck, tbsSeparator, tbsDivider
@@ -35,10 +37,12 @@ type
     fGroup: int
     fGlyph: GlyphProc
     fImage: Image
+    fImageIndex: int
     fHot, fPressed: bool
 
   ToolBar* = ref object of Container
     fFlat: bool
+    fImages: ImageList
 
 const
   GlyphSize = 16'f32
@@ -92,7 +96,26 @@ proc `image=`*(b: ToolButton, v: Image) =
   b.invalidate()
   b.requestLayout()
 
-func hasIcon(b: ToolButton): bool = b.fGlyph != nil or b.fImage != nil
+func imageIndex*(b: ToolButton): int = b.fImageIndex
+  ## Index into the parent ToolBar's `images` (-1: none).
+proc `imageIndex=`*(b: ToolButton, v: int) =
+  if v == b.fImageIndex: return
+  b.fImageIndex = v
+  b.invalidate()
+  b.requestLayout()
+
+func barImages(b: ToolButton): ImageList =
+  if b.parent != nil and b.parent of ToolBar: ToolBar(b.parent).fImages else: nil
+
+func listIcon(b: ToolButton): bool =
+  let il = b.barImages
+  b.fGlyph == nil and b.fImage == nil and il != nil and il.image(b.fImageIndex) != nil
+
+func hasIcon(b: ToolButton): bool = b.fGlyph != nil or b.fImage != nil or b.listIcon
+
+func iconSize(b: ToolButton): SizeF =
+  if b.listIcon: sizeF(b.barImages.width, b.barImages.height)
+  else: sizeF(GlyphSize, GlyphSize)
 
 method preferredSize*(b: ToolButton): SizeF =
   let h = currentTheme().controlHeight
@@ -101,7 +124,7 @@ method preferredSize*(b: ToolButton): SizeF =
   else:
     var w = 2 * BtnPad
     let showText = b.fShowCaption and b.caption.len > 0
-    if b.hasIcon: w += GlyphSize
+    if b.hasIcon: w += b.iconSize.w
     if showText:
       if b.hasIcon: w += 5
       w += b.textWidth(b.caption, b.font)
@@ -167,13 +190,15 @@ method paint*(b: ToolButton, c: Canvas) =
   let col = if en: t.text else: t.textDisabled
   let showText = b.fShowCaption and b.caption.len > 0
   let tw = if showText: b.textWidth(b.caption, b.font) else: 0'f32
-  let iconW = if b.hasIcon: GlyphSize else: 0'f32
+  let isz = b.iconSize
+  let iconW = if b.hasIcon: isz.w else: 0'f32
   let gap = if b.hasIcon and showText: 5'f32 else: 0'f32
   var x = floor((r.w - (iconW + gap + tw)) / 2)
   if b.hasIcon:
-    let ir = rectF(x, floor((r.h - GlyphSize) / 2), GlyphSize, GlyphSize)
+    let ir = rectF(x, floor((r.h - isz.h) / 2), isz.w, isz.h)
     if b.fGlyph != nil: b.fGlyph(c, ir, col)
     elif b.fImage != nil: c.drawImage(b.fImage, ir)
+    elif b.listIcon: b.barImages.draw(c, b.fImageIndex, ir.x, ir.y, en)
     x += iconW + gap
   if showText:
     c.textRect(b.caption, b.font, rectF(x, 0, tw + 1, r.h), col, taLeft, vaCenter)
@@ -182,6 +207,7 @@ method paint*(b: ToolButton, c: Canvas) =
 proc initToolButton*(b: ToolButton, owner: Component = nil) =
   b.initControl(owner)
   b.fShowCaption = true
+  b.fImageIndex = -1
   b.setBounds(0, 0, currentTheme().controlHeight, currentTheme().controlHeight)
   b.align = alCustom
   b.autoSize = true
@@ -197,6 +223,13 @@ proc newToolButton*(parent: Container = nil, caption = "",
   if parent != nil: parent.insertControl result
 
 # ----------------------------------------------------------------- ToolBar
+
+func images*(t: ToolBar): ImageList = t.fImages
+proc `images=`*(t: ToolBar, v: ImageList) =
+  t.fImages = v
+  t.invalidate()
+  t.requestLayout()
+  for c in t.children: c.requestLayout()
 
 func flat*(t: ToolBar): bool = t.fFlat
 proc `flat=`*(t: ToolBar, v: bool) =
