@@ -1,0 +1,80 @@
+## `ScrollBox` (VCL TScrollBox): a container that scrolls its children.
+##
+## Children with `align = alNone` (the default) live in CONTENT coordinates:
+## `left`/`top` are measured from the unscrolled content origin, and they move
+## with the scroll position and are clipped to the viewport. The content size is
+## the bounding box (right/bottom edge) of the visible alNone children, tracked
+## automatically, unless you set `contentSize` explicitly (which turns
+## `autoContentSize` off). Children with another `align` are laid out against
+## the viewport and do NOT scroll (a deviation from VCL, where aligned children
+## scroll too); they fill the visible area.
+##
+## Scrollbars (`hScrollMode` / `vScrollMode`, auto by default), wheel and
+## Shift+wheel come from `ScrollingControl` (scrolling.nim). When keyboard focus
+## moves into a descendant of an alNone child (Tab, `setFocus`; not a mouse
+## press) the box scrolls the minimum distance that reveals it.
+## The box is not focusable itself. It draws no background (set `color` via a
+## Panel parent, or use a Panel and give it scrolling children yourself).
+
+import ./common, ./scrolling
+export scrolling
+
+type
+  ScrollBox* = ref object of ScrollingControl
+    fAutoContent: bool
+    fDirty: bool
+
+func autoContentSize*(b: ScrollBox): bool = b.fAutoContent
+proc `autoContentSize=`*(b: ScrollBox, v: bool) =
+  if v == b.fAutoContent: return
+  b.fAutoContent = v
+  b.fDirty = v
+  if v: b.relayout()
+
+proc `contentSize=`*(b: ScrollBox, s: SizeF) =
+  ## Explicit content size; turns `autoContentSize` off.
+  b.fAutoContent = false
+  b.setContentSize(s.w, s.h)
+
+proc measureContent(b: ScrollBox) =
+  var w, h = 0'f32
+  for ch in b.children:
+    if ch.align != alNone or not ch.visible: continue
+    w = max(w, ch.left + ch.width)
+    h = max(h, ch.top + ch.height)
+  b.fDirty = false
+  b.setContentSize(w, h)
+
+method childBoundsChanged*(b: ScrollBox, ch: Control) =
+  if b.fAutoContent and (ch.align == alNone):
+    b.fDirty = true
+    if not b.layouting: b.relayout()
+
+method beforeLayout*(b: ScrollBox) =
+  if b.fAutoContent and b.fDirty: b.measureContent()
+  procCall beforeLayout(ScrollingControl(b))
+
+method afterLayout*(b: ScrollBox) =
+  # anchors may have moved children during this layout
+  if b.fAutoContent and b.fDirty: b.relayout()
+
+method revealControl*(b: ScrollBox, d: Control) =
+  # the direct child of `b` on the path to `d`
+  var top = d
+  while top != nil and Control(top.parent) != Control(b): top = Control(top.parent)
+  if top == nil or top.align != alNone or not d.isVisible: return
+  let r = b.rectInAncestor(d)
+  let o = b.scrollPos
+  b.scrollIntoView(r.offset(o.x, o.y))
+
+proc initScrollBox*(b: ScrollBox, owner: Component = nil) =
+  b.initScrollingControl(owner, scrollsChildren = true)
+  b.setBounds(0, 0, 200, 150)
+  b.fAutoContent = true
+  b.fDirty = true
+
+proc newScrollBox*(parent: Container = nil, left = 0'f32, top = 0'f32,
+                   width = -1'f32, height = -1'f32): ScrollBox =
+  new result
+  result.initScrollBox(parent)
+  result.placeControl(parent, left, top, width, height)

@@ -13,6 +13,11 @@ type
     border*, borderStrong*, focusRing*: Color
     selection*, selectionText*: Color
     hover*, pressed*, danger*: Color
+    selectionInactive*: Color    ## selection of an unfocused list
+    scrollTrack*, scrollThumb*, scrollThumbHover*: Color
+    # menus and tooltips
+    menuBg*, menuHover*, menuHoverText*, menuSeparator*, menuBorder*: Color
+    tooltipBg*, tooltipText*, tooltipBorder*, shadow*: Color
     # metrics (logical px)
     radius*, borderWidth*, controlHeight*, spacing*, focusRingWidth*: float32
     # fonts
@@ -43,6 +48,19 @@ proc themeLight*(): Theme =
   result.hover = hex"#e8ebf0"
   result.pressed = hex"#d9dde4"
   result.danger = hex"#dc2626"
+  result.menuBg = hex"#ffffff"
+  result.menuHover = hex"#e3ebfa"
+  result.menuHoverText = hex"#1f2328"
+  result.menuSeparator = hex"#e1e4ea"
+  result.menuBorder = hex"#c3c9d3"
+  result.tooltipBg = hex"#2b2f36"
+  result.tooltipText = hex"#f3f4f6"
+  result.tooltipBorder = hex"#2b2f36"
+  result.shadow = rgba(0, 0, 0, 38)
+  result.selectionInactive = hex"#dde1e8"
+  result.scrollTrack = hex"#e6e9ee"
+  result.scrollThumb = hex"#b4bbc6"
+  result.scrollThumbHover = hex"#8b94a1"
 
 proc themeDark*(): Theme =
   result = baseTheme()
@@ -63,6 +81,19 @@ proc themeDark*(): Theme =
   result.hover = hex"#2a2f39"
   result.pressed = hex"#343a46"
   result.danger = hex"#f0605d"
+  result.menuBg = hex"#23272f"
+  result.menuHover = hex"#33405c"
+  result.menuHoverText = hex"#ffffff"
+  result.menuSeparator = hex"#3a404c"
+  result.menuBorder = hex"#4a5262"
+  result.tooltipBg = hex"#e6e8ec"
+  result.tooltipText = hex"#1f2328"
+  result.tooltipBorder = hex"#e6e8ec"
+  result.shadow = rgba(0, 0, 0, 90)
+  result.selectionInactive = hex"#323846"
+  result.scrollTrack = hex"#262a33"
+  result.scrollThumb = hex"#4f586a"
+  result.scrollThumbHover = hex"#7a8499"
 
 var gTheme: Theme
 

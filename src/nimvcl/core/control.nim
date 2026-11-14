@@ -29,6 +29,13 @@
 ##   The tree is `Container.children`; z-order = child index, last on top.
 ##   Layout order of same-`align` siblings is ALSO the child index (see
 ##   layout.nim), so `bringToFront` reorders stacking too.
+## * Scrolling: a Container has a scroll offset (`scrollOffset`). Children with
+##   `align == alNone` live in CONTENT coordinates: they are drawn and hit-tested
+##   shifted by `-scrollOffset` and clipped to `viewportRect` (default: the whole
+##   client rect). Aligned children (`align != alNone`) are laid out against the
+##   viewport and are NOT scrolled (they stay put like a ScrollBox's scrollbars).
+##   `left`/`top` of a child are always in content coordinates; use
+##   `visualRect` for where it currently appears in the parent's client area.
 ## * `core` imports no SDL; it uses `graphics` (Canvas etc.) only.
 
 import ../graphics/[geometry, color, font, canvas]
@@ -77,6 +84,7 @@ type
     layouting*: bool            ## true while `layout` runs (suppresses feedback)
     lastLayoutSize*: SizeF      ## container size at the previous layout
     layoutInitialized*: bool    ## false until the first layout recorded a size
+    fScrollX, fScrollY: float32 ## scroll offset applied to alNone children
 
   NotifyEvent* = proc(sender: Control)
   MouseEvent* = proc(sender: Control, button: MouseButton, shift: ShiftState,
@@ -109,6 +117,10 @@ method controlLost*(h: RootHost, c: Control) {.base.} =
   discard
 method cursorChanged*(h: RootHost, c: Control) {.base.} =
   ## `c.cursor` changed; the host re-evaluates the cursor under the mouse.
+  discard
+method scrollChanged*(h: RootHost, c: Container) {.base.} =
+  ## The scroll offset of `c` changed: what is under the mouse may differ, so
+  ## the host re-evaluates hover.
   discard
 
 # ------------------------------------------------------------ construction
@@ -203,19 +215,52 @@ method padding*(c: Container): Spacing {.base.} =
   ## a computed value (GroupBox: below the caption) override it.
   c.fPadding
 
+func scrollOffset*(c: Container): PointF = pointF(c.fScrollX, c.fScrollY)
+
+func originInParent(c: Control): PointF =
+  ## Where `c`'s client origin is in its parent's client (viewport) coordinates:
+  ## `left`/`top`, minus the parent's scroll offset for alNone children.
+  if c.fParent != nil and c.fAlign == alNone:
+    pointF(c.fLeft - c.fParent.fScrollX, c.fTop - c.fParent.fScrollY)
+  else:
+    pointF(c.fLeft, c.fTop)
+
+func visualRect*(c: Control): RectF =
+  ## Bounds of `c` in the parent's client coordinates as currently shown
+  ## (`boundsRect` shifted by the parent's scroll offset for alNone children).
+  let o = originInParent(c)
+  rectF(o.x, o.y, c.fWidth, c.fHeight)
+
 func clientToParent*(c: Control, p: PointF): PointF =
-  pointF(p.x + c.fLeft, p.y + c.fTop)
-func clientToParent*(c: Control, r: RectF): RectF = r.offset(c.fLeft, c.fTop)
+  let o = originInParent(c)
+  pointF(p.x + o.x, p.y + o.y)
+func clientToParent*(c: Control, r: RectF): RectF =
+  let o = originInParent(c)
+  r.offset(o.x, o.y)
 func parentToClient*(c: Control, p: PointF): PointF =
-  pointF(p.x - c.fLeft, p.y - c.fTop)
+  let o = originInParent(c)
+  pointF(p.x - o.x, p.y - o.y)
 
 func formOrigin*(c: Control): PointF =
-  ## Origin of `c`'s client area in form (root client) coordinates.
+  ## Origin of `c`'s client area in form (root client) coordinates (scroll
+  ## offsets of the ancestors included).
   var x = c
   while x.fParent != nil:
-    result.x += x.fLeft
-    result.y += x.fTop
+    let o = originInParent(x)
+    result.x += o.x
+    result.y += o.y
     x = x.fParent
+
+func rectInAncestor*(a: Container, c: Control): RectF =
+  ## Bounds of the descendant `c` in `a`'s client coordinates as currently
+  ## shown (scroll offsets of `a` and of the controls between included).
+  ## `c` must be a descendant of `a`.
+  var r = rectF(0, 0, c.fWidth, c.fHeight)
+  var x = c
+  while x != nil and x != Control(a):
+    r = r.offset(originInParent(x).x, originInParent(x).y)
+    x = x.fParent
+  r
 
 func clientToForm*(c: Control, p: PointF): PointF =
   let o = formOrigin(c)
@@ -244,7 +289,7 @@ proc invalidate*(c: Control) =
   c.invalidate(c.clientRect)
 
 proc invalidateInParent(c: Control, r: RectF) =
-  ## `r` is in the parent's client coordinates.
+  ## `r` is in the parent's client coordinates (as shown).
   if c.fParent != nil: c.fParent.invalidate(r)
   else: c.invalidate()
 
@@ -356,6 +401,30 @@ method customAlign*(c: Container, child: Control, available: RectF) {.base.} =
   ## space taken by aligned siblings). Base: leaves the child as is.
   discard
 
+method viewportRect*(c: Container): RectF {.base.} =
+  ## The part of the client area in which scrolling (alNone) children are shown
+  ## and hit; they are clipped to it. Base: the whole client rect.
+  c.clientRect
+
+method beforeLayout*(c: Container) {.base.} =
+  ## Called by `layout` before it positions the children (content size /
+  ## scrollbar bookkeeping). Marking layout from here is harmless.
+  discard
+
+method afterLayout*(c: Container) {.base.} =
+  ## Called by `layout` after the children were positioned.
+  discard
+
+method childBoundsChanged*(c: Container, child: Control) {.base.} =
+  ## `child` was added, removed, shown/hidden, resized, moved or re-aligned.
+  ## Called even while `c` lays out. ScrollBox uses it to track its content.
+  discard
+
+method revealControl*(c: Container, descendant: Control) {.base.} =
+  ## `descendant` (somewhere below `c`) took keyboard focus; scrolling
+  ## containers bring it into view. Called for every ancestor, innermost first.
+  discard
+
 # ----------------------------------------------------------------- setters
 
 func sameFont(a, b: FontSpec): bool =
@@ -370,7 +439,7 @@ proc setBounds*(c: Control, l, t, w, h: float32) =
   let nw = c.fConstraints.clampWidth(max(w, 0))
   let nh = c.fConstraints.clampHeight(max(h, 0))
   if l == c.fLeft and t == c.fTop and nw == c.fWidth and nh == c.fHeight: return
-  let old = c.boundsRect
+  let old = c.visualRect
   let sizeChanged = nw != c.fWidth or nh != c.fHeight
   c.fLeft = l
   c.fTop = t
@@ -379,12 +448,13 @@ proc setBounds*(c: Control, l, t, w, h: float32) =
   let quiet = c.parentLayouting   # the parent's layout repaints/relayouts once
   if not quiet:
     c.invalidateInParent(old)
-    c.invalidateInParent(c.boundsRect)
+    c.invalidateInParent(c.visualRect)
   if sizeChanged and c of Container:
     if quiet: Container(c).needsLayout = true
     else: markLayout(Container(c))
   if not quiet and c.fAlign != alNone and c.fParent != nil:
     markLayout(c.fParent)
+  if c.fParent != nil: c.fParent.childBoundsChanged(c)
   if sizeChanged: c.doResize()
 
 proc `left=`*(c: Control, v: float32) = c.setBounds(v, c.fTop, c.fWidth, c.fHeight)
@@ -396,6 +466,7 @@ proc `align=`*(c: Control, v: Align) =
   if v == c.fAlign: return
   c.fAlign = v
   c.requestLayout()
+  if c.fParent != nil: c.fParent.childBoundsChanged(c)
 
 proc `anchors=`*(c: Control, v: Anchors) =
   if v == c.fAnchors: return
@@ -431,8 +502,10 @@ proc `visible=`*(c: Control, v: bool) =
   c.fVisible = v
   if not v and h != nil: h.controlLost(c)
   # repaint the area it occupied/occupies in the parent
-  if c.fParent != nil: c.fParent.invalidate(c.boundsRect) else: c.invalidate()
-  if c.fParent != nil: markLayout(c.fParent)
+  if c.fParent != nil: c.fParent.invalidate(c.visualRect) else: c.invalidate()
+  if c.fParent != nil:
+    markLayout(c.fParent)
+    c.fParent.childBoundsChanged(c)
 
 func enabled*(c: Control): bool = c.fEnabled
 proc `enabled=`*(c: Control, v: bool) =
@@ -537,10 +610,11 @@ proc removeControl*(c: Container, child: Control) =
   if i < 0: return
   let h = c.host
   if h != nil: h.controlLost(child)      # still attached here
-  c.invalidate(child.boundsRect)
+  c.invalidate(child.visualRect)
   c.fChildren.delete(i)
   child.fParent = nil
   markLayout(c)
+  c.childBoundsChanged(child)
 
 proc insertControl*(c: Container, child: Control, index = -1) =
   ## Adds `child` at `index` (default: append = topmost), re-parenting it from
@@ -553,7 +627,8 @@ proc insertControl*(c: Container, child: Control, index = -1) =
   c.fChildren.insert(child, at)
   child.fParent = c
   markLayout(c)
-  c.invalidate(child.boundsRect)
+  c.invalidate(child.visualRect)
+  c.childBoundsChanged(child)
 
 proc `parent=`*(c: Control, p: Container) =
   ## Re-parents: removes from the old parent, appends to the new one (nil just
@@ -570,7 +645,7 @@ proc bringToFront*(c: Control) =
   p.fChildren.delete(p.fChildren.find(c))
   p.fChildren.add c
   markLayout(p)
-  c.invalidateInParent(c.boundsRect)
+  c.invalidateInParent(c.visualRect)
 
 proc sendToBack*(c: Control) =
   let p = c.fParent
@@ -578,7 +653,22 @@ proc sendToBack*(c: Control) =
   p.fChildren.delete(p.fChildren.find(c))
   p.fChildren.insert(c, 0)
   markLayout(p)
-  c.invalidateInParent(c.boundsRect)
+  c.invalidateInParent(c.visualRect)
+
+# ------------------------------------------------------------------ scrolling
+
+proc setScrollOffset*(c: Container, x, y: float32) =
+  ## Sets the raw scroll offset (no clamping: scrolling controls clamp). The
+  ## alNone children move by `-offset`; repaints and tells the host so hover is
+  ## re-evaluated.
+  if x == c.fScrollX and y == c.fScrollY: return
+  c.fScrollX = x
+  c.fScrollY = y
+  c.invalidate()
+  let h = c.host
+  if h != nil: h.scrollChanged(c)
+
+proc `scrollOffset=`*(c: Container, p: PointF) = c.setScrollOffset(p.x, p.y)
 
 # ------------------------------------------------------------------ hit test
 
@@ -589,10 +679,13 @@ proc controlAtPoint*(c: Container, p: PointF, includeDisabled = false): Control 
   ## ones (with their subtree) too unless `includeDisabled`; a skipped control
   ## lets the hit fall through to whatever is below it.
   if not c.clientRect.contains(p): return nil
+  let vp = c.viewportRect()
+  let inView = vp.contains(p)
   for i in countdown(c.fChildren.high, 0):
     let ch = c.fChildren[i]
     if not ch.fVisible: continue
     if not includeDisabled and not ch.fEnabled: continue
+    if ch.fAlign == alNone and not inView: continue   # clipped to the viewport
     let lp = ch.parentToClient(p)
     if not ch.clientRect.contains(lp) or not ch.hitTest(lp): continue
     if ch of Container:
@@ -608,10 +701,17 @@ proc paintTree*(c: Control, canvas: Canvas) =
   ## translate to its origin, clip to its client rect, `paint`, then children
   ## in z-order. Controls whose rect is fully clipped out are skipped.
   if not c.fVisible: return
-  let ox = if c.fParent == nil: 0'f32 else: c.fLeft
-  let oy = if c.fParent == nil: 0'f32 else: c.fTop
-  if canvas.isClippedOut(rectF(ox, oy, c.fWidth, c.fHeight)): return
-  canvas.pushTranslate(ox, oy)
+  let o = if c.fParent == nil: pointF(0, 0) else: originInParent(c)
+  if canvas.isClippedOut(rectF(o.x, o.y, c.fWidth, c.fHeight)): return
+  # scrolling (alNone) children are clipped to the parent's viewport
+  var clipVp = false
+  if c.fParent != nil and c.fAlign == alNone:
+    let vp = c.fParent.viewportRect()
+    let pr = c.fParent.clientRect
+    if vp.x != pr.x or vp.y != pr.y or vp.w != pr.w or vp.h != pr.h:
+      clipVp = true
+      canvas.pushClip(vp)
+  canvas.pushTranslate(o.x, o.y)
   canvas.pushClip(c.clientRect)
   c.paint(canvas)
   if c of Container:
@@ -619,6 +719,7 @@ proc paintTree*(c: Control, canvas: Canvas) =
       ch.paintTree(canvas)
   canvas.popClip()
   canvas.popTranslate()
+  if clipVp: canvas.popClip()
 
 proc relayoutAll*(c: Control) =
   ## Marks `c` and every container below it for relayout (theme metric change).

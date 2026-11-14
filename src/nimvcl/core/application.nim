@@ -41,7 +41,8 @@
 
 import std/[locks, isolation]
 import ../platform/[events, cursors, sdlutil]
-import ./theme, ./control, ./form, ./timer, ./input
+import ./theme, ./control, ./form, ./timer, ./input, ./popup
+export popup
 
 type
   TApplication* = ref object
@@ -49,6 +50,11 @@ type
     initialised: bool
     onIdle*: proc()                       ## after each batch of events, before blocking
     onException*: proc(e: ref Exception)  ## handler errors; default re-raises
+
+  EventObserver* = proc(f: Form, pe: PlatformEvent)
+    ## Sees every event after it was routed. `f` is the form it belongs to (the
+    ## owner for popup windows), nil for events of no form. Used by hints and
+    ## menus; must not raise.
 
   QueuedProc* = proc() {.closure, gcsafe.}
 
@@ -64,6 +70,7 @@ var
   Application* = TApplication()           ## the singleton
   queueLock: Lock
   queued: seq[Job]
+  observers: seq[EventObserver]
 
 initLock(queueLock)
 
@@ -173,6 +180,13 @@ proc runQueued(a: TApplication) =
 
 # ---------------------------------------------------------------- dispatch
 
+proc addEventObserver*(a: TApplication, o: EventObserver) =
+  ## Registers a function that is called after each dispatched window event.
+  observers.add o
+
+proc notify(f: Form, pe: PlatformEvent) =
+  for o in observers: o(f, pe)
+
 proc dispatch*(a: TApplication, pe: PlatformEvent) =
   ## Routes one translated event to its form (the loop's single entry point).
   case pe.kind
@@ -180,8 +194,13 @@ proc dispatch*(a: TApplication, pe: PlatformEvent) =
   of ekQuit: a.terminate()
   of ekTimer: discard dispatchTimer(pe.timerId)
   else:
+    let po = popupOwnerOf(pe.windowId)
+    if handlePopupEvent(pe):
+      notify(if po != nil: po else: findForm(pe.windowId), pe)
+      return
     let f = findForm(pe.windowId)
     if f == nil: return
+    defer: notify(f, pe)
     case pe.kind
     of ekWindowClose:
       if f.acceptsInput: f.close()
@@ -202,6 +221,7 @@ proc dispatchEvent*(a: TApplication, ev: var Event) =
 
 proc paintForms*(a: TApplication) =
   for f in openForms(): discard f.paintIfDirty()
+  paintPopups()
 
 proc safeDispatch(a: TApplication, pe: PlatformEvent) =
   try: a.dispatch(pe)
@@ -231,6 +251,7 @@ proc shutdown*(a: TApplication) =
   ## Frees every form (renderer-bound resources first), stops timers, quits
   ## SDL_ttf and SDL. A later `init` starts them again.
   stopAllTimers()
+  closeAllPopups(nil)
   for f in openForms(): f.freeWindow()
   freeCursors()
   setMainForm(nil)

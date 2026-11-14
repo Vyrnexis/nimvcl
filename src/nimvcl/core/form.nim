@@ -31,6 +31,9 @@ type
   BorderStyle* = enum bsSizeable, bsSingle, bsNone
   FormStyle* = enum fsNormal, fsStayOnTop
 
+  KeyHook* = proc(key: var Key, shift: ShiftState)
+    ## A handler for keys no control used. Sets `key` to `Key(0)` to consume it.
+
   FormCloseEvent* = proc(sender: Form, action: var CloseAction)
   FormCloseQueryEvent* = proc(sender: Form, canClose: var bool)
 
@@ -38,6 +41,11 @@ type
     fUi: UiRoot
     fShown, fModal, fClosing, fSyncing: bool
     fModalResult: ModalResult
+    fKeyHandlers: seq[tuple[id: string, hook: KeyHook]]
+    fUserKeyHook: KeyHook
+    fKeyChain: bool
+    menuBar*: Control            ## the form's `MainMenu` (set by controls/menus.nim)
+    popupMenus*: seq[RootRef]    ## `PopupMenu`s attached to controls of this form (menus.nim)
     fPosition: FormPosition
     fBorderStyle: BorderStyle
     fFormStyle: FormStyle
@@ -53,6 +61,7 @@ var
   gForcedScale: float32
   modalLoopProc*: proc(f: Form)   ## installed by application.nim
   terminateProc*: proc()          ## installed by application.nim
+  closePopupsProc*: proc(f: Form) ## installed by popup.nim; closes `f`'s popups (nil: all)
 
 # --------------------------------------------------------------- registry
 
@@ -141,6 +150,44 @@ proc `theme=`*(f: Form, t: Theme) =
   f.relayoutAll()
   f.invalidate()
 
+# ------------------------------------------------------------- key handlers
+
+proc installKeyChain(f: Form) =
+  if f.fKeyChain: return
+  f.fKeyChain = true
+  f.fUserKeyHook = f.fUi.onUnhandledKey      # a hook set before is kept, called first
+  f.fUi.onUnhandledKey = proc(key: var Key, shift: ShiftState) =
+    if f.fUserKeyHook != nil:
+      f.fUserKeyHook(key, shift)
+      if key == Key(0): return
+    var i = 0
+    while i < f.fKeyHandlers.len:            # a handler may add handlers
+      f.fKeyHandlers[i].hook(key, shift)
+      if key == Key(0): return
+      inc i
+
+func keyChainActive*(f: Form): bool = f.fKeyChain
+  ## True once `addKeyHandler` has installed the form's `onUnhandledKey` chain.
+
+proc addKeyHandler*(f: Form, id: string, hook: KeyHook) =
+  ## Registers a handler for keys that neither the focused control nor the
+  ## form handled, in registration order. Several features (default/cancel
+  ## buttons, menu shortcuts) share the form's single `ui.onUnhandledKey` hook
+  ## this way. The same `id` replaces the earlier handler. A hook that was
+  ## already set on `ui.onUnhandledKey` is kept and runs first.
+  f.installKeyChain()
+  for e in f.fKeyHandlers.mitems:
+    if e.id == id:
+      e.hook = hook
+      return
+  f.fKeyHandlers.add (id, hook)
+
+proc removeKeyHandler*(f: Form, id: string) =
+  for i in 0 ..< f.fKeyHandlers.len:
+    if f.fKeyHandlers[i].id == id:
+      f.fKeyHandlers.delete(i)
+      return
+
 # ----------------------------------------------------------------- window
 
 proc applyPosition(f: Form) =
@@ -174,6 +221,7 @@ proc releaseWindow(f: Form) =
   ## Frees renderer-bound resources, then the renderer and window.
   let ui = f.fUi
   if ui.win == nil: return
+  if closePopupsProc != nil: closePopupsProc(f)
   ui.cancelInteraction()
   ui.focusControl(nil)
   ui.closeContext()
@@ -226,6 +274,7 @@ proc show*(f: Form) =
 proc hide*(f: Form) =
   if not f.fShown: return
   f.fShown = false
+  if closePopupsProc != nil: closePopupsProc(f)
   f.fUi.cancelInteraction()
   if f.fUi.win != nil: f.fUi.win.hide()
   if gActive == f: gActive = nil
@@ -270,6 +319,7 @@ proc showModal*(f: Form): ModalResult =
     if gModals.len > 0: gModals[^1]
     elif gMainForm != nil and gMainForm != f: gMainForm
     else: nil
+  if closePopupsProc != nil: closePopupsProc(nil)   # menus of the form below
   f.fModal = true
   gModals.add f
   if parent != nil and parent.fUi.win != nil: f.fUi.win.setModalFor(parent.fUi.win)

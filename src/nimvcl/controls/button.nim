@@ -56,7 +56,15 @@ proc handleDialogKey*(root: Control, key: var Key, shift: ShiftState) =
 
 proc installDialogKeys*(ui: UiRoot) =
   ## Routes unhandled Enter/Esc of `ui`'s form to its default/cancel buttons.
-  ## Does nothing when the form already has an `onUnhandledKey` hook.
+  ## For a `Form` it joins the form's key-handler chain (`addKeyHandler`), so
+  ## it coexists with menu shortcuts. Does nothing when the form (or a host)
+  ## already has its own `onUnhandledKey` hook.
+  if ui.root of Form:
+    let f = Form(ui.root)
+    if ui.onUnhandledKey != nil and not f.keyChainActive: return
+    f.addKeyHandler("dialog", proc(key: var Key, shift: ShiftState) =
+      handleDialogKey(ui.root, key, shift))
+    return
   if ui.onUnhandledKey != nil: return
   ui.onUnhandledKey = proc(key: var Key, shift: ShiftState) =
     handleDialogKey(ui.root, key, shift)

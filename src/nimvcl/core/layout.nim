@@ -23,6 +23,14 @@
 ## 6. Child containers whose size changed (or that are flagged) are laid out
 ##    recursively.
 ##
+## Scrolling: aligned children (anything but alNone) are laid out against the
+## container's own client area (padding deflated) and are NOT scrolled, so a
+## scrolling container's scrollbars (alRight/alBottom) and alClient content stay
+## on screen while alNone children, which live in content coordinates, move
+## with `Container.scrollOffset`. Layout itself never reads the scroll offset
+## (scrolling needs no relayout). `beforeLayout` / `afterLayout` are hooks for
+## containers that track a content size (ScrollingControl).
+##
 ## Rounding policy: values stay float32, but every position and size that
 ## layout computes is snapped to a WHOLE logical pixel (`round`, half away from
 ## zero) before it is stored, and following siblings stack from the snapped
@@ -57,6 +65,7 @@ proc layout*(c: Container) =
   ## Aligns the children of `c` (see the module docs), then recurses into child
   ## containers that need it. Clears `needsLayout`/`childNeedsLayout`.
   if c.layouting: return
+  c.beforeLayout()
   c.layouting = true
   let kids = c.children          # copy: handlers may touch the tree
   let pad = c.padding
@@ -133,6 +142,7 @@ proc layout*(c: Container) =
   c.childNeedsLayout = false
   c.layouting = false
   c.invalidate()
+  c.afterLayout()
 
 proc layoutIfNeeded*(c: Container) =
   ## `layout(c)` only when `c` or a descendant is flagged. The form calls this

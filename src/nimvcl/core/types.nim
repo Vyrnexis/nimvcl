@@ -101,6 +101,13 @@ const
   keyLeft*      = Key(0x40000050)
   keyDown*      = Key(0x40000051)
   keyUp*        = Key(0x40000052)
+  keyApplication* = Key(0x40000065)   ## the menu / context-menu key
+  keyLCtrl*     = Key(0x400000e0)
+  keyLShift*    = Key(0x400000e1)
+  keyLAlt*      = Key(0x400000e2)
+  keyRCtrl*     = Key(0x400000e4)
+  keyRShift*    = Key(0x400000e5)
+  keyRAlt*      = Key(0x400000e6)
 
 func key*(c: char): Key =
   ## Key for a printable character; letters map to their lowercase keycode.

@@ -11,7 +11,15 @@
 ## (coordinates in its client space). `doClick` fires when the left button is
 ## released over the control it went down on. A double click (SDL clicks == 2)
 ## calls `doDblClick` after `doMouseDown` (`ssDouble` set). Wheel goes to the
-## target and bubbles up the parents until `handled`.
+## target and bubbles up the parents until `handled`. `dx`/`dy` are in wheel
+## notches (SDL precise values, fractional on touchpads; dy > 0 = away from the
+## user = scroll up). A scroller sets `handled` only when it actually moved, so
+## a wheel over a list that is already at its limit keeps bubbling to the
+## enclosing ScrollBox.
+##
+## Focus: when focus moves to a control (keyboard, `setFocus`; not a mouse
+## press) every ancestor gets `revealControl` so scrolling containers can bring
+## it into view.
 ##
 ## Keyboard: key events go to the focused control (or the root when none);
 ## they do not bubble. With `keyPreview` the root sees them first. Unhandled
@@ -34,6 +42,8 @@ type
     autoSizeRoot*: bool          ## window size changes resize the root
     onUnhandledKey*: proc(key: var Key, shift: ShiftState)
     windowInactive*: bool        ## the window lost focus (set by the Form)
+    revealOnFocus*: bool         ## focus changes scroll the control into view
+                                 ## (default true; off while a mouse press focuses)
     fHovered, fCaptured, fFocused, fPressed: Control
     buttons: set[MouseButton]
     lastPos: PointF
@@ -42,7 +52,7 @@ type
     cursorApplied: bool
 
 proc newUiRoot*(root: Container): UiRoot =
-  result = UiRoot(root: root, dirty: true)
+  result = UiRoot(root: root, dirty: true, revealOnFocus: true)
   root.host = result
 
 func hovered*(ui: UiRoot): Control = ui.fHovered
@@ -73,6 +83,10 @@ proc updateCursor(ui: UiRoot) =
   elif ui.cursorApplied:
     setCursorShape(crArrow)
     ui.cursorApplied = false
+
+method scrollChanged*(ui: UiRoot, c: Container) =
+  ui.hoverStale = true
+  ui.dirty = true
 
 method cursorChanged*(ui: UiRoot, c: Control) =
   if ui.fHovered != nil and inside(c, ui.fHovered): ui.updateCursor()
@@ -133,6 +147,12 @@ proc focusControl*(ui: UiRoot, c: Control) =
     c.invalidate()
     c.doEnter()
   ui.updateTextInput()
+  if c != nil and ui.fFocused == c and ui.revealOnFocus:
+    # scrolling ancestors (ScrollBox) bring the focused control into view
+    var p = c.parent
+    while p != nil:
+      p.revealControl(c)
+      p = p.parent
 
 proc setFocus*(c: Control) =
   ## Focuses `c` in its form/host (no-op when detached or not focusable).
@@ -220,7 +240,10 @@ proc mouseDown(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState,
   # focus first (VCL): the nearest focusable control from the target up
   var f = target
   while f != nil and not canTakeFocus(f): f = Control(f.parent)
-  if f != nil: ui.focusControl(f)
+  if f != nil:
+    ui.revealOnFocus = false     # a press must not move the control under it
+    ui.focusControl(f)
+    ui.revealOnFocus = true
   var sh = shift + ui.buttonShift
   let dbl = clicks == 2 and button == mbLeft
   if dbl: sh.incl ssDouble

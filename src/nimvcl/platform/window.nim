@@ -18,6 +18,8 @@ type
     owned*: bool               ## destroy window and renderer in `destroy`
     forcedScale*: float32      ## 0 = use the real pixel density
     textInputOn: bool
+    popup*: bool               ## created through `createPlatformPopup`
+    popupFallback*: bool       ## a popup emulated with a borderless top-level window
 
 proc wrapWindow*(window: Window, renderer: Renderer): PlatformWindow =
   ## Wraps a window and renderer owned by the caller (host mode).
@@ -154,3 +156,54 @@ proc writeBmp*(w: PlatformWindow, path: string): bool =
   if s == nil: return false
   result = saveBMP(s, path.cstring)
   destroySurface s
+
+# ------------------------------------------------------------------ popups
+
+type PopupStyle* = enum psMenu, psTooltip
+
+proc createPlatformPopup*(parent: PlatformWindow, offX, offY, logicalW, logicalH: float32,
+                          style: PopupStyle, forcedScale: float32 = 0): PlatformWindow =
+  ## Creates a hidden popup window (SDL_CreatePopupWindow: `xdg_popup` on
+  ## Wayland, an override-redirect window on X11) at (`offX`, `offY`) logical px
+  ## from the top-left of `parent`'s client area. When the video driver cannot
+  ## make popups (for example `offscreen`) it falls back to a borderless,
+  ## always-on-top, utility top-level window at the same place
+  ## (`popupFallback` is set); tooltips are then also not focusable.
+  let fs = if forcedScale > 0: forcedScale else: 1'f32
+  let w = cint(max(logicalW * fs, 1))
+  let h = cint(max(logicalH * fs, 1))
+  let kind = if style == psMenu: WINDOW_POPUP_MENU else: WINDOW_TOOLTIP
+  var win = createPopupWindow(parent.window, cint(offX * fs), cint(offY * fs), w, h,
+                              kind or WINDOW_HIGH_PIXEL_DENSITY or WINDOW_HIDDEN)
+  var fallback = false
+  if win == nil:
+    fallback = true
+    var flags = WINDOW_HIGH_PIXEL_DENSITY or WINDOW_HIDDEN or WINDOW_BORDERLESS or
+                WINDOW_ALWAYS_ON_TOP or WINDOW_UTILITY
+    if style == psTooltip: flags = flags or WINDOW_NOT_FOCUSABLE
+    win = createWindow("", w, h, flags)
+    if win == nil: raise newException(IOError, "createPopup: " & sdlError())
+    var px, py: cint
+    discard getWindowPosition(parent.window, px, py)
+    discard setWindowPosition(win, px + cint(offX * fs), py + cint(offY * fs))
+  let r = createRenderer(win, nil)
+  if r == nil:
+    let e = sdlError()
+    destroyWindow(win)
+    raise newException(IOError, "createRenderer: " & e)
+  discard setRenderVSync(r, 1)
+  PlatformWindow(window: win, renderer: r, owned: true, forcedScale: forcedScale,
+                 popup: true, popupFallback: fallback)
+
+proc keyboardFocusId*(): uint32 =
+  ## ID of the window with keyboard focus, 0 when none.
+  let w = getKeyboardFocus()
+  if w == nil: 0'u32 else: uint32(getWindowID(w))
+
+proc isWaylandDriver*(): bool = $getCurrentVideoDriver() == "wayland"
+
+proc displayUsableBounds*(w: PlatformWindow): tuple[ok: bool, x, y, w, h: float32] =
+  ## Usable area of the display `w` is on, in global window points.
+  var r: Rect
+  if not getDisplayUsableBounds(getDisplayForWindow(w.window), r): return
+  (true, float32(r.x), float32(r.y), float32(r.w), float32(r.h))

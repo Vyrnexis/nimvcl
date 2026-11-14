@@ -142,3 +142,40 @@ proc indicatorPreferredSize*(c: Control): SizeF =
   let gap = if c.caption.len > 0: t.spacing else: 0'f32
   sizeF(IndicatorSize + gap + (if c.caption.len > 0: ceil(s.w) + 1 else: 0'f32),
         max(IndicatorSize + 4, ceil(s.h)))
+
+# ------------------------------------------------- shared by the phase 5 set
+
+type
+  Orientation* = enum orHorizontal, orVertical
+  ArrowDir* = enum adUp, adDown, adLeft, adRight
+
+proc drawArrow*(c: Canvas, center: PointF, size: float32, dir: ArrowDir,
+                color: Color) =
+  ## Small filled triangle of half-width `size` centred on `center`.
+  let h = size * 0.6
+  case dir
+  of adUp:
+    c.fillPolygon([pointF(center.x - size, center.y + h / 2),
+                   pointF(center.x + size, center.y + h / 2),
+                   pointF(center.x, center.y - h / 2)], color)
+  of adDown:
+    c.fillPolygon([pointF(center.x - size, center.y - h / 2),
+                   pointF(center.x + size, center.y - h / 2),
+                   pointF(center.x, center.y + h / 2)], color)
+  of adLeft:
+    c.fillPolygon([pointF(center.x + h / 2, center.y - size),
+                   pointF(center.x + h / 2, center.y + size),
+                   pointF(center.x - h / 2, center.y)], color)
+  of adRight:
+    c.fillPolygon([pointF(center.x - h / 2, center.y - size),
+                   pointF(center.x - h / 2, center.y + size),
+                   pointF(center.x + h / 2, center.y)], color)
+
+proc textWidth*(c: Control, text: string, f: FontSpec): float32 =
+  ## Measured logical width of `text`; a rough estimate without a window.
+  if text.len == 0: return 0
+  if c.canMeasure: ceil(c.measure(text, f).w)
+  else: ceil(float32(text.len) * f.size * 0.55'f32)
+
+proc textHeight*(c: Control, f: FontSpec): float32 =
+  if c.canMeasure: ceil(c.measure("Ag", f).h) else: ceil(f.size * 1.25'f32)
