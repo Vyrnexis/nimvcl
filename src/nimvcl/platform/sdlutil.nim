@@ -1,4 +1,4 @@
-## Thin helpers over gaps in the nim-lang/sdl3 binding (see docs/binding-audit.md).
+## Thin helpers over gaps in the nim-lang/sdl3 binding (see docs/dev/binding-audit.md).
 ## Only `platform/` and `graphics/` import sdl3.
 
 import sdl3
