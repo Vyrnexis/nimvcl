@@ -42,7 +42,7 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 | `fixedCols`, `fixedRows` | int | Frozen header cells |
 | `defaultColWidth`, `defaultRowHeight` | float32 | Defaults (64 and 24) |
 | `colWidths[c]`, `rowHeights[r]` | float32 | Per-slot overrides |
-| `options` | `GridOptions` | `goRangeSelect`, `goRowSelect`, `goColSizing`, `goRowSizing`, `goEditing`, `goTabs`, `goAlwaysShowEditor` |
+| `options` | `GridOptions` | `goRangeSelect`, `goRowSelect`, `goColSizing`, `goRowSizing`, `goColMoving`, `goEditing`, `goTabs`, `goAlwaysShowEditor` |
 | `col`, `row` | int | Current cell (never a fixed one) |
 | `selection` | `GridRect` | Selected range (inclusive) |
 | `horzLines`, `vertLines`, `hotTrack` | bool | Look |
@@ -60,6 +60,7 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 | `onGetEditText`, `onSetEditText` | Editing hooks for a DrawGrid |
 | `onFixedCellClick(sender, col, row)` | A header cell was clicked |
 | `onColWidthChanged`, `onRowHeightChanged` | After a resize |
+| `onColumnMoved(sender, fromCol, toCol)` | After a column was moved (`goColMoving` or `moveColumn`) |
 
 ## Methods
 
@@ -69,6 +70,7 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 | `setSelection(l, t, r, b)`, `selectCell(c, r)`, `selectAll()` | Selection |
 | `startEdit()`, `endEdit(commit)`, `cancelEdit()` | In-place editor |
 | `autoFitColumn(c)`, `setColWidth`, `setRowHeight`, `resetSizes()` | Sizes |
+| `moveColumn(fromCol, toCol)` | Reorder a scrolling column (what dragging a header does) |
 | `copySelection()`, `pasteFromClipboard()`, `clearSelectedCells()` | Clipboard (tab separated) |
 | StringGrid: `insertRow`, `deleteRow`, `clearCells`, `sortByColumn(col, ascending)` | Data |
 
@@ -81,6 +83,32 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 * Without `goEditing`, cells are read-only. Enter or F2 starts editing.
 * `autoFitColumn` measures the header rows and at most 400 rows below the first
   visible one; for exact auto-fit of huge grids handle `onMeasureColumn`.
-* Not implemented: column dragging (`goColMoving`).
+* **Column dragging**: add `goColMoving` to `options`, then drag a header cell
+  (a cell of the fixed rows) sideways. A bar shows where the column lands, the
+  grid scrolls at the edges, and the column ends up where you let go. A click
+  without movement is still a header click, but it fires on release (so a
+  sorting header and a draggable header can be the same cell). Fixed columns
+  never move and nothing moves into them.
+
+  A StringGrid moves the cells, widths, alignments and the sort arrow by
+  itself. A DrawGrid owns no data, so you remap yours in `onColumnMoved`; the
+  column that was `fromCol` is now `toCol` and those in between shifted by one:
+
+  ```nim
+  var order = @[0, 1, 2, 3, 4]            # which data column each grid column shows
+  grid.options = grid.options + {goColMoving}
+  grid.onColumnMoved = proc(sender: Control, fromCol, toCol: int) =
+    let v = order[fromCol]
+    order.delete(fromCol)
+    order.insert(v, toCol)
+  grid.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
+                         rect: RectF, state: GridDrawStates) =
+    grid.drawCellText(c, rect, $order[col] & "," & $row, state)
+  ```
+
+  The current cell and the selection follow the moved column.
+* Scrolling is exact for millions of rows: positions are float64 inside
+  (`scrollPosY`, `contentH`), `cellRect` / `cellAt` / `topRow` agree at any
+  offset.
 
 [Back to the index](../README.md)

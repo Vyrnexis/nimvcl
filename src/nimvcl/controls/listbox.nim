@@ -135,18 +135,19 @@ method scrollLineSize*(lb: ListBox): SizeF = sizeF(24, lb.itemHeight)
 
 proc refresh(lb: ListBox) =
   let ih = lb.itemHeight
-  let cs = sizeF(lb.fExtent, float32(lb.count) * ih)
+  let csW = float64(lb.fExtent)
+  let csH = float64(lb.count) * float64(ih)   # float64: exact for millions of rows
   if lb.fLastIh > 0 and ih != lb.fLastIh:
     # row height changed (font, first measurement): keep the same rows in view
     let old = lb.fLastIh
-    let y = float32(float64(lb.scrollPos.y) / float64(old) * float64(ih))
+    let y = lb.scrollPosY / float64(old) * float64(ih)
     lb.fLastIh = ih
-    if ih < old: lb.scrollTo(lb.scrollPos.x, y)
-    lb.setContentSize(cs.w, cs.h)
-    if ih >= old: lb.scrollTo(lb.scrollPos.x, y)
+    if ih < old: lb.scrollTo(lb.scrollPosX, y)
+    lb.setContentSize(csW, csH)
+    if ih >= old: lb.scrollTo(lb.scrollPosX, y)
   else:
     lb.fLastIh = ih
-    lb.setContentSize(cs.w, cs.h)
+    lb.setContentSize(csW, csH)
   lb.invalidate()
 
 method beforeLayout*(lb: ListBox) =
@@ -192,7 +193,7 @@ proc setFocusRow(lb: ListBox, i: int) =
 
 func rowTop(lb: ListBox, i: int, ih: float32): float32 =
   ## Client y of row `i`.
-  lb.viewport.y + float32(float64(i) * float64(ih) - float64(lb.scrollPos.y))
+  lb.viewport.y + float32(float64(i) * float64(ih) - lb.scrollPosY)
 
 proc itemRect*(lb: ListBox, i: int): RectF =
   ## Row `i` in client coordinates, as currently scrolled.
@@ -205,26 +206,26 @@ proc indexAt*(lb: ListBox, p: PointF): int =
   let vp = lb.viewport
   if not vp.contains(p): return -1
   let ih = float64(lb.itemHeight)
-  let i = int(floor((float64(p.y - vp.y) + float64(lb.scrollPos.y)) / ih))
+  let i = int(floor((float64(p.y - vp.y) + lb.scrollPosY) / ih))
   if i < 0 or i >= lb.count: -1 else: i
 
 proc topIndex*(lb: ListBox): int =
   ## First (possibly partially) visible row.
-  int(floor(float64(lb.scrollPos.y) / float64(lb.itemHeight)))
+  int(floor(lb.scrollPosY / float64(lb.itemHeight)))
 proc `topIndex=`*(lb: ListBox, v: int) =
-  lb.scrollTo(lb.scrollPos.x, float32(max(v, 0)) * lb.itemHeight)
+  lb.scrollTo(lb.scrollPosX, float64(max(v, 0)) * float64(lb.itemHeight))
 
 proc firstFullRow(lb: ListBox): int =
-  int(ceil(float64(lb.scrollPos.y) / float64(lb.itemHeight)))
+  int(ceil(lb.scrollPosY / float64(lb.itemHeight)))
 proc lastFullRow(lb: ListBox): int =
-  min(int(floor((float64(lb.scrollPos.y) + float64(lb.viewport.h)) /
+  min(int(floor((lb.scrollPosY + float64(lb.viewport.h)) /
                 float64(lb.itemHeight))) - 1, lb.count - 1)
 
 proc makeVisible*(lb: ListBox, i: int) =
   ## Scrolls vertically the minimum distance that shows row `i` completely.
   if i < 0 or i >= lb.count: return
   let ih = lb.itemHeight
-  lb.scrollIntoView(rectF(lb.scrollPos.x, float32(i) * ih, 1, ih))
+  lb.scrollIntoView(lb.scrollPosX, float64(i) * float64(ih), 1, float64(ih))
 
 proc updateHot(lb: ListBox) =
   let h = if lb.fMouseIn and lb.isEnabled:
@@ -525,7 +526,7 @@ proc dragSelect(lb: ListBox) =
   if lb.count == 0: return
   let vp = lb.viewport
   let cy = min(max(lb.fMouseY, vp.y), vp.bottom - 1)
-  var i = int(floor((float64(cy - vp.y) + float64(lb.scrollPos.y)) /
+  var i = int(floor((float64(cy - vp.y) + lb.scrollPosY) /
                     float64(lb.itemHeight)))
   i = min(max(i, 0), lb.count - 1)
   if i != lb.fIndex:
@@ -683,8 +684,8 @@ method paint*(lb: ListBox, c: Canvas) =
   let n = lb.count
   let focused = lb.focused
   c.pushClip(vp)
-  let first = max(int(floor(float64(lb.scrollPos.y) / float64(ih))), 0)
-  let last = min(int(ceil((float64(lb.scrollPos.y) + float64(vp.h)) / float64(ih))), n)
+  let first = max(int(floor(lb.scrollPosY / float64(ih))), 0)
+  let last = min(int(ceil((lb.scrollPosY + float64(vp.h)) / float64(ih))), n)
   let rad = max(t.radius - 1, 2)
   let ownerDraw = lb.fStyle == lbOwnerDraw and lb.onDrawItem != nil
   for i in first ..< last:

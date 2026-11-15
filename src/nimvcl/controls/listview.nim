@@ -48,6 +48,15 @@
 ## `onSelectItem(sender, item, selected)` fires per item whose selection
 ## changed (only when assigned), `onChange` once per change of the focus /
 ## selection, `onClick`, `onDblClick` are the usual mouse events.
+## `onSelectionChanged(sender, added, removed)` is the batched form: it fires
+## ONCE per selection change with the sorted indices that became selected and
+## the ones that no longer are (also when selected items are removed from the
+## list). Prefer it for big selections: Ctrl+A / `selectAll` / `clearSelection`
+## / `setSelection` on 100,000 rows calls `onSelectItem` 100,000 times (each
+## call may hit `onData` in virtual mode) but `onSelectionChanged` once. When
+## both are assigned, the per-item calls come first, then
+## `onSelectionChanged`, then `onChange`. Leave `onSelectItem` nil when you do
+## not need it: nothing per item is computed or called then.
 ## `onItemDblClick(sender, index, column)` fires on a double click that hits an
 ## item (not the header, not empty space); `column` is the report-view column
 ## under the pointer (-1 in other views). `onDblClick` is unchanged. In any
@@ -117,6 +126,7 @@ type
 
   ListItemEvent* = proc(sender: Control, item: ListItem)
   ListSelectEvent* = proc(sender: Control, item: ListItem, selected: bool)
+  ListSelectionEvent* = proc(sender: Control, added, removed: openArray[int])
   ListColumnEvent* = proc(sender: Control, column: ListColumn)
   ListItemDblClickEvent* = proc(sender: Control, index, column: int)
   ListAllowEvent* = proc(sender: Control, item: ListItem, allow: var bool)
@@ -155,6 +165,7 @@ type
     typeAheadTimeout*: int
     onChange*: NotifyEvent
     onSelectItem*: ListSelectEvent
+    onSelectionChanged*: ListSelectionEvent
     onItemChecked*: ListItemEvent
     onItemDblClick*: ListItemDblClickEvent
     onColumnClick*: ListColumnEvent
@@ -341,11 +352,28 @@ proc cellRect(lv: ListView, i: int): RectF =
     rectF(float32(i div rpc) * lv.cellW, float32(i mod rpc) * lv.cellH,
           lv.cellW, lv.cellH)
 
+proc cellOrigin(lv: ListView, i: int): (float64, float64) =
+  ## Top-left of item `i` in CONTENT coordinates, float64 (exact for millions
+  ## of rows; `cellRect` rounds to float32).
+  case lv.fStyle
+  of vsReport: (0.0, float64(i) * float64(lv.itemHeight))
+  of vsIcon, vsSmallIcon:
+    let per = max(lv.fPer, 1)
+    (float64(i mod per) * float64(lv.cellW),
+     float64(i div per) * float64(lv.cellH))
+  of vsList:
+    let rpc = max(lv.fRpc, 1)
+    (float64(i div rpc) * float64(lv.cellW), float64(i mod rpc) * float64(lv.cellH))
+
 proc itemRect*(lv: ListView, i: int): RectF =
   ## Item `i` (a row / cell) in client coordinates, as currently scrolled.
+  ## The subtraction of the scroll position is done in float64, so the result
+  ## is exact however many rows there are.
   let vp = lv.viewport
   let c = lv.cellRect(i)
-  rectF(vp.x - lv.scrollPos.x + c.x, vp.y - lv.scrollPos.y + c.y, c.w, c.h)
+  let o = lv.cellOrigin(i)
+  rectF(vp.x + float32(o[0] - lv.scrollPosX), vp.y + float32(o[1] - lv.scrollPosY),
+        c.w, c.h)
 
 proc columnLeft*(lv: ListView, col: int): float32 =
   ## Left edge of column `col` in client coordinates (as scrolled).
@@ -406,25 +434,25 @@ proc rowRange(lv: ListView): (int, int) =
   case lv.fStyle
   of vsReport:
     let ih = float64(lv.itemHeight)
-    (max(int(floor(float64(lv.scrollPos.y) / ih)), 0),
-     min(int(ceil((float64(lv.scrollPos.y) + float64(vp.h)) / ih)), n))
+    (max(int(floor(lv.scrollPosY / ih)), 0),
+     min(int(ceil((lv.scrollPosY + float64(vp.h)) / ih)), n))
   of vsIcon, vsSmallIcon:
     let ch = float64(lv.cellH)
     let per = max(lv.fPer, 1)
-    (max(int(floor(float64(lv.scrollPos.y) / ch)), 0) * per,
-     min(int(ceil((float64(lv.scrollPos.y) + float64(vp.h)) / ch)) * per, n))
+    (max(int(floor(lv.scrollPosY / ch)), 0) * per,
+     min(int(ceil((lv.scrollPosY + float64(vp.h)) / ch)) * per, n))
   of vsList:
     let cw = lv.cellW
     let rpc = max(lv.fRpc, 1)
-    (max(int(floor(lv.scrollPos.x / cw)), 0) * rpc,
-     min(int(ceil((lv.scrollPos.x + vp.w) / cw)) * rpc, n))
+    (max(int(floor(lv.scrollPosX / float64(cw))), 0) * rpc,
+     min(int(ceil((lv.scrollPosX + float64(vp.w)) / float64(cw))) * rpc, n))
 
 proc itemAt*(lv: ListView, p: PointF): int =
   ## Item under `p` (client coordinates); -1 where there is none.
   let vp = lv.viewport
   if not vp.contains(p): return -1
-  let cx = float64(p.x - vp.x + lv.scrollPos.x)
-  let cy = float64(p.y - vp.y) + float64(lv.scrollPos.y)
+  let cx = float64(p.x - vp.x) + lv.scrollPosX
+  let cy = float64(p.y - vp.y) + lv.scrollPosY
   var i = -1
   case lv.fStyle
   of vsReport:
@@ -495,7 +523,7 @@ proc refresh(lv: ListView) =
   if lv.padding != pad: lv.padding = pad
   let ih = lv.itemHeight
   let n = lv.count
-  var cs = sizeF(0, 0)
+  var csW, csH = 0.0
   var oldPer = -1
   var oldRpc = -1
   let oldIh = lv.fLastIh
@@ -503,19 +531,22 @@ proc refresh(lv: ListView) =
     lv.computeLayoutCounts()
     case lv.fStyle
     of vsReport:
-      cs = sizeF(lv.totalColumnWidth, float32(float64(n) * float64(ih)))
+      csW = float64(lv.totalColumnWidth)
+      csH = float64(n) * float64(ih)
     of vsIcon, vsSmallIcon:
-      cs = sizeF(0, float32(float64((n + lv.fPer - 1) div lv.fPer) * float64(lv.cellH)))
+      csW = 0
+      csH = float64((n + lv.fPer - 1) div lv.fPer) * float64(lv.cellH)
     of vsList:
-      cs = sizeF(float32((n + lv.fRpc - 1) div lv.fRpc) * lv.cellW, 0)
+      csW = float64((n + lv.fRpc - 1) div lv.fRpc) * float64(lv.cellW)
+      csH = 0
     if lv.fStyle == vsReport and oldIh > 0 and ih != oldIh and iter == 0:
-      let y = float32(float64(lv.scrollPos.y) / float64(oldIh) * float64(ih))
+      let y = lv.scrollPosY / float64(oldIh) * float64(ih)
       lv.fLastIh = ih
-      if ih < oldIh: lv.scrollTo(lv.scrollPos.x, y)
-      lv.setContentSize(cs.w, cs.h)
-      if ih >= oldIh: lv.scrollTo(lv.scrollPos.x, y)
+      if ih < oldIh: lv.scrollTo(lv.scrollPosX, y)
+      lv.setContentSize(csW, csH)
+      if ih >= oldIh: lv.scrollTo(lv.scrollPosX, y)
     else:
-      lv.setContentSize(cs.w, cs.h)
+      lv.setContentSize(csW, csH)
     if lv.fPer == oldPer and lv.fRpc == oldRpc: break
     oldPer = lv.fPer
     oldRpc = lv.fRpc
@@ -541,14 +572,15 @@ type SelSnap = object
   old: HashSet[int]
 
 proc snap(lv: ListView): SelSnap =
-  if lv.onSelectItem != nil: SelSnap(active: true, old: lv.fSel)
+  if lv.onSelectItem != nil or lv.onSelectionChanged != nil:
+    SelSnap(active: true, old: lv.fSel)
   else: SelSnap()
 
 proc notify(lv: ListView, ver: int, sn: SelSnap) =
   ## Fires the selection events once when the state changed since `ver`.
   if lv.fVer == ver: return
   lv.invalidate()
-  if sn.active and lv.onSelectItem != nil:
+  if sn.active and (lv.onSelectItem != nil or lv.onSelectionChanged != nil):
     var gone, came: seq[int]
     for i in sn.old:
       if i notin lv.fSel: gone.add i
@@ -556,12 +588,15 @@ proc notify(lv: ListView, ver: int, sn: SelSnap) =
       if i notin sn.old: came.add i
     gone.sort()
     came.sort()
-    for i in gone:
-      let it = lv.getItem(i)
-      if it != nil: lv.onSelectItem(lv, it, false)
-    for i in came:
-      let it = lv.getItem(i)
-      if it != nil: lv.onSelectItem(lv, it, true)
+    if lv.onSelectItem != nil:
+      for i in gone:
+        let it = lv.getItem(i)
+        if it != nil: lv.onSelectItem(lv, it, false)
+      for i in came:
+        let it = lv.getItem(i)
+        if it != nil: lv.onSelectItem(lv, it, true)
+    if lv.onSelectionChanged != nil and (gone.len > 0 or came.len > 0):
+      lv.onSelectionChanged(lv, came, gone)
   if lv.onChange != nil: lv.onChange(lv)
 
 proc selectOnly(lv: ListView, i: int) =
@@ -585,12 +620,13 @@ proc setFocusRow(lv: ListView, i: int) =
 proc makeVisible*(lv: ListView, i: int) =
   ## Scrolls the minimum distance that shows item `i`.
   if i < 0 or i >= lv.count: return
-  var r = lv.cellRect(i)
+  let r = lv.cellRect(i)
+  let o = lv.cellOrigin(i)
   case lv.fStyle
-  of vsReport: r = rectF(lv.scrollPos.x, r.y, 1, r.h)
-  of vsIcon, vsSmallIcon: r = rectF(lv.scrollPos.x, r.y, 1, r.h)
-  of vsList: r = rectF(r.x, lv.scrollPos.y, r.w, 1)
-  lv.scrollIntoView(r)
+  of vsReport, vsIcon, vsSmallIcon:
+    lv.scrollIntoView(lv.scrollPosX, o[1], 1, float64(r.h))
+  of vsList:
+    lv.scrollIntoView(o[0], lv.scrollPosY, float64(r.w), 1)
 
 proc layoutEdit(lv: ListView)
 
@@ -761,6 +797,8 @@ proc deleteItem(lv: ListView, i: int) =
   if lv.fDownIdx == i: lv.fDownIdx = -1
   if lv.fSlowIdx == i: lv.fSlowIdx = -1
   if wasSel and lv.onSelectItem != nil: lv.onSelectItem(lv, lv.fItems[i], false)
+  if wasSel and lv.onSelectionChanged != nil:
+    lv.onSelectionChanged(lv, [], [i])   # later indices shift down: not reported
   lv.fSel.excl i
   lv.shiftIndices(i + 1, -1)
   if wasFocus: lv.fIndex = -1
@@ -779,6 +817,8 @@ proc clearItems(lv: ListView) =
   let had = lv.fSel.len > 0 or lv.fIndex >= 0
   if lv.onSelectItem != nil and lv.fSel.len > 0:
     for i in lv.selectedIndices: lv.onSelectItem(lv, lv.bareItem(i), false)
+  if lv.onSelectionChanged != nil and lv.fSel.len > 0:
+    lv.onSelectionChanged(lv, [], lv.selectedIndices)
   for it in lv.fItems: it.fView = nil
   lv.fItems.setLen(0)
   lv.fCount = 0
@@ -840,6 +880,8 @@ proc `itemsCount=`*(lv: ListView, n: int) =
       if lv.onSelectItem != nil: lv.onSelectItem(lv, lv.bareItem(j), false)
       lv.fSel.excl j
       changed = true
+    if drop.len > 0 and lv.onSelectionChanged != nil:
+      lv.onSelectionChanged(lv, [], drop)
     lv.fCount = newCount
     drop.setLen(0)
     for j in lv.fChecks:
@@ -1255,9 +1297,9 @@ proc typeAhead(lv: ListView, ch: char) =
       break
 
 proc firstFullRow(lv: ListView): int =
-  int(ceil(float64(lv.scrollPos.y) / float64(lv.itemHeight)))
+  int(ceil(lv.scrollPosY / float64(lv.itemHeight)))
 proc lastFullRow(lv: ListView): int =
-  min(int(floor((float64(lv.scrollPos.y) + float64(lv.viewport.h)) /
+  min(int(floor((lv.scrollPosY + float64(lv.viewport.h)) /
                 float64(lv.itemHeight))) - 1, lv.count - 1)
 
 proc navTarget(lv: ListView, key: Key, cur: int): int =

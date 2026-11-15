@@ -410,7 +410,7 @@ method doEnter*(e: Edit) =
         return
       if not e.focused or (h of UiRoot and UiRoot(h).windowInactive): return
       e.caretOn = not e.caretOn
-      e.invalidate()
+      e.invalidate(e.caretRect.inflate(1, 1))   # only the caret area
   e.caretOn = true
   e.blink.enabled = e.isShowing
   e.keepSelPress = false

@@ -155,6 +155,17 @@ proc fillRect*(c: Canvas, rect: RectF, color: Color) =
   discard renderFillRect(renderer(c.ctx), r)
   c.blendMode color
 
+proc clearRect*(c: Canvas, rect: RectF, color: Color) =
+  ## Overwrites `rect` (edges snapped to device pixels, honours the clip) with
+  ## `color` as is, alpha included, without blending: the partial-repaint
+  ## counterpart of `clear`, which ignores the clip.
+  let r = c.snapRect(rect)
+  if r.w <= 0 or r.h <= 0: return
+  c.setColor color
+  discard setRenderDrawBlendMode(renderer(c.ctx), BLENDMODE_NONE)
+  discard renderFillRect(renderer(c.ctx), r)
+  discard setRenderDrawBlendMode(renderer(c.ctx), BLENDMODE_BLEND)
+
 proc frameRect*(c: Canvas, rect: RectF, color: Color, width: float32 = 1) =
   ## Rectangular border of `width` logical px drawn INSIDE `rect`. The border
   ## thickness is rounded to whole device pixels (at least 1), so 1 logical px

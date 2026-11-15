@@ -234,6 +234,8 @@ proc dispatch*(a: TApplication, pe: PlatformEvent) =
   of ekNone, ekWake: discard
   of ekQuit: a.terminate()
   of ekTimer: discard dispatchTimer(pe.timerId)
+  of ekRenderReset:
+    for f in openForms(): f.ui.resetBackbuffer()   # contents lost: repaint fully
   else:
     let po = popupOwnerOf(pe.windowId)
     if handlePopupEvent(pe):

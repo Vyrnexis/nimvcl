@@ -215,6 +215,7 @@ proc ensureWindow(f: Form) =
     f.fUi.win = nil
     raise
   if f.fBorderStyle == bsSingle: w.setResizable(false)
+  f.fUi.useBackbuffer = true      # partial repaints into a persistent target
   gForms.add f
   f.fUi.dirty = true
 
@@ -382,10 +383,14 @@ proc paintIfDirty*(f: Form): bool =
   f.fUi.paintFrame(clear = true, present = true)
   true
 
-proc screenshot*(f: Form, path: string): bool =
+proc screenshot*(f: Form, path: string, full = false): bool =
   ## Headless helper: shows the form, lays out, paints one frame (without
   ## presenting) and saves it as a PNG when `path` ends in `.png`, else as a BMP.
+  ## The image is the form's backbuffer, so it shows what a window would show:
+  ## pending dirty regions are repainted first. `full = true` discards the
+  ## backbuffer content and repaints the whole form (a reference image).
   f.show()
   f.syncMetrics()
+  if full: f.fUi.invalidateAll()
   f.fUi.paintFrame(clear = true, present = false)
   f.fUi.win.writeImage(path)

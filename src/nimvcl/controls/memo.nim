@@ -25,13 +25,21 @@
 ## scroll horizontally. `scrollBars` chooses the axes that may show a bar
 ## (always automatic: only while the content exceeds the viewport).
 ##
-## Large texts: only the lines in view (plus the caret line) are measured and
-## drawn; per-line widths and wrap breaks are cached and dropped only for the
-## edited lines, and a Fenwick tree maps lines to visual rows in O(log n)
-## (wrap mode). Consequences for a very large document (more than 500 lines):
-## the horizontal scroll range is the widest line seen so far, and with
-## `wordWrap` the scroll range counts not-yet-seen lines as one row each, so
-## the vertical thumb can change size as new regions come into view.
+## Large texts: only the lines in view (plus the caret line) are drawn, and
+## per-line widths and wrap breaks are cached and dropped only for the edited
+## lines. A Fenwick tree maps lines to visual rows in O(log n) (wrap mode),
+## the widest line is tracked with a count of the lines at that width (so
+## editing never needs a rescan unless the last widest line got narrower), and
+## positions are float64, so a million lines scroll to the exact pixel.
+## Up to 500 lines everything is measured at once and the scroll range is
+## always exact. A bigger document is measured in the background, a few
+## milliseconds at a time (a timer, so typing and scrolling stay responsive):
+## the horizontal extent (no wrap) and the row count (`wordWrap`) are exact for
+## the lines measured so far and converge to the exact value within a fraction
+## of a second (about 1 s per million lines); `extentsExact` tells when the
+## sweep is done, `measureAll` finishes it synchronously (tests, or before
+## reading `visualRowCount` of a huge text). While wrapping, the view stays
+## anchored on the same text when the rows above it are measured.
 ##
 ## Keys
 ## ----
@@ -69,7 +77,11 @@ type
     fRows: seq[int32]         ## visual rows per line (wrap mode)
     fFen: seq[int32]          ## Fenwick tree over fRows
     fTotalRows: int
-    fMaxW: float32
+    fMaxW: float32            ## widest measured line (no wrap)
+    fMaxCount: int            ## measured lines whose width equals fMaxW
+    fMaxDirty: bool           ## the last widest line changed: fMaxW is only an upper bound
+    fSweep: int               ## lines [0, fSweep) are all measured (background sweep)
+    sweeper: Timer
     fWrapW: float32
     fWrap, fWantTabs, fWantReturns: bool
     fScrollBars: MemoScrollBars
@@ -307,17 +319,36 @@ proc lineText(e: Memo, i: int): string =
     l[0 ..< c] & e.composition & l[c .. ^1]
   else: e.model.line(i)
 
+proc dropLayout(e: Memo, i: int) =
+  ## Line `i` changed: forget its layout (keeps the widest-line bookkeeping and
+  ## the background-sweep watermark right).
+  if i < 0 or i >= e.layouts.len: return
+  if i < e.fSweep: e.fSweep = i
+  if e.layouts[i].valid:
+    if not e.fWrap and e.layouts[i].width >= e.fMaxW:
+      dec e.fMaxCount
+      if e.fMaxCount <= 0: e.fMaxDirty = true
+    e.layouts[i].valid = false
+
 proc ensureLayout(e: Memo, i: int) =
   if i < 0 or i >= e.layouts.len: return
   if e.layouts[i].valid and e.layouts[i].wrapW == e.fWrapW: return
   let text = e.lineText(i)
   var lay = LineLayout(valid: true, wrapW: e.fWrapW)
   if e.fWrap:
-    lay.breaks = e.computeBreaks(text, e.fWrapW)
+    lay.width = e.widthTabs(text, 0, text.len)
+    # a line that fits needs no break search (one measurement instead of many)
+    if lay.width > e.fWrapW: lay.breaks = e.computeBreaks(text, e.fWrapW)
     e.setRows(i, lay.breaks.len + 1)
   else:
     lay.width = e.widthTabs(text, 0, text.len)
-    if lay.width > e.fMaxW: e.fMaxW = lay.width
+    if lay.width > e.fMaxW:
+      e.fMaxW = lay.width
+      e.fMaxCount = 1
+      e.fMaxDirty = false          # larger than the old upper bound: exact again
+    elif lay.width == e.fMaxW:
+      inc e.fMaxCount
+      e.fMaxDirty = false
   e.layouts[i] = lay
 
 proc vlineCount(e: Memo, i: int): int =
@@ -337,6 +368,26 @@ proc wrapWidth(e: Memo): float32 =
 
 proc invalidateLayouts(e: Memo) =
   for i in 0 ..< e.layouts.len: e.layouts[i].valid = false
+  e.fSweep = 0
+  e.fMaxW = 0
+  e.fMaxCount = 0
+  e.fMaxDirty = false
+
+proc rescanMax(e: Memo) =
+  ## Exact widest line among the measured lines (O(n), only after the last
+  ## widest line became narrower).
+  var m = 0'f32
+  var c = 0
+  for i in 0 ..< e.layouts.len:
+    if e.layouts[i].valid:
+      let w = e.layouts[i].width
+      if w > m:
+        m = w
+        c = 1
+      elif w == m: inc c
+  e.fMaxW = m
+  e.fMaxCount = c
+  e.fMaxDirty = false
 
 proc measureVisible(e: Memo) =
   let n = e.model.lineCount
@@ -346,16 +397,21 @@ proc measureVisible(e: Memo) =
       var w = 0'f32
       for i in 0 ..< n: w = max(w, e.layouts[i].width)
       e.fMaxW = w
+      e.fMaxDirty = true            # counts are rebuilt when the text grows past this
+    e.fSweep = n
     return
   let rh = e.rowH
   let vp = e.viewport
-  let top = e.scrollPos.y
+  let top = e.scrollPosY
   let r0 = max(int(floor((top - PadY) / rh)), 0)
-  let r1 = int(ceil((top + vp.h - PadY) / rh)) + 1
+  let r1 = int(ceil((top + float64(vp.h) - PadY) / rh)) + 1
   let l0 = e.lineAtRow(r0)
   let l1 = min(e.lineAtRow(r1), l0 + 300)
   for i in l0 .. l1: e.ensureLayout(i)
   e.ensureLayout(e.model.caret.line)
+  if e.fMaxDirty and not e.fWrap: e.rescanMax()
+
+proc kickSweep(e: Memo)
 
 proc prepare(e: Memo) =
   ## Brings caches and the scroll range up to date for the current size,
@@ -378,17 +434,82 @@ proc prepare(e: Memo) =
     if w != e.fWrapW:
       e.fWrapW = w
       e.invalidateLayouts()
-    let before = e.scrollPos
+    let bx = e.scrollPosX
+    let by = e.scrollPosY
     e.measureVisible()
     let vp = e.viewport
-    let cw = if e.fWrap: 0'f32 else: e.fMaxW + 2 * PadX + 1
-    let ch = float32(e.fTotalRows) * rh + 2 * PadY
+    let cw = if e.fWrap: 0.0 else: float64(e.fMaxW) + 2 * float64(PadX) + 1
+    let ch = float64(e.fTotalRows) * float64(rh) + 2 * float64(PadY)
     e.setContentSize(cw, ch)
-    if e.wrapWidth == e.fWrapW and e.scrollPos.x == before.x and
-       e.scrollPos.y == before.y and e.viewport.h == vp.h:
+    if e.wrapWidth == e.fWrapW and e.scrollPosX == bx and
+       e.scrollPosY == by and e.viewport.h == vp.h:
       break
+  e.kickSweep()
 
 method scrollLineSize*(e: Memo): SizeF = sizeF(32, max(e.rowH, 1))
+
+# ------------------------------------------------- background measurement
+
+const
+  SweepMs = 4                  ## timer interval of the background sweep
+  SweepBudgetMs = 5.0          ## work per tick
+
+proc sweepStep(e: Memo, budgetMs: float): bool =
+  ## Measures unmeasured lines for about `budgetMs`; true when all are done.
+  let n = e.model.lineCount
+  if n <= FullMeasureLines:
+    e.prepare()
+    return true
+  e.prepare()                            # current wrap width and viewport
+  if e.fSweep >= n: return true
+  let t0 = getMonoTime()
+  let rh = float64(max(e.rowH, 1))
+  # keep the text in view anchored when rows above it change (wrap mode)
+  let anchor = e.lineAtRow(max(int(floor((e.scrollPosY - float64(PadY)) / rh)), 0))
+  let r0 = e.rowStart(anchor)
+  var i = e.fSweep
+  var cnt = 0
+  while i < n:
+    e.ensureLayout(i)
+    inc i
+    inc cnt
+    if (cnt and 255) == 0 and e.canMeasure:
+      # every measured line leaves a cached text object behind: advance the
+      # frame and trim, so a million-line sweep does not pile up gigabytes
+      let ctx = e.renderCtx
+      ctx.beginFrameTick()
+      ctx.sweep()
+    if (cnt and 31) == 0 and
+       float((getMonoTime() - t0).inMicroseconds) > budgetMs * 1000: break
+  e.fSweep = i
+  if e.fMaxDirty and not e.fWrap: e.rescanMax()
+  e.prepare()                            # new content size
+  if e.fWrap:
+    let dr = e.rowStart(anchor) - r0
+    if dr != 0: e.scrollBy(0, float64(dr) * rh)
+  i >= n
+
+proc kickSweep(e: Memo) =
+  ## Starts the background sweep when a big text has unmeasured lines.
+  if e.model.lineCount <= FullMeasureLines or e.fSweep >= e.model.lineCount: return
+  if e.sweeper == nil:
+    e.sweeper = newTimer(nil, SweepMs)
+    e.sweeper.onTimer = proc(t: Timer) =
+      if e.sweepStep(SweepBudgetMs): t.enabled = false
+  if not e.sweeper.enabled: e.sweeper.enabled = true
+
+proc extentsExact*(e: Memo): bool =
+  ## True when every line is measured, so the scroll range (widest line, or
+  ## the visual row count with `wordWrap`) is exact. Always true up to 500
+  ## lines; bigger texts converge in the background after loading, editing
+  ## the first lines or resizing a wrapped memo.
+  e.prepare()
+  e.model.lineCount <= FullMeasureLines or e.fSweep >= e.model.lineCount
+
+proc measureAll*(e: Memo) =
+  ## Finishes the background measurement now (a million lines take about a
+  ## second). Afterwards `extentsExact` is true.
+  discard e.sweepStep(1e12)
 
 method contentScrolled*(e: Memo) =
   procCall contentScrolled(ScrollingControl(e))
@@ -431,15 +552,25 @@ proc posAtRowX(e: Memo, row: int, x: float32): (MemoPos, bool) =
   ((line, col), eol)
 
 proc textOrigin(e: Memo): PointF =
+  ## Origin of the text (row 0, x 0) in client coordinates. Use `rowTop` for
+  ## the y of a row of a big text: it subtracts in float64.
   let vp = e.viewport
   pointF(vp.x + PadX - e.scrollPos.x, vp.y + PadY - e.scrollPos.y)
+
+proc rowTop(e: Memo, row: int): float32 =
+  ## Client y of visual row `row` (exact for millions of rows).
+  e.viewport.y + float32(float64(PadY) + float64(row) * float64(e.rowH) - e.scrollPosY)
+
+proc rowAtY(e: Memo, y: float32): int =
+  ## Visual row under client y (float64 arithmetic).
+  int(floor((float64(y - e.viewport.y) - float64(PadY) + e.scrollPosY) /
+            float64(max(e.rowH, 1))))
 
 proc posAtPoint*(e: Memo, x, y: float32): MemoPos =
   ## Model position a click at client (x, y) would put the caret on.
   e.prepare()
   let o = e.textOrigin
-  let row = int(floor((y - o.y) / max(e.rowH, 1)))
-  e.posAtRowX(row, x - o.x)[0]
+  e.posAtRowX(e.rowAtY(y), x - o.x)[0]
 
 proc caretRect*(e: Memo): RectF =
   ## The caret in client coordinates (1 px wide, one text row tall).
@@ -447,7 +578,7 @@ proc caretRect*(e: Memo): RectF =
   let c = e.model.caret
   let (row, x) = e.rowAndX(c.line, e.caretDisplayCol, e.fEol)
   let o = e.textOrigin
-  rectF(o.x + x, o.y + float32(row) * e.rowH, 1, e.rowH)
+  rectF(o.x + x, e.rowTop(row), 1, e.rowH)
 
 proc scrollCaretIntoView*(e: Memo) =
   ## Scrolls the minimum distance that shows the caret.
@@ -456,9 +587,11 @@ proc scrollCaretIntoView*(e: Memo) =
   let (row, x) = e.rowAndX(c.line, e.caretDisplayCol, e.fEol)
   let m = min(24'f32, max(e.viewport.w / 4, 1))
   # the first/last row also reveal the padding above/below the text
-  let y0 = if row == 0: 0'f32 else: PadY + float32(row) * e.rowH
-  let y1 = PadY + float32(row + 1) * e.rowH + (if row >= e.fTotalRows - 1: PadY else: 0'f32)
-  e.scrollIntoView(rectF(PadX + x - m, y0, 2 * m + 1, y1 - y0))
+  let rh = float64(e.rowH)
+  let y0 = if row == 0: 0.0 else: float64(PadY) + float64(row) * rh
+  let y1 = float64(PadY) + float64(row + 1) * rh +
+           (if row >= e.fTotalRows - 1: float64(PadY) else: 0.0)
+  e.scrollIntoView(float64(PadX + x - m), y0, float64(2 * m + 1), y1 - y0)
 
 # ------------------------------------------------------------------ helpers
 
@@ -491,16 +624,18 @@ proc stopDrag(e: Memo) =
 proc modelChanged(e: Memo, first, oldN, newN: int) =
   e.fChanged = true
   e.fPristine = false
+  for i in first ..< min(first + oldN, e.layouts.len): e.dropLayout(i)
   if oldN != newN:
     e.layouts.spliceSeq(first, oldN, newN)
     if e.fWrap:
       e.fRows.spliceSeq(first, oldN, newN)
       for i in first ..< first + newN: e.fRows[i] = 1
-  for i in first ..< first + min(oldN, newN):
-    e.layouts[i].valid = false
+  e.fSweep = min(e.fSweep, first)
   for i in first + min(oldN, newN) ..< first + newN:
     e.layouts[i] = LineLayout()
   if oldN != newN: e.rebuildFen()
+  if newN <= 16:                  # a small edit: measure it now, extents stay exact
+    for i in first ..< min(first + newN, e.layouts.len): e.ensureLayout(i)
 
 # ------------------------------------------------------------ construction
 
@@ -534,7 +669,7 @@ proc text*(e: Memo): string = e.model.text
 proc `text=`*(e: Memo, v: string) =
   ## Replaces the text (caret to the start, undo history cleared, scrolled to
   ## the top). Fires `onChange` when the text differs.
-  e.fMaxW = 0
+  e.fMaxDirty = true
   let old = e.model.text
   e.model.setText(v)
   let same = e.model.text == old        # compared after sanitising / maxLength
@@ -657,7 +792,7 @@ proc pasteFromClipboard*(e: Memo) =
 proc topLine*(e: Memo): int =
   ## The first (possibly partial) visible line.
   e.prepare()
-  e.lineAtRow(max(int(floor((e.scrollPos.y - PadY) / max(e.rowH, 1))), 0))
+  e.lineAtRow(max(int(floor((e.scrollPosY - float64(PadY)) / float64(max(e.rowH, 1)))), 0))
 
 proc visualRowCount*(e: Memo): int =
   ## Visual rows of the (measured) text; equals `lineCount` without wrapping.
@@ -723,7 +858,7 @@ method doEnter*(e: Memo) =
       let h = e.host
       if not e.focused or (h of UiRoot and UiRoot(h).windowInactive): return
       e.caretOn = not e.caretOn
-      e.invalidate()
+      e.invalidate(e.caretRect.inflate(1, 1))   # only the caret area
   e.caretOn = true
   e.blink.enabled = true
   e.touched(follow = false)
@@ -731,7 +866,7 @@ method doEnter*(e: Memo) =
 method doExit*(e: Memo) =
   if e.composition.len > 0:
     e.composition = ""
-    e.layouts[min(e.compLine, e.layouts.high)].valid = false
+    e.dropLayout(min(e.compLine, e.layouts.high))
   e.stopDrag()
   if e.blink != nil: e.blink.enabled = false
   e.caretOn = false
@@ -763,8 +898,7 @@ method doMouseDown*(e: Memo, button: MouseButton, shift: ShiftState,
     # remember the visual-line side of a click at a wrap boundary
     e.prepare()
     let o = e.textOrigin
-    let row = int(floor((y - o.y) / max(e.rowH, 1)))
-    e.fEol = e.posAtRowX(row, x - o.x)[1]
+    e.fEol = e.posAtRowX(e.rowAtY(y), x - o.x)[1]
     e.dragging = true
     e.dragX = x
     e.dragY = y
@@ -772,8 +906,7 @@ method doMouseDown*(e: Memo, button: MouseButton, shift: ShiftState,
 
 proc dragTo(e: Memo) =
   let o = e.textOrigin
-  let row = int(floor((e.dragY - o.y) / max(e.rowH, 1)))
-  let (p, eol) = e.posAtRowX(row, e.dragX - o.x)
+  let (p, eol) = e.posAtRowX(e.rowAtY(e.dragY), e.dragX - o.x)
   e.model.setCaret(p, extend = true)
   e.fEol = eol
 
@@ -922,7 +1055,7 @@ method doKeyPress*(e: Memo, text: var string) =
   let had = e.composition.len > 0
   if had:
     e.composition = ""
-    e.layouts[min(e.compLine, e.layouts.high)].valid = false
+    e.dropLayout(min(e.compLine, e.layouts.high))
   var t = text
   t = t.replace("\t", "")                     # Tab is a key, handled in doKeyDown
   if not e.fWantReturns: t = flattenBreaks(t)
@@ -935,7 +1068,7 @@ method doKeyPress*(e: Memo, text: var string) =
 method doTextEditing*(e: Memo, text: string, cursor, selLen: int) =
   if e.readOnly: return
   if e.composition.len > 0 or text.len > 0:
-    e.layouts[min(e.compLine, e.layouts.high)].valid = false
+    e.dropLayout(min(e.compLine, e.layouts.high))
   e.composition = text
   if text.len > 0:
     if not (e.compLine == e.model.caret.line and e.compCol == e.model.caret.col):
@@ -946,7 +1079,7 @@ method doTextEditing*(e: Memo, text: string, cursor, selLen: int) =
     var b = 0
     for _ in 0 ..< c: b = nextBoundary(text, b)
     e.compCursor = b
-    e.layouts[e.compLine].valid = false
+    e.dropLayout(e.compLine)
   e.touched()
 
 # --------------------------------------------------------------------- paint
@@ -1000,10 +1133,10 @@ method paint*(e: Memo, c: Canvas) =
   c.pushClip(vp)
 
   if e.showsPlaceholder:
-    c.drawText(e.fPlaceholder, font, o.x, o.y, if enabled: t.textMuted else: t.textDisabled)
+    c.drawText(e.fPlaceholder, font, o.x, e.rowTop(0), if enabled: t.textMuted else: t.textDisabled)
   else:
     let n = model.lineCount
-    let firstRow = max(int(floor((e.scrollPos.y - PadY) / rh)), 0)
+    let firstRow = max(int(floor((e.scrollPosY - float64(PadY)) / float64(rh))), 0)
     var line = e.lineAtRow(firstRow)
     var k = firstRow - e.rowStart(line)
     var row = firstRow
@@ -1013,14 +1146,14 @@ method paint*(e: Memo, c: Canvas) =
     let showSel = not composing and selA != selB and enabled
     let selCol = if foc: t.selection else: t.selectionInactive
     let selTxt = if foc: t.selectionText else: textCol
-    while line < n and o.y + float32(row) * rh < vp.bottom:
+    while line < n and e.rowTop(row) < vp.bottom:
       e.ensureLayout(line)
       let text = e.lineText(line)
       let nv = if e.fWrap: e.layouts[line].breaks.len + 1 else: 1
       if k >= nv: k = nv - 1
-      while k < nv and o.y + float32(row) * rh < vp.bottom:
+      while k < nv and e.rowTop(row) < vp.bottom:
         let (a, b) = e.vlineBounds(line, k, text.len)
-        let y = o.y + float32(row) * rh
+        let y = e.rowTop(row)
         if y + rh > vp.y:
           let vt = text[a ..< b]
           var lo = 0

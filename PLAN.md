@@ -129,9 +129,8 @@ replaceable (SDL_GPU, tests) and stops SDL types from leaking into the public AP
 - Default font: bundle one OFL font (for example Inter or Noto Sans) with a
   fallback chain via `addFallbackFont` for symbols, CJK and emoji. Use
   fontconfig lookup on Linux when it is available.
-- Painting: v1 redraws the whole dirty form. SDL_Renderer handles this easily
-  for UIs. Add dirty rectangles or cached render targets only when profiling
-  shows the need.
+- Painting: a `Form` repaints only its dirty regions into a persistent
+  backbuffer texture; popups and `Host` redraw fully.
 
 ### 2.5 Layout (VCL semantics)
 - `align`: `alNone, alTop, alBottom, alLeft, alRight, alClient, alCustom`.
@@ -347,9 +346,11 @@ comments and `docs/`):
   against the viewport and do not scroll. Layout never reads the scroll offset.
 - **ListBox**: owner-draw items have a fixed height (`itemHeight`), no
   variable-height rows.
-- **Scroll position is float32**: very long lists (more than about 700k rows)
-  scroll in quantised steps. Fine for the phase 5 targets; the 100k-row virtual
-  list of phase 6 is well inside the limit.
+- **Scroll position is float64** inside `ScrollingControl` and the scrollbars
+  (`scrollPosY`, `contentH`, ...), so lists of millions of rows scroll to the
+  exact pixel; `scrollPos` / `contentSize` still return float32 (rounded) for
+  small content. Views convert to float32 only after subtracting the scroll
+  position.
 - **Popups on offscreen/headless**: SDL cannot create real popup windows there,
   so popups fall back to small top-level windows (`docs/popups-menus.md`).
   Tests and screenshots use that path; Wayland uses `xdg_popup`, X11
@@ -366,14 +367,28 @@ comments and `docs/`):
 ## 9. Open issues
 
 Known limitations, not yet fixed:
-- **float32 scroll position**: lists beyond about 700,000 rows scroll in
-  quantised steps (fine for navigation).
-- **Caret blink repaints the whole form** (no dirty rectangles yet).
-- **Memo extents are estimated** for documents over 500 lines (the scroll range
-  is approximate until the lines have been measured).
-- **`goColMoving`** (dragging grid columns) is not implemented.
+- **Partial repaint floor**: forms repaint only dirty regions into a persistent
+  backbuffer (see docs/guide/painting.md), but every frame still copies the whole
+  backbuffer to the window and presents it (about 1.5 ms at 1100x700 on the
+  software renderer, vs about 11 ms for a full repaint). Copying only the dirty
+  rects would need a renderer whose window contents survive a present.
+  `requestLayout`, scrolling and `ui.dirty = true` still repaint the whole form;
+  popups and `Host` always do.
+- **Memo background measurement is slow per line**: documents over 500 lines
+  are measured in the background (4-5 ms slices) so the horizontal extent / the
+  wrapped row count become exact within seconds, but each line costs one text
+  measurement through the render context's text cache (about 20 us, so about
+  20 s for a million lines; memory stays flat because the sweep trims the
+  cache). Until then the extents are exact for the measured lines only
+  (`Memo.extentsExact`, `measureAll`). A core `RenderContext` call that measures
+  a string without creating a cached text object would make this about 10x
+  cheaper.
+- **ListView has no column reordering** (`goColMoving` exists for the grids).
+  Column 0 is the caption and the other columns are `subItems[k - 1]`, so
+  moving a column would have to move item data too.
 - **Real Wayland/X11 popups and IME are untested**: only the offscreen fallback
   and the SDL contracts are covered by the tests.
-- **`onSelectItem` per-item calls**: selecting or clearing a huge selection
-  calls the handler once per changed item.
+- **`ListView.onSelectItem` is still per item** (by design, VCL compatible):
+  a huge selection change calls it once per changed item. Use the batched
+  `onSelectionChanged(sender, added, removed)` for big selections.
 

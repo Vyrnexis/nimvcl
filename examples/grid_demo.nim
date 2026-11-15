@@ -4,8 +4,9 @@
 # Keys: arrows / PgUp / PgDn / Home / End, Tab, Enter or F2 or typing edits a
 #       StringGrid cell (Enter commits and moves down, Esc cancels),
 #       Shift+arrows / drag select a range, Ctrl+C / Ctrl+V copy / paste TSV,
-#       click a header to sort, drag a header border to resize (double click
-#       auto-fits), wheel scrolls.  D toggles dark/light.
+#       click a header to sort, drag a header to move the column, drag a
+#       header border to resize (double click auto-fits), wheel scrolls.
+#       D toggles dark/light.
 #
 # Env:
 #   NIMVCL_SCREENSHOT   lay out, render one frame to this BMP and exit
@@ -44,7 +45,7 @@ proc buildPeople(f: Form): StringGrid =
   g.rowCount = 201
   g.fixedCols = 1
   g.fixedRows = 1
-  g.options = g.options + {goRowSizing}
+  g.options = g.options + {goRowSizing, goColMoving}
   g.colWidths[0] = 44
   g.colWidths[1] = 150
   g.colWidths[2] = 104
@@ -118,7 +119,7 @@ proc buildHuge(f: Form): DrawGrid =
 proc buildMain(): Form =
   let f = newForm(nil, 984, 500)
   f.caption = "nimvcl grid demo"
-  f.caption("StringGrid: 200 rows, click a header to sort, Enter / F2 / type to edit",
+  f.caption("StringGrid: 200 rows, click a header to sort, drag it to move, Enter / F2 / type to edit",
             16, 12)
   discard buildPeople(f)
   f.caption("DrawGrid: 1,000,000 rows, owner-drawn", 592, 12)

@@ -57,6 +57,9 @@ list.onChange = proc(sender: Control) =
   list.onData = proc(sender: Control, index: int): string = "Row " & $index
   list.count = 1_000_000
   ```
+* Millions of rows are fine: the scroll position is float64, so a 5,000,000-row
+  virtual list scrolls to the exact pixel (`topIndex`, `itemRect`, `indexAt` and
+  PageDown agree at any offset).
 * Deleting the focused row sets `itemIndex` to -1. Turning `multiSelect` off
   keeps only the focused row selected.
 * In virtual mode `clear`, `delete` and `items` do nothing: change `count`.

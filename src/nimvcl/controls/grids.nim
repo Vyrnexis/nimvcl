@@ -32,7 +32,23 @@
 ##                   follows the thumb
 ## * `goAlwaysShowEditor` the editor opens on every selected cell
 ##
-## `goColMoving` (drag a header to reorder columns) is NOT implemented.
+## * `goColMoving`   drag a header cell (a cell of the fixed rows, over a
+##                   scrolling column) sideways to reorder the columns: a bar
+##                   shows where the column will land, the grid scrolls while
+##                   the pointer is outside, and the column ends up at the
+##                   column under the pointer on release. A press without
+##                   movement is still a header click (`onFixedCellClick`,
+##                   sorting), fired on release instead of on press. Fixed
+##                   columns never move and nothing moves into them. The code
+##                   form is `moveColumn(fromCol, toCol)`. The grid moves the
+##                   width of the column and the current cell / selection (they
+##                   follow the column); a StringGrid also moves the cells, the
+##                   alignment and the sort indicator. A DrawGrid has no data
+##                   of its own: it fires `onColumnMoved(sender, fromCol,
+##                   toCol)` AFTER the move and the application remaps its own
+##                   column data (what `cells`/`onDrawCell` read) the same way:
+##                   the column that was `fromCol` is now `toCol`, the ones in
+##                   between shifted by one.
 ##
 ## Selection: `col`, `row` (current cell, never a fixed one), `selection` (the
 ## rectangle, inclusive cell ranges), `onSelectCell(sender, col, row,
@@ -79,7 +95,7 @@ export scrolling, gridmodel.AxisSizes
 type
   GridOption* = enum
     goRangeSelect, goRowSelect, goColSizing, goRowSizing, goEditing, goTabs,
-    goThumbTracking, goAlwaysShowEditor
+    goThumbTracking, goAlwaysShowEditor, goColMoving
   GridOptions* = set[GridOption]
 
   GridDrawState* = enum gdSelected, gdFocused, gdFixed, gdHot
@@ -97,7 +113,9 @@ type
   GridIndexEvent* = proc(sender: Control, index: int)
   MeasureColumnEvent* = proc(sender: Control, col: int): float32
 
-  DragMode = enum dmNone, dmSelect, dmColSize, dmRowSize
+  GridMoveEvent* = proc(sender: Control, fromIdx, toIdx: int)
+
+  DragMode = enum dmNone, dmSelect, dmColSize, dmRowSize, dmColMove
 
   DrawGrid* = ref object of ScrollingControl
     fCols, fRows: AxisSizes
@@ -117,6 +135,8 @@ type
     fEditCol, fEditRow: int
     fEditOrig: string
     fDownOnBorder, fMoving: bool
+    fMoveFrom, fMoveTo, fMoveRow: int  # goColMoving drag: column, target, header row
+    fMoveStarted: bool
     minColWidth*, minRowHeight*: float32
     onSelectCell*: SelectCellEvent
     onDrawCell*: DrawCellEvent
@@ -125,6 +145,7 @@ type
     onSelectionChanged*: NotifyEvent
     onFixedCellClick*: GridCellEvent   ## click on a header cell
     onColWidthChanged*: GridIndexEvent
+    onColumnMoved*: GridMoveEvent      ## a column was moved (after the move)
     onRowHeightChanged*: GridIndexEvent
     onMeasureColumn*: MeasureColumnEvent
 
@@ -164,6 +185,12 @@ method drawCell*(g: DrawGrid, canvas: Canvas, col, row: int, rect: RectF,
                  state: GridDrawStates) {.base.} =
   if g.onDrawCell != nil: g.onDrawCell(g, canvas, col, row, rect, state)
 
+method columnMoved*(g: DrawGrid, fromCol, toCol: int) {.base.} =
+  ## A column was moved (sizes and current cell are already updated).
+  ## Subclasses with column data move it, then call `procCall`. Base: fires
+  ## `onColumnMoved`.
+  if g.onColumnMoved != nil: g.onColumnMoved(g, fromCol, toCol)
+
 method fixedCellClicked*(g: DrawGrid, col, row: int) {.base.} =
   if g.onFixedCellClick != nil: g.onFixedCellClick(g, col, row)
 
@@ -189,7 +216,7 @@ func colWidth*(g: DrawGrid, c: int): float32 = g.fCols.size(c)
 func rowHeight*(g: DrawGrid, r: int): float32 = g.fRows.size(r)
 
 proc refreshContent(g: DrawGrid) =
-  g.setContentSize(float32(g.fCols.total), float32(g.fRows.total))
+  g.setContentSize(g.fCols.total, g.fRows.total)
   g.invalidate()
 
 method scrollLineSize*(g: DrawGrid): SizeF =
@@ -210,13 +237,13 @@ proc colX*(g: DrawGrid, c: int): float32 =
   let v = g.viewport
   let o = g.fCols.offset(c)
   if c < g.fFixedCols: v.x + float32(o)
-  else: v.x + float32(o - float64(g.scrollPos.x))
+  else: v.x + float32(o - g.scrollPosX)
 
 proc rowY*(g: DrawGrid, r: int): float32 =
   let v = g.viewport
   let o = g.fRows.offset(r)
   if r < g.fFixedRows: v.y + float32(o)
-  else: v.y + float32(o - float64(g.scrollPos.y))
+  else: v.y + float32(o - g.scrollPosY)
 
 proc cellRect*(g: DrawGrid, c, r: int): RectF =
   ## The cell slot (grid line included) in client coordinates, as scrolled.
@@ -226,7 +253,7 @@ proc visibleCols(g: DrawGrid): GridCoord =
   ## First and last (possibly partial) scrolling column; (1, 0) when none.
   let a = g.scrollArea
   if a.w <= 0 or g.fFixedCols >= g.fCols.count: return (1, 0)
-  let start = float64(g.scrollPos.x) + g.fixedW
+  let start = g.scrollPosX + g.fixedW
   let first = g.fCols.indexAt(start)
   if first < 0: return (1, 0)
   var last = g.fCols.indexAt(start + float64(a.w) - 0.001)
@@ -236,7 +263,7 @@ proc visibleCols(g: DrawGrid): GridCoord =
 proc visibleRows(g: DrawGrid): GridCoord =
   let a = g.scrollArea
   if a.h <= 0 or g.fFixedRows >= g.fRows.count: return (1, 0)
-  let start = float64(g.scrollPos.y) + g.fixedH
+  let start = g.scrollPosY + g.fixedH
   let first = g.fRows.indexAt(start)
   if first < 0: return (1, 0)
   var last = g.fRows.indexAt(start + float64(a.h) - 0.001)
@@ -253,10 +280,10 @@ proc topRow*(g: DrawGrid): int =
 
 proc `leftCol=`*(g: DrawGrid, c: int) =
   let k = min(max(c, g.fFixedCols), max(g.fCols.count - 1, 0))
-  g.scrollTo(float32(g.fCols.offset(k) - g.fixedW), g.scrollPos.y)
+  g.scrollTo(g.fCols.offset(k) - g.fixedW, g.scrollPosY)
 proc `topRow=`*(g: DrawGrid, r: int) =
   let k = min(max(r, g.fFixedRows), max(g.fRows.count - 1, 0))
-  g.scrollTo(g.scrollPos.x, float32(g.fRows.offset(k) - g.fixedH))
+  g.scrollTo(g.scrollPosX, g.fRows.offset(k) - g.fixedH)
 
 proc fullRows(g: DrawGrid): GridCoord =
   ## First and last completely visible scrolling row ((1, 0): none).
@@ -265,7 +292,7 @@ proc fullRows(g: DrawGrid): GridCoord =
   let a = g.scrollArea
   var first = v.col
   var last = v.row
-  let top = float64(g.scrollPos.y) + g.fixedH
+  let top = g.scrollPosY + g.fixedH
   if g.fRows.offset(first) < top - 0.01: inc first
   if g.fRows.offset(last + 1) > top + float64(a.h) + 0.01: dec last
   (first, last)
@@ -278,18 +305,20 @@ proc visibleRowCount*(g: DrawGrid): int =
 proc makeVisible*(g: DrawGrid, col, row: int) =
   ## Scrolls the minimum distance that shows the (scrolling) cell completely.
   let a = g.scrollArea
-  var nx = g.scrollPos.x
-  var ny = g.scrollPos.y
+  var nx = g.scrollPosX
+  var ny = g.scrollPosY
+  let aw = float64(a.w)
+  let ah = float64(a.h)
   if col >= g.fFixedCols and col < g.fCols.count:
-    let l = float32(g.fCols.offset(col) - g.fixedW)
-    let r = float32(g.fCols.offset(col + 1) - g.fixedW)
-    if r - l > a.w or l < nx: nx = l
-    elif r > nx + a.w: nx = r - a.w
+    let l = g.fCols.offset(col) - g.fixedW
+    let r = g.fCols.offset(col + 1) - g.fixedW
+    if r - l > aw or l < nx: nx = l
+    elif r > nx + aw: nx = r - aw
   if row >= g.fFixedRows and row < g.fRows.count:
-    let t = float32(g.fRows.offset(row) - g.fixedH)
-    let b = float32(g.fRows.offset(row + 1) - g.fixedH)
-    if b - t > a.h or t < ny: ny = t
-    elif b > ny + a.h: ny = b - a.h
+    let t = g.fRows.offset(row) - g.fixedH
+    let b = g.fRows.offset(row + 1) - g.fixedH
+    if b - t > ah or t < ny: ny = t
+    elif b > ny + ah: ny = b - ah
   g.scrollTo(nx, ny)
 
 # ------------------------------------------------------------- hit testing
@@ -300,7 +329,7 @@ proc colAtX(g: DrawGrid, x: float32): int =
   let px = float64(x - v.x)
   let fw = g.fixedW
   if px < fw: g.fCols.indexAt(px)
-  else: g.fCols.indexAt(px + float64(g.scrollPos.x))
+  else: g.fCols.indexAt(px + g.scrollPosX)
 
 proc rowAtY(g: DrawGrid, y: float32): int =
   let v = g.viewport
@@ -308,7 +337,7 @@ proc rowAtY(g: DrawGrid, y: float32): int =
   let py = float64(y - v.y)
   let fh = g.fixedH
   if py < fh: g.fRows.indexAt(py)
-  else: g.fRows.indexAt(py + float64(g.scrollPos.y))
+  else: g.fRows.indexAt(py + g.scrollPosY)
 
 proc cellAt*(g: DrawGrid, p: PointF): GridCoord =
   ## The cell under `p` (client coordinates); (-1, -1) outside the cells.
@@ -530,9 +559,10 @@ proc setSelection*(g: DrawGrid, left, top, right, bottom: int) =
 
 proc selectAll*(g: DrawGrid) =
   if goRangeSelect notin g.fOptions: return
-  let sp = g.scrollPos                 # selecting everything does not scroll
+  let spx = g.scrollPosX               # selecting everything does not scroll
+  let spy = g.scrollPosY
   g.setSelection(g.fFixedCols, g.fFixedRows, g.fCols.count - 1, g.fRows.count - 1)
-  g.scrollTo(sp.x, sp.y)
+  g.scrollTo(spx, spy)
 
 # --------------------------------------------------------- sizes and counts
 
@@ -584,6 +614,36 @@ proc setRowHeight*(g: DrawGrid, r: int, h: float32) =
   g.refreshContent()
   g.positionEditor()
   if g.onRowHeightChanged != nil: g.onRowHeightChanged(g, r)
+
+func remapColumn(c, fromCol, toCol: int): int =
+  ## Where column `c` is after `fromCol` moved to `toCol`.
+  if c == fromCol: toCol
+  elif fromCol < toCol and c > fromCol and c <= toCol: c - 1
+  elif fromCol > toCol and c >= toCol and c < fromCol: c + 1
+  else: c
+
+proc moveColumn*(g: DrawGrid, fromCol, toCol: int) =
+  ## Moves a scrolling column so that it ends up at index `toCol` (the columns
+  ## in between shift by one). Fixed columns cannot move or be moved into. The
+  ## width, the current cell and the selection follow the column; see
+  ## `goColMoving` and `onColumnMoved`.
+  if fromCol < g.fFixedCols or toCol < g.fFixedCols or fromCol == toCol or
+     fromCol >= g.fCols.count or toCol >= g.fCols.count: return
+  if g.fEditing: g.endEdit(false)
+  let lo = min(fromCol, toCol)
+  let hi = max(fromCol, toCol)
+  var sizes: seq[float32]
+  for i in lo .. hi: sizes.add g.fCols.size(i)
+  let moved = sizes[fromCol - lo]
+  sizes.delete(fromCol - lo)
+  sizes.insert(moved, toCol - lo)
+  for i in lo .. hi: g.fCols.setSize(i, sizes[i - lo])
+  g.fCol = remapColumn(g.fCol, fromCol, toCol)
+  g.fAnchorCol = remapColumn(g.fAnchorCol, fromCol, toCol)
+  g.refreshContent()
+  g.positionEditor()
+  g.columnMoved(fromCol, toCol)
+  g.invalidate()
 
 proc resetSizes*(g: DrawGrid) =
   ## Back to the default widths and heights.
@@ -772,7 +832,17 @@ method doMouseDown*(g: DrawGrid, button: MouseButton, shift: ShiftState,
       if cell.col >= 0:
         if cell.col < g.fFixedCols or cell.row < g.fFixedRows:
           # the second press of a double click does not click the header again
-          if ssDouble notin shift: g.fixedCellClicked(cell.col, cell.row)
+          if ssDouble in shift: discard
+          elif goColMoving in g.fOptions and cell.row < g.fFixedRows and
+               cell.col >= g.fFixedCols:
+            # a header press may become a column drag: the click waits for the release
+            g.fDrag = dmColMove
+            g.fMoveFrom = cell.col
+            g.fMoveTo = cell.col
+            g.fMoveRow = cell.row
+            g.fMoveStarted = false
+            g.fDragStart = x
+          else: g.fixedCellClicked(cell.col, cell.row)
         else:
           g.fDrag = dmSelect
           g.moveCurrent(cell.col, cell.row, extend = ssShift in shift)
@@ -783,6 +853,8 @@ method doMouseMove*(g: DrawGrid, shift: ShiftState, x, y: float32) =
   g.fMouse = p
   if g.fDrag != dmNone and ssLeft notin shift:
     g.fDrag = dmNone
+    g.fMoveStarted = false
+    g.invalidate()
   case g.fDrag
   of dmColSize:
     g.setColWidth(g.fDragIdx, max(g.fDragSize + x - g.fDragStart, g.minColWidth))
@@ -801,6 +873,20 @@ method doMouseMove*(g: DrawGrid, shift: ShiftState, x, y: float32) =
     if c < 0: c = g.fCol
     if r < 0: r = g.fRow
     g.moveCurrent(c, r, extend = true)
+  of dmColMove:
+    if not g.fMoveStarted and abs(x - g.fDragStart) > 4: g.fMoveStarted = true
+    if g.fMoveStarted:
+      let a = g.scrollArea
+      let vc = g.visibleCols
+      var c = g.colAtX(x)
+      if x >= a.right: c = min(vc.row + 1, g.fCols.count - 1)
+      elif x < a.x: c = max(vc.col - 1, g.fFixedCols)
+      if c < 0: c = g.fMoveTo
+      c = max(c, g.fFixedCols)
+      if c != g.fMoveTo or x < a.x or x >= a.right:
+        g.makeVisible(c, -1)               # autoscroll toward the target
+      g.fMoveTo = c
+      g.invalidate()
   of dmNone:
     g.updateCursor(p)
     g.updateHot()
@@ -809,7 +895,14 @@ method doMouseMove*(g: DrawGrid, shift: ShiftState, x, y: float32) =
 method doMouseUp*(g: DrawGrid, button: MouseButton, shift: ShiftState,
                   x, y: float32) =
   if button == mbLeft:
+    let wasMove = g.fDrag == dmColMove
+    let started = g.fMoveStarted
     g.fDrag = dmNone
+    g.fMoveStarted = false
+    if wasMove:
+      g.invalidate()
+      if started: g.moveColumn(g.fMoveFrom, g.fMoveTo)
+      else: g.fixedCellClicked(g.fMoveFrom, g.fMoveRow)   # a plain header click
     g.updateCursor(pointF(x, y))
   procCall doMouseUp(Control(g), button, shift, x, y)
 
@@ -969,6 +1062,13 @@ method paint*(g: DrawGrid, c: Canvas) =
   g.paintPane(c, fc, vr, rectF(v.x, a.y, min(fw, v.w), a.h), true, sel, focused)
   g.paintPane(c, vc, fr, rectF(a.x, v.y, a.w, min(fh, v.h)), true, sel, focused)
   g.paintPane(c, fc, fr, rectF(v.x, v.y, min(fw, v.w), min(fh, v.h)), true, sel, focused)
+  if g.fDrag == dmColMove and g.fMoveStarted and g.fMoveTo != g.fMoveFrom:
+    # drop marker: the edge of the target column the moved one will sit beside
+    let x = if g.fMoveTo > g.fMoveFrom: g.colX(g.fMoveTo) + g.fCols.size(g.fMoveTo)
+            else: g.colX(g.fMoveTo)
+    c.pushClip(v)
+    c.fillRect(rectF(x - 1, v.y, 2, v.h), t.accent)
+    c.popClip()
   c.strokeRoundRect(r, t.radius, if g.focused: t.focusRing else: t.borderStrong,
                     if g.focused: t.focusRingWidth else: t.borderWidth)
   procCall paint(Control(g), c)
@@ -1201,6 +1301,21 @@ method drawCell*(g: StringGrid, c: Canvas, col, row: int, rect: RectF,
     c.drawArrow(pointF(rect.right - 10, rect.y + rect.h / 2), 4,
                 if g.fSortAsc: adUp else: adDown, t.textMuted)
   g.drawCellText(c, r, g.cellOf(col, row), state, g.colAlignments[col], isHeader)
+
+method columnMoved*(g: StringGrid, fromCol, toCol: int) =
+  let hi = max(fromCol, toCol)
+  for r in 0 ..< g.fData.len:
+    if g.fData[r].len == 0: continue
+    if g.fData[r].len <= hi: g.fData[r].setLen(hi + 1)
+    let v = g.fData[r][fromCol]
+    g.fData[r].delete(fromCol)
+    g.fData[r].insert(v, toCol)
+  if g.fAligns.len <= hi: g.fAligns.setLen(hi + 1)
+  let a = g.fAligns[fromCol]
+  g.fAligns.delete(fromCol)
+  g.fAligns.insert(a, toCol)
+  if g.fSortCol >= 0: g.fSortCol = remapColumn(g.fSortCol, fromCol, toCol)
+  procCall columnMoved(DrawGrid(g), fromCol, toCol)
 
 method fixedCellClicked*(g: StringGrid, col, row: int) =
   procCall fixedCellClicked(DrawGrid(g), col, row)

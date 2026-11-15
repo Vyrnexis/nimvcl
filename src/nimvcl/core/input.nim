@@ -33,7 +33,7 @@
 ## Alt: `altHeld` follows the Alt key events (cleared on focus loss) and
 ## repaints the tree when it changes, so captions can underline their mnemonic.
 
-import std/[algorithm, strutils]
+import std/[algorithm, strutils, os, math]
 import ../graphics/[geometry, context, canvas]
 import ../platform/[window, events, cursors]
 import ./types, ./control, ./layout
@@ -46,7 +46,15 @@ type
     root*: Container
     win*: PlatformWindow
     ctx*: RenderContext
-    dirty*: bool                 ## a repaint is needed
+    dirty*: bool                 ## the whole tree needs repainting
+    dirtyRects*: seq[RectF]      ## partial repaint: regions (form coordinates,
+                                 ## device-pixel aligned, disjoint); used when
+                                 ## `useBackbuffer` and `dirty` is false
+    useBackbuffer*: bool         ## paint into a persistent per-window texture and
+                                 ## repaint only the dirty regions (Form: true;
+                                 ## Host and popups: false, they repaint fully)
+    lastPaintFull*: bool         ## the last frame repainted everything
+    lastPaintRects*: seq[RectF]  ## regions the last partial frame repainted
     keyPreview*: bool
     rootGetsMouse*: bool         ## the root itself is a mouse target (Form: true)
     autoSizeRoot*: bool          ## window size changes resize the root
@@ -86,7 +94,66 @@ func inside(a, b: Control): bool =
 
 # --------------------------------------------------------------- RootHost
 
-method invalidate*(ui: UiRoot, r: RectF) = ui.dirty = true
+const
+  MaxDirtyRects = 6              ## more regions than this collapse to their bounding box
+  FullRepaintShare = 0.85'f32    ## dirty area above this share of the form: repaint it all
+
+var debugDirty = -1              # NIMVCL_DEBUG_DIRTY=1: outline the repainted regions
+proc debugDirtyOn(): bool =
+  if debugDirty < 0: debugDirty = (if getEnv("NIMVCL_DEBUG_DIRTY") == "1": 1 else: 0)
+  debugDirty == 1
+
+func touches(a, b: RectF): bool =
+  ## Overlap or share an edge.
+  a.x <= b.right and b.x <= a.right and a.y <= b.bottom and b.y <= a.bottom
+
+func unionRect(a, b: RectF): RectF =
+  let x0 = min(a.x, b.x)
+  let y0 = min(a.y, b.y)
+  rectF(x0, y0, max(a.right, b.right) - x0, max(a.bottom, b.bottom) - y0)
+
+proc addDirtyRect*(list: var seq[RectF], r: RectF) =
+  ## Adds `r` to a list of disjoint rects: rects that overlap or touch are
+  ## merged into their bounding box, and more than `MaxDirtyRects` entries
+  ## collapse into one bounding box.
+  var cur = r
+  var i = 0
+  while i < list.len:
+    if touches(list[i], cur):
+      cur = unionRect(list[i], cur)
+      list.delete(i)
+      i = 0
+    else:
+      inc i
+  list.add cur
+  if list.len > MaxDirtyRects:
+    var bb = list[0]
+    for k in 1 .. list.high: bb = unionRect(bb, list[k])
+    list.setLen 0
+    list.add bb
+
+proc invalidateAll*(ui: UiRoot) =
+  ## The whole tree needs repainting.
+  ui.dirty = true
+  ui.dirtyRects.setLen 0
+
+method invalidate*(ui: UiRoot, r: RectF) =
+  if ui.dirty: return
+  if not ui.useBackbuffer or ui.ctx == nil:
+    ui.dirty = true
+    return
+  let s = ui.ctx.scale
+  let form = ui.root.clientRect
+  var x0 = floor(r.x * s) / s            # outwards to whole device pixels
+  var y0 = floor(r.y * s) / s
+  var x1 = ceil(r.right * s) / s
+  var y1 = ceil(r.bottom * s) / s
+  let c = intersect(rectF(x0, y0, x1 - x0, y1 - y0), form)
+  if c.isEmpty: return
+  ui.dirtyRects.addDirtyRect(c)
+  var area = 0'f32
+  for q in ui.dirtyRects: area += q.w * q.h
+  if area >= FullRepaintShare * form.w * form.h: ui.invalidateAll()
 method requestLayout*(ui: UiRoot) = ui.dirty = true
 
 proc effectiveCursor(c: Control): Cursor =
@@ -438,16 +505,18 @@ proc setWindowActive*(ui: UiRoot, active: bool) =
 proc syncScale*(ui: UiRoot) =
   ## Re-reads the window's pixel density and rebuilds font caches if it changed.
   if ui.win == nil or ui.ctx == nil: return
+  let before = ui.ctx.scale
   ui.ctx.setScale(ui.win.scale)
-  ui.dirty = true
+  if ui.ctx.scale != before: ui.invalidateAll()
 
 proc resize*(ui: UiRoot, w, h: float32) =
   ## Sets the root's size (logical px) and relayouts.
   let r = ui.root
+  let changed = r.width != w or r.height != h
   r.hostSized = true      # a window resize is not the design size
   try: r.setBounds(0, 0, w, h)
   finally: r.hostSized = false
-  ui.dirty = true
+  if changed: ui.invalidateAll()
 
 proc syncMetrics*(ui: UiRoot) =
   ## Scale and (when `autoSizeRoot`) root size from the window.
@@ -498,25 +567,85 @@ proc handle*(ui: UiRoot, pe: PlatformEvent): bool =
 
 # ------------------------------------------------------------------ paint
 
-proc needsPaint*(ui: UiRoot): bool = ui.dirty
+proc needsPaint*(ui: UiRoot): bool = ui.dirty or ui.dirtyRects.len > 0
+
+proc resetBackbuffer*(ui: UiRoot) =
+  ## The renderer lost its render targets (SDL_EVENT_RENDER_TARGETS_RESET /
+  ## DEVICE_RESET): drops the backbuffer and repaints everything.
+  if ui.win != nil: ui.win.dropBackbuffer()
+  ui.invalidateAll()
+
+proc paintRegions(ui: UiRoot, cv: Canvas, clear, full: bool,
+                  rects: openArray[RectF]) =
+  let root = ui.root
+  if full:
+    if clear: cv.clear(root.color)
+    root.paintTree(cv)
+  else:
+    for r in rects:
+      cv.pushClip(r)
+      if clear: cv.clearRect(r, root.color)
+      root.paintTree(cv)
+      cv.popClip()
 
 proc paintFrame*(ui: UiRoot, clear, present: bool) =
   ## Layout, then one frame: optional clear with the root colour, the tree,
-  ## optional present. Clears the dirty flag.
+  ## optional present. Clears the dirty state.
+  ##
+  ## With `useBackbuffer` the tree is drawn into the window's persistent
+  ## backbuffer texture, only inside the dirty regions (all of it when `dirty`
+  ## is set or the backbuffer was just (re)created); the backbuffer is then
+  ## copied to the window. Otherwise the tree is drawn straight to the current
+  ## target.
   if ui.ctx == nil: return
   ui.root.layoutIfNeeded()
   if ui.hoverStale:
     ui.hoverStale = false
     if ui.mouseInside and ui.fCaptured == nil: ui.setHover(ui.hitAt(ui.lastPos))
     ui.root.layoutIfNeeded()
+  var full = ui.dirty
+  var bb = false
+  if ui.useBackbuffer and ui.win != nil and ui.win.window != nil:
+    if ui.win.ensureBackbuffer(): full = true
+    bb = ui.win.hasBackbuffer
+  let rects = ui.dirtyRects
   ui.dirty = false
-  let cv = beginFrame(ui.ctx)
-  try:
-    if clear: cv.clear(ui.root.color)
-    ui.root.paintTree(cv)
-  finally:
-    cv.endFrame()          # restores the renderer state even when a paint raised
-  if present and ui.win != nil: ui.win.present()
+  ui.dirtyRects.setLen 0
+  if not bb:
+    let cv = beginFrame(ui.ctx)
+    try:
+      if clear: cv.clear(ui.root.color)
+      ui.root.paintTree(cv)
+    finally:
+      cv.endFrame()        # restores the renderer state even when a paint raised
+    ui.lastPaintFull = true
+    ui.lastPaintRects.setLen 0
+    if present and ui.win != nil: ui.win.present()
+    return
+  ui.lastPaintFull = full
+  ui.lastPaintRects = if full: @[] else: rects
+  if full or rects.len > 0:
+    ui.win.beginBackbuffer()
+    try:
+      let cv = beginFrame(ui.ctx)
+      try: ui.paintRegions(cv, clear, full, rects)
+      finally: cv.endFrame()
+    finally:
+      ui.win.endBackbuffer()
+  else:
+    ui.win.endBackbuffer()   # nothing to draw: just refresh the window copy
+  if present:
+    if debugDirtyOn():
+      let s = ui.ctx.scale
+      var dev: seq[tuple[x, y, w, h: int]]
+      if full:
+        dev.add (0, 0, int(round(ui.root.width * s)), int(round(ui.root.height * s)))
+      else:
+        for r in rects:
+          dev.add (int(round(r.x * s)), int(round(r.y * s)),
+                   int(round(r.w * s)), int(round(r.h * s)))
+      ui.win.drawDebugRects(dev)
+    ui.win.present()
 
 proc closeContext*(ui: UiRoot) =
   ## Closes the RenderContext (before the renderer is destroyed).

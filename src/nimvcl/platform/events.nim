@@ -20,7 +20,8 @@ type
     ekKeyDown, ekKeyUp, ekTextInput, ekTextEditing,
     ekWindowClose, ekWindowResized, ekWindowPixelSize, ekWindowScale,
     ekWindowExposed, ekWindowShown, ekWindowHidden, ekWindowMoved,
-    ekWindowMouseLeave, ekWindowFocusGained, ekWindowFocusLost
+    ekWindowMouseLeave, ekWindowFocusGained, ekWindowFocusLost,
+    ekRenderReset      ## render targets or the device were lost (no window)
 
   PlatformEvent* = object
     kind*: EventKind
@@ -150,6 +151,8 @@ proc translate*(ev: Event): PlatformEvent =
     return PlatformEvent(kind: ekTextEditing, windowId: e.windowID,
       text: (if e.text == nil: "" else: $e.text),
       editStart: int(e.start), editLength: int(e.length))
+  elif t == uint32(EVENT_RENDER_TARGETS_RESET) or t == uint32(EVENT_RENDER_DEVICE_RESET):
+    return PlatformEvent(kind: ekRenderReset)
   elif t == uint32(EVENT_WINDOW_CLOSE_REQUESTED): return simple(ekWindowClose)
   elif t == uint32(EVENT_WINDOW_RESIZED): return simple(ekWindowResized)
   elif t == uint32(EVENT_WINDOW_PIXEL_SIZE_CHANGED): return simple(ekWindowPixelSize)

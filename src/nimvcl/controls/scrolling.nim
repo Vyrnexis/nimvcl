@@ -15,6 +15,14 @@
 ##   `0 .. contentSize - viewport`. Change it with `scrollTo` / `scrollBy` /
 ##   `scrollIntoView`; read the pixel range with `maxScroll`.
 ##
+## Precision: positions and content sizes are kept as float64 internally, so
+## a list of millions of rows scrolls to the exact pixel. `scrollPos`,
+## `contentSize` and `maxScroll` return float32 (rounded; fine for small
+## content); use `scrollPosX/Y`, `contentW/H` and `maxScrollX/Y` (float64)
+## when you compute row positions for huge content, and convert to float32
+## only after subtracting the scroll position (viewport-relative values are
+## small).
+##
 ## What scrolling DOES to the display is a subclass choice:
 ##
 ## * `scrollsChildren = true` (ScrollBox): the Container scroll offset follows
@@ -45,8 +53,8 @@ type
   ScrollingControl* = ref object of Container
     fHBar, fVBar: ScrollBar
     fHMode, fVMode: ScrollBarMode
-    fContent: SizeF
-    fPos: PointF
+    fContentW, fContentH: float64
+    fPosX, fPosY: float64
     fNeedH, fNeedV: bool
     fScrollsChildren: bool
     fWheelLines: int
@@ -57,8 +65,16 @@ func hScrollBar*(c: ScrollingControl): ScrollBar = c.fHBar
 func vScrollBar*(c: ScrollingControl): ScrollBar = c.fVBar
 func hScrollMode*(c: ScrollingControl): ScrollBarMode = c.fHMode
 func vScrollMode*(c: ScrollingControl): ScrollBarMode = c.fVMode
-func contentSize*(c: ScrollingControl): SizeF = c.fContent
-func scrollPos*(c: ScrollingControl): PointF = c.fPos
+func contentSize*(c: ScrollingControl): SizeF =
+  sizeF(float32(c.fContentW), float32(c.fContentH))
+func scrollPos*(c: ScrollingControl): PointF =
+  pointF(float32(c.fPosX), float32(c.fPosY))
+func contentW*(c: ScrollingControl): float64 = c.fContentW
+func contentH*(c: ScrollingControl): float64 = c.fContentH
+func scrollPosX*(c: ScrollingControl): float64 = c.fPosX
+  ## `scrollPos.x` without float32 rounding.
+func scrollPosY*(c: ScrollingControl): float64 = c.fPosY
+  ## `scrollPos.y` without float32 rounding.
 func scrollsChildren*(c: ScrollingControl): bool = c.fScrollsChildren
 func wheelLines*(c: ScrollingControl): int = c.fWheelLines
 proc `wheelLines=`*(c: ScrollingControl, v: int) =
@@ -74,7 +90,7 @@ method contentScrolled*(c: ScrollingControl) {.base.} =
   ## `scrollPos` changed (after the bars were synced). Base: moves the
   ## Container scroll offset when `scrollsChildren`, repaints and fires
   ## `onScroll`. Subclasses call `procCall` then update their own state.
-  if c.fScrollsChildren: c.setScrollOffset(c.fPos.x, c.fPos.y)
+  if c.fScrollsChildren: c.setScrollOffset(float32(c.fPosX), float32(c.fPosY))
   else: c.invalidate()
   if c.onScroll != nil: c.onScroll(c)
 
@@ -83,11 +99,11 @@ proc computeNeeds(c: ScrollingControl) =
   let aw = max(c.width - pad.horizontal, 0)
   let ah = max(c.height - pad.vertical, 0)
   let bs = DefaultScrollBarSize
-  template need(mode: ScrollBarMode, content, avail: float32): bool =
-    mode == sbmAlways or (mode == sbmAuto and content > avail)
-  var nv = need(c.fVMode, c.fContent.h, ah)
-  var nh = need(c.fHMode, c.fContent.w, aw - (if nv: bs else: 0))
-  nv = need(c.fVMode, c.fContent.h, ah - (if nh: bs else: 0))
+  template need(mode: ScrollBarMode, content: float64, avail: float32): bool =
+    mode == sbmAlways or (mode == sbmAuto and content > float64(avail))
+  var nv = need(c.fVMode, c.fContentH, ah)
+  var nh = need(c.fHMode, c.fContentW, aw - (if nv: bs else: 0))
+  nv = need(c.fVMode, c.fContentH, ah - (if nh: bs else: 0))
   c.fNeedH = nh
   c.fNeedV = nv
 
@@ -99,9 +115,13 @@ func viewport*(c: ScrollingControl): RectF =
         max(c.width - pad.horizontal - (if c.fNeedV: bs else: 0), 0),
         max(c.height - pad.vertical - (if c.fNeedH: bs else: 0), 0))
 
+func maxScrollX*(c: ScrollingControl): float64 =
+  max(c.fContentW - float64(c.viewport.w), 0.0)
+func maxScrollY*(c: ScrollingControl): float64 =
+  max(c.fContentH - float64(c.viewport.h), 0.0)
+
 func maxScroll*(c: ScrollingControl): PointF =
-  let v = c.viewport
-  pointF(max(c.fContent.w - v.w, 0), max(c.fContent.h - v.h, 0))
+  pointF(float32(c.maxScrollX), float32(c.maxScrollY))
 
 method viewportRect*(c: ScrollingControl): RectF = c.viewport
 
@@ -116,22 +136,22 @@ proc syncBars(c: ScrollingControl) =
   c.fHBar.smallChange = ls.w
   c.fVBar.largeChange = max(v.h - ls.h, ls.h)
   c.fHBar.largeChange = max(v.w - ls.w, ls.w)
-  c.fVBar.setRange(0, max(c.fContent.h, 0), v.h)
-  c.fHBar.setRange(0, max(c.fContent.w, 0), v.w)
-  c.fVBar.position = c.fPos.y
-  c.fHBar.position = c.fPos.x
+  c.fVBar.setRange64(0, max(c.fContentH, 0.0), float64(v.h))
+  c.fHBar.setRange64(0, max(c.fContentW, 0.0), float64(v.w))
+  c.fVBar.setPosition64(c.fPosY)
+  c.fHBar.setPosition64(c.fPosX)
   c.fSyncing = false
 
-proc applyPos(c: ScrollingControl, x, y: float32, force = false) =
-  let m = c.maxScroll
-  let nx = min(max(x, 0), m.x)
-  let ny = min(max(y, 0), m.y)
-  if nx == c.fPos.x and ny == c.fPos.y and not force: return
-  let changed = nx != c.fPos.x or ny != c.fPos.y
-  c.fPos = pointF(nx, ny)
+proc applyPos(c: ScrollingControl, x, y: float64, force = false) =
+  let nx = min(max(x, 0.0), c.maxScrollX)
+  let ny = min(max(y, 0.0), c.maxScrollY)
+  if nx == c.fPosX and ny == c.fPosY and not force: return
+  let changed = nx != c.fPosX or ny != c.fPosY
+  c.fPosX = nx
+  c.fPosY = ny
   c.fSyncing = true
-  c.fVBar.position = ny
-  c.fHBar.position = nx
+  c.fVBar.setPosition64(ny)
+  c.fHBar.setPosition64(nx)
   c.fSyncing = false
   if changed or force: c.contentScrolled()
 
@@ -142,30 +162,35 @@ proc updateScrollBars*(c: ScrollingControl) =
   c.computeNeeds()
   c.syncBars()
   if (c.fNeedH, c.fNeedV) != was: c.invalidate()
-  c.applyPos(c.fPos.x, c.fPos.y)
+  c.applyPos(c.fPosX, c.fPosY)
 
-proc scrollTo*(c: ScrollingControl, x, y: float32) =
+proc scrollTo*(c: ScrollingControl, x, y: float64) =
   ## Sets `scrollPos` (clamped).
   c.applyPos(x, y)
 
-proc scrollBy*(c: ScrollingControl, dx, dy: float32) =
-  c.applyPos(c.fPos.x + dx, c.fPos.y + dy)
+proc scrollBy*(c: ScrollingControl, dx, dy: float64) =
+  c.applyPos(c.fPosX + dx, c.fPosY + dy)
+
+proc scrollIntoView*(c: ScrollingControl, rx, ry, rw, rh: float64) =
+  ## float64 form of `scrollIntoView(RectF)` (exact for huge content).
+  let v = c.viewport
+  var x = c.fPosX
+  var y = c.fPosY
+  if rw > float64(v.w) or rx < x: x = rx
+  elif rx + rw > x + float64(v.w): x = rx + rw - float64(v.w)
+  if rh > float64(v.h) or ry < y: y = ry
+  elif ry + rh > y + float64(v.h): y = ry + rh - float64(v.h)
+  c.applyPos(x, y)
 
 proc scrollIntoView*(c: ScrollingControl, r: RectF) =
   ## Scrolls the minimum distance that shows `r` (CONTENT coordinates) in the
   ## viewport; a rect larger than the viewport is aligned at its top-left.
-  let v = c.viewport
-  var x = c.fPos.x
-  var y = c.fPos.y
-  if r.w > v.w or r.x < x: x = r.x
-  elif r.right > x + v.w: x = r.right - v.w
-  if r.h > v.h or r.y < y: y = r.y
-  elif r.bottom > y + v.h: y = r.bottom - v.h
-  c.applyPos(x, y)
+  c.scrollIntoView(float64(r.x), float64(r.y), float64(r.w), float64(r.h))
 
-proc setContentSize*(c: ScrollingControl, w, h: float32) =
-  if w == c.fContent.w and h == c.fContent.h: return
-  c.fContent = sizeF(w, h)
+proc setContentSize*(c: ScrollingControl, w, h: float64) =
+  if w == c.fContentW and h == c.fContentH: return
+  c.fContentW = w
+  c.fContentH = h
   c.updateScrollBars()
 
 proc `hScrollMode=`*(c: ScrollingControl, v: ScrollBarMode) =
@@ -196,18 +221,19 @@ method doMouseWheel*(c: ScrollingControl, shift: ShiftState, dx, dy: float32,
     mx = dy
     my = 0
   let ls = c.scrollLineSize()
-  let lines = float32(c.fWheelLines)
-  let m = c.maxScroll
-  var nx = c.fPos.x
-  var ny = c.fPos.y
+  let lines = float64(c.fWheelLines)
+  let mxs = c.maxScrollX
+  let mys = c.maxScrollY
+  var nx = c.fPosX
+  var ny = c.fPosY
   var moved = false
-  if my != 0 and m.y > 0:
-    let t = min(max(ny - my * lines * ls.h, 0), m.y)
+  if my != 0 and mys > 0:
+    let t = min(max(ny - float64(my) * lines * float64(ls.h), 0.0), mys)
     if t != ny:
       ny = t
       moved = true
-  if mx != 0 and m.x > 0:
-    let t = min(max(nx - mx * lines * ls.w, 0), m.x)
+  if mx != 0 and mxs > 0:
+    let t = min(max(nx - float64(mx) * lines * float64(ls.w), 0.0), mxs)
     if t != nx:
       nx = t
       moved = true
@@ -225,7 +251,7 @@ proc initScrollingControl*(c: ScrollingControl, owner: Component = nil,
   let onBar = proc(s: Control) =
     let sc = ScrollingControl(s.parent)
     if sc == nil or sc.fSyncing: return
-    sc.applyPos(sc.fHBar.position, sc.fVBar.position)
+    sc.applyPos(sc.fHBar.position64, sc.fVBar.position64)
   c.fVBar = newScrollBar(c, sbVertical)
   c.fVBar.align = alRight
   c.fVBar.visible = false

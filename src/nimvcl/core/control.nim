@@ -295,12 +295,28 @@ func formToClient*(c: Control, r: RectF): RectF =
 
 # ------------------------------------------------------- invalidate / layout
 
+proc visibleInForm(c: Control, r: RectF): RectF
+  # (defined below `viewportRect`)
+
+var gPaintedControls*: int
+  ## Number of controls `paintTree` has painted so far (test/diagnostic hook:
+  ## compare before and after a frame to see how much a repaint touched).
+
 proc invalidate*(c: Control, r: RectF) =
-  ## Repaint `r` (client coordinates of `c`). No-op without a host or when `c`
-  ## is not visible.
+  ## Repaint `r` (client coordinates of `c`). The rect is clipped to what is
+  ## visible (the client rects and scroll viewports of `c` and its ancestors);
+  ## when nothing is left, nothing is invalidated. No-op without a host or when
+  ## `c` is not visible. Prefer a small `r` when only a small area changed (a
+  ## caret): the form then repaints only that region.
   let h = c.host
   if h == nil or not c.isVisible: return
-  h.invalidate(c.clientToForm(r))
+  let v = c.visibleInForm(r)
+  if v.isEmpty: return
+  h.invalidate(v)
+
+proc invalidateRect*(c: Control, r: RectF) =
+  ## Same as `invalidate(c, r)`: repaint only `r` (client coordinates of `c`).
+  c.invalidate(r)
 
 proc invalidate*(c: Control) =
   ## Repaint the whole control.
@@ -829,6 +845,22 @@ proc controlAtPoint*(c: Container, p: PointF, includeDisabled = false): Control 
 
 # -------------------------------------------------------------------- paint
 
+proc visibleInForm(c: Control, r: RectF): RectF =
+  ## `r` (client coordinates of `c`) clipped through every ancestor, in form
+  ## (root client) coordinates; empty when it is entirely clipped away.
+  result = r
+  var x = c
+  while true:
+    result = intersect(result, x.clientRect)
+    if result.isEmpty: return
+    let p = x.fParent
+    if p == nil: return
+    result = x.clientToParent(result)
+    if x.fAlign == alNone:      # scrolling children are clipped to the viewport
+      result = intersect(result, p.viewportRect())
+      if result.isEmpty: return
+    x = p
+
 proc paintTree*(c: Control, canvas: Canvas) =
   ## Paints `c` and its visible children. The canvas must be positioned at the
   ## parent's client origin (for a root: at the form origin). For each control:
@@ -837,6 +869,7 @@ proc paintTree*(c: Control, canvas: Canvas) =
   if not c.fVisible: return
   let o = if c.fParent == nil: pointF(0, 0) else: originInParent(c)
   if canvas.isClippedOut(rectF(o.x, o.y, c.fWidth, c.fHeight)): return
+  inc gPaintedControls
   # scrolling (alNone) children are clipped to the parent's viewport
   var clipVp = false
   if c.fParent != nil and c.fAlign == alNone:

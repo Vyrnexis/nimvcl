@@ -33,8 +33,8 @@ type
 
   ScrollBar* = ref object of Control
     fKind: ScrollBarKind
-    fMin, fMax, fPage, fPos: float32
-    fSmall, fLarge: float32
+    fMin, fMax, fPage, fPos: float64   # float64: exact for millions of rows
+    fSmall, fLarge: float64
     fArrows: bool
     fWheelLines: int
     fHot, fThumbHot, fDragging: bool
@@ -47,31 +47,36 @@ const
   MinThumbLength = 24'f32
 
 func kind*(s: ScrollBar): ScrollBarKind = s.fKind
-func min*(s: ScrollBar): float32 = s.fMin
-func max*(s: ScrollBar): float32 = s.fMax
-func pageSize*(s: ScrollBar): float32 = s.fPage
-func position*(s: ScrollBar): float32 = s.fPos
-func smallChange*(s: ScrollBar): float32 = s.fSmall
-func largeChange*(s: ScrollBar): float32 = s.fLarge
+func min*(s: ScrollBar): float32 = float32(s.fMin)
+func max*(s: ScrollBar): float32 = float32(s.fMax)
+func pageSize*(s: ScrollBar): float32 = float32(s.fPage)
+func position*(s: ScrollBar): float32 = float32(s.fPos)
+func smallChange*(s: ScrollBar): float32 = float32(s.fSmall)
+func largeChange*(s: ScrollBar): float32 = float32(s.fLarge)
+func position64*(s: ScrollBar): float64 = s.fPos
+  ## `position` without the float32 rounding (exact beyond 16 million pixels).
 func showArrows*(s: ScrollBar): bool = s.fArrows
 func wheelLines*(s: ScrollBar): int = s.fWheelLines
 proc `wheelLines=`*(s: ScrollBar, v: int) = s.fWheelLines = system.max(v, 1)
 
+func maxPos64(s: ScrollBar): float64 = system.max(s.fMin, s.fMax - s.fPage)
+
 func maxPosition*(s: ScrollBar): float32 =
   ## Highest reachable position: `max - pageSize` (never below `min`).
-  system.max(s.fMin, s.fMax - s.fPage)
+  float32(s.maxPos64)
 
-func canScroll*(s: ScrollBar): bool = s.maxPosition > s.fMin
+func canScroll*(s: ScrollBar): bool = s.maxPos64 > s.fMin
 
-func effectiveLarge(s: ScrollBar): float32 =
+func effectiveLarge(s: ScrollBar): float64 =
   if s.fLarge > 0: s.fLarge
   elif s.fPage > 0: s.fPage
   else: s.fSmall * 10
 
-proc clampPos(s: ScrollBar, v: float32): float32 =
-  system.min(system.max(v, s.fMin), s.maxPosition)
+proc clampPos(s: ScrollBar, v: float64): float64 =
+  system.min(system.max(v, s.fMin), s.maxPos64)
 
-proc `position=`*(s: ScrollBar, v: float32) =
+proc setPosition64*(s: ScrollBar, v: float64) =
+  ## `position=` with float64 precision.
   let n = s.clampPos(v)
   if n == s.fPos: return
   s.fPos = n
@@ -79,8 +84,10 @@ proc `position=`*(s: ScrollBar, v: float32) =
   let h = s.onChange        # copy: the handler may clear or replace itself
   if h != nil: h(s)
 
-proc setRange*(s: ScrollBar, min, max: float32, pageSize = 0'f32) =
-  ## Sets min, max and pageSize at once (clamping `position`, one `onChange`).
+proc `position=`*(s: ScrollBar, v: float32) = s.setPosition64(float64(v))
+
+proc setRange64*(s: ScrollBar, min, max: float64, pageSize = 0.0) =
+  ## `setRange` with float64 precision.
   s.fMin = min
   s.fMax = system.max(max, min)
   s.fPage = system.max(pageSize, 0)
@@ -91,22 +98,34 @@ proc setRange*(s: ScrollBar, min, max: float32, pageSize = 0'f32) =
     let h = s.onChange
     if h != nil: h(s)
 
-proc `min=`*(s: ScrollBar, v: float32) = s.setRange(v, s.fMax, s.fPage)
-proc `max=`*(s: ScrollBar, v: float32) = s.setRange(s.fMin, v, s.fPage)
-proc `pageSize=`*(s: ScrollBar, v: float32) = s.setRange(s.fMin, s.fMax, v)
-proc `smallChange=`*(s: ScrollBar, v: float32) = s.fSmall = system.max(v, 0)
-proc `largeChange=`*(s: ScrollBar, v: float32) = s.fLarge = system.max(v, 0)
+proc setRange*(s: ScrollBar, min, max: float32, pageSize = 0'f32) =
+  ## Sets min, max and pageSize at once (clamping `position`, one `onChange`).
+  s.setRange64(float64(min), float64(max), float64(pageSize))
+
+proc `min=`*(s: ScrollBar, v: float32) = s.setRange64(float64(v), s.fMax, s.fPage)
+proc `max=`*(s: ScrollBar, v: float32) = s.setRange64(s.fMin, float64(v), s.fPage)
+proc `pageSize=`*(s: ScrollBar, v: float32) = s.setRange64(s.fMin, s.fMax, float64(v))
+proc `smallChange=`*(s: ScrollBar, v: float32) = s.fSmall = system.max(float64(v), 0.0)
+proc `largeChange=`*(s: ScrollBar, v: float32) = s.fLarge = system.max(float64(v), 0.0)
 proc `showArrows=`*(s: ScrollBar, v: bool) =
   if v == s.fArrows: return
   s.fArrows = v
   s.invalidate()
 
+proc fireScroll(s: ScrollBar, code: ScrollCode, p: var float64) =
+  ## Runs `onScroll` (float32 contract); an unchanged value keeps full precision.
+  let h = s.onScroll
+  if h == nil: return
+  var q = float32(p)
+  let q0 = q
+  h(s, code, q)
+  if q != q0: p = float64(q)
+
 proc scrollBy*(s: ScrollBar, code: ScrollCode, delta: float32) =
   ## A user-style move: `onScroll` may adjust the target, then `position` is set.
-  var p = s.fPos + delta
-  let h = s.onScroll
-  if h != nil: h(s, code, p)
-  s.position = p
+  var p = s.fPos + float64(delta)
+  s.fireScroll(code, p)
+  s.setPosition64(p)
 
 # ---------------------------------------------------------------- geometry
 
@@ -125,16 +144,17 @@ func trackLen(s: ScrollBar): float32 = system.max(s.length - 2 * s.arrowLen, 0)
 func thumbLen(s: ScrollBar): float32 =
   let tl = s.trackLen
   let span = s.fMax - s.fMin
-  var l = if s.fPage > 0 and span > 0: tl * s.fPage / span else: MinThumbLength
+  var l = if s.fPage > 0 and span > 0: float32(float64(tl) * s.fPage / span)
+          else: MinThumbLength
   l = system.max(l, MinThumbLength)
   system.min(l, tl)
 
 func thumbStart(s: ScrollBar): float32 =
   ## Offset of the thumb along the bar.
   let free = s.trackLen - s.thumbLen
-  let range = s.maxPosition - s.fMin
+  let range = s.maxPos64 - s.fMin
   if free <= 0 or range <= 0: return s.trackStart
-  s.trackStart + (s.fPos - s.fMin) / range * free
+  s.trackStart + float32((s.fPos - s.fMin) / range * float64(free))
 
 func alongRect(s: ScrollBar, start, len: float32): RectF =
   if s.fKind == sbVertical: rectF(0, start, s.width, len)
@@ -153,10 +173,9 @@ proc dragTo(s: ScrollBar, mouse: float32) =
   if free <= 0: return
   let ts = mouse - s.fGrab
   let frac = (ts - s.trackStart) / free
-  var p = s.fMin + frac * (s.maxPosition - s.fMin)
-  let h = s.onScroll
-  if h != nil: h(s, scThumbTrack, p)
-  s.position = p
+  var p = s.fMin + float64(frac) * (s.maxPos64 - s.fMin)
+  s.fireScroll(scThumbTrack, p)
+  s.setPosition64(p)
 
 # ------------------------------------------------------------------- events
 
@@ -223,7 +242,7 @@ method doMouseWheel*(s: ScrollBar, shift: ShiftState, dx, dy: float32,
     else: dy
   if d == 0: return
   let before = s.fPos
-  s.scrollBy(scWheel, -d * float32(s.fWheelLines) * s.fSmall)
+  s.scrollBy(scWheel, float32(-float64(d) * float64(s.fWheelLines) * s.fSmall))
   if s.fPos != before: handled = true
 
 method doExit*(s: ScrollBar) =

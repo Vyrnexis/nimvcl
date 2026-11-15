@@ -247,17 +247,18 @@ method scrollLineSize*(tv: TreeView): SizeF = sizeF(24, tv.itemHeight)
 proc refresh(tv: TreeView) =
   if tv.fUpdating > 0: return
   let ih = tv.itemHeight
-  let cs = sizeF(tv.fExtent, float32(tv.fRows.len) * ih)
+  let csW = float64(tv.fExtent)
+  let csH = float64(tv.fRows.len) * float64(ih)   # float64: exact for huge trees
   if tv.fLastIh > 0 and ih != tv.fLastIh:
     let old = tv.fLastIh
-    let y = float32(float64(tv.scrollPos.y) / float64(old) * float64(ih))
+    let y = tv.scrollPosY / float64(old) * float64(ih)
     tv.fLastIh = ih
-    if ih < old: tv.scrollTo(tv.scrollPos.x, y)
-    tv.setContentSize(cs.w, cs.h)
-    if ih >= old: tv.scrollTo(tv.scrollPos.x, y)
+    if ih < old: tv.scrollTo(tv.scrollPosX, y)
+    tv.setContentSize(csW, csH)
+    if ih >= old: tv.scrollTo(tv.scrollPosX, y)
   else:
     tv.fLastIh = ih
-    tv.setContentSize(cs.w, cs.h)
+    tv.setContentSize(csW, csH)
   tv.invalidate()
 
 method beforeLayout*(tv: TreeView) =
@@ -327,7 +328,7 @@ proc hotUpdate(tv: TreeView)
 proc makeRowVisible*(tv: TreeView, row: int) =
   if row < 0 or row >= tv.fRows.len: return
   let ih = tv.itemHeight
-  tv.scrollIntoView(rectF(tv.scrollPos.x, float32(row) * ih, 1, ih))
+  tv.scrollIntoView(tv.scrollPosX, float64(row) * float64(ih), 1, float64(ih))
 
 proc layoutEdit(tv: TreeView)
 
@@ -338,9 +339,9 @@ method contentScrolled*(tv: TreeView) =
   tv.layoutEdit()
 
 proc firstFullRow(tv: TreeView): int =
-  int(ceil(float64(tv.scrollPos.y) / float64(tv.itemHeight)))
+  int(ceil(tv.scrollPosY / float64(tv.itemHeight)))
 proc lastFullRow(tv: TreeView): int =
-  min(int(floor((float64(tv.scrollPos.y) + float64(tv.viewport.h)) /
+  min(int(floor((tv.scrollPosY + float64(tv.viewport.h)) /
                 float64(tv.itemHeight))) - 1, tv.fRows.len - 1)
 
 # ----------------------------------------------------------------- geometry
@@ -349,7 +350,7 @@ func colOf(tv: TreeView, n: TreeNode): int =
   n.fLevel - (if tv.fShowRoot: 0 else: 1)
 
 proc rowTop(tv: TreeView, i: int, ih: float32): float32 =
-  tv.viewport.y + float32(float64(i) * float64(ih) - float64(tv.scrollPos.y))
+  tv.viewport.y + float32(float64(i) * float64(ih) - tv.scrollPosY)
 
 proc geom(tv: TreeView, n: TreeNode, y: float32, ih: float32): NodeGeom =
   let vp = tv.viewport
@@ -400,7 +401,7 @@ proc rowAt*(tv: TreeView, p: PointF): int =
   ## Visible row under `p` (client coordinates); -1 outside the rows.
   let vp = tv.viewport
   if not vp.contains(p): return -1
-  let i = int(floor((float64(p.y - vp.y) + float64(tv.scrollPos.y)) /
+  let i = int(floor((float64(p.y - vp.y) + tv.scrollPosY) /
                     float64(tv.itemHeight)))
   if i < 0 or i >= tv.fRows.len: -1 else: i
 
@@ -1274,8 +1275,8 @@ method paint*(tv: TreeView, c: Canvas) =
   let focused = tv.focused
   let n = tv.fRows.len
   c.pushClip(vp)
-  let first = max(int(floor(float64(tv.scrollPos.y) / float64(ih))), 0)
-  let last = min(int(ceil((float64(tv.scrollPos.y) + float64(vp.h)) / float64(ih))), n)
+  let first = max(int(floor(tv.scrollPosY / float64(ih))), 0)
+  let last = min(int(ceil((tv.scrollPosY + float64(vp.h)) / float64(ih))), n)
   let rad = max(t.radius - 1, 2)
   var maxRight = 0'f32
   for i in first ..< last:

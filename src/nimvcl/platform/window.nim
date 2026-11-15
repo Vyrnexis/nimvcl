@@ -22,6 +22,8 @@ type
     textInputOn: bool
     popup*: bool               ## created through `createPlatformPopup`
     popupFallback*: bool       ## a popup emulated with a borderless top-level window
+    backbuf: Texture           ## persistent render target (partial repaints), device px
+    bbW, bbH: cint             ## size the backbuffer was last (re)built for
 
 proc wrapWindow*(window: Window, renderer: Renderer): PlatformWindow =
   ## Wraps a window and renderer owned by the caller (host mode).
@@ -47,10 +49,19 @@ proc createPlatformWindow*(title: string, logicalW, logicalH: float32,
   discard setRenderVSync(r, 1)
   PlatformWindow(window: w, renderer: r, owned: true, forcedScale: forcedScale)
 
+proc dropBackbuffer*(w: PlatformWindow) =
+  ## Frees the backbuffer texture (the next `ensureBackbuffer` rebuilds it).
+  if w.backbuf != nil:
+    destroyTexture(w.backbuf)
+    w.backbuf = nil
+  w.bbW = 0
+  w.bbH = 0
+
 proc destroy*(w: PlatformWindow) =
   ## Destroys the renderer, then the window (when owned). The RenderContext
   ## bound to the renderer must be closed BEFORE this.
   if w.window == nil: return
+  w.dropBackbuffer()
   if w.owned:
     if w.renderer != nil: destroyRenderer(w.renderer)
     destroyWindow(w.window)
@@ -152,6 +163,51 @@ proc setTextInputArea*(w: PlatformWindow, r: RectF) =
   discard sdl3.setTextInputArea(w.window, addr rc, 0)
 
 proc present*(w: PlatformWindow) = discard renderPresent(w.renderer)
+
+# --------------------------------------------------------------- backbuffer
+
+proc hasBackbuffer*(w: PlatformWindow): bool = w.backbuf != nil
+
+proc ensureBackbuffer*(w: PlatformWindow): bool =
+  ## Makes sure a render-target texture the size of the window's output exists.
+  ## True when it was (re)created, i.e. its content is undefined and the caller
+  ## must repaint everything. When the renderer cannot make target textures
+  ## `hasBackbuffer` stays false and the caller paints straight to the window.
+  ## The renderer's current target must be the window.
+  var pw, ph: cint
+  discard getCurrentRenderOutputSize(w.renderer, pw, ph)
+  if pw <= 0 or ph <= 0: return false
+  if pw == w.bbW and ph == w.bbH: return false
+  w.dropBackbuffer()
+  w.bbW = pw
+  w.bbH = ph
+  w.backbuf = createTexture(w.renderer, PIXELFORMAT_ARGB8888, TEXTUREACCESS_TARGET, pw, ph)
+  if w.backbuf != nil:
+    discard setTextureBlendMode(w.backbuf, BLENDMODE_NONE)
+    discard setTextureScaleMode(w.backbuf, SCALEMODE_NEAREST)
+  w.backbuf != nil
+
+proc beginBackbuffer*(w: PlatformWindow) =
+  ## Directs drawing into the backbuffer.
+  discard setRenderTarget(w.renderer, w.backbuf)
+
+proc endBackbuffer*(w: PlatformWindow) =
+  ## Back to the window, then copies the whole backbuffer onto it (no
+  ## blending). Does not present.
+  discard setRenderTarget(w.renderer, nil)
+  discard setRenderClipRect(w.renderer, nil)
+  discard renderTexture(w.renderer, w.backbuf, nil, nil)
+
+proc drawDebugRects*(w: PlatformWindow, rects: openArray[tuple[x, y, w, h: int]]) =
+  ## Debug overlay on the window (not the backbuffer): a translucent red fill
+  ## and an outline around each device-pixel rect. Gone with the next frame.
+  discard setRenderDrawBlendMode(w.renderer, BLENDMODE_BLEND)
+  for r in rects:
+    var f = FRect(x: r.x.float32, y: r.y.float32, w: r.w.float32, h: r.h.float32)
+    discard setRenderDrawColor(w.renderer, 255, 0, 0, 48)
+    discard renderFillRect(w.renderer, f)
+    discard setRenderDrawColor(w.renderer, 255, 0, 0, 255)
+    discard renderRect(w.renderer, f)
 
 proc rendererName*(w: PlatformWindow): string = $getRendererName(w.renderer)
 

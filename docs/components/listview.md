@@ -38,7 +38,8 @@ ListItem: `caption`, `subItems`, `imageIndex`, `checked`, `selected`, `data`, `t
 
 | Event | Description |
 |---|---|
-| `onSelectItem(sender, item, selected)` | Selection changed |
+| `onSelectItem(sender, item, selected)` | One call per item whose selection changed |
+| `onSelectionChanged(sender, added, removed)` | One call per selection change, with the sorted indices that became selected and the ones that no longer are |
 | `onChange` | Focus or selection changed |
 | `onItemDblClick(sender, index, column)` | Double click on an item (not the header or empty space); `column` is the report-view column under the pointer, -1 in other views |
 | `onItemChecked(sender, item)` | A check box toggled |
@@ -76,8 +77,24 @@ ListItem: `caption`, `subItems`, `imageIndex`, `checked`, `selected`, `data`, `t
   `onSelectItem` only for items whose state changed, and it is fast even with
   100,000 selected rows in virtual mode. Plain Space toggles the focused item
   when `multiSelect` is on and `extendedSelect` is off.
+* **Big selections**: `selectAll()`, `clearSelection()` or `setSelection` on
+  100,000 rows call `onSelectItem` 100,000 times (in virtual mode each call can
+  reach `onData`). When you only need to know *that* and *what* changed, use
+  `onSelectionChanged`: it fires once per change (also when selected items are
+  deleted or `itemsCount` shrinks) and leaves `onSelectItem` free to stay nil,
+  in which case nothing per item is computed. With both set, the per-item calls
+  come first, then `onSelectionChanged`, then `onChange`.
+
+  ```nim
+  lv.onSelectionChanged = proc(sender: Control, added, removed: openArray[int]) =
+    echo added.len, " selected, ", removed.len, " deselected"
+  ```
+* Millions of rows scroll to the exact pixel (the scroll position is float64):
+  a 5,000,000-row virtual list is fine; `itemRect(i)` and `itemAt(point)` agree
+  with what is painted at every position.
 * Sorting is yours: handle `onColumnClick` and call `sortByColumn`.
 * Sub-item `k` is column `k + 1`; the caption is column 0.
-* Drag the right edge of a column header to resize it.
+* Drag the right edge of a column header to resize it. (Dragging headers to
+  reorder columns is not supported; the grids have `goColMoving`.)
 
 [Back to the index](../README.md)

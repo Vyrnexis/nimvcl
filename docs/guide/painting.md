@@ -45,6 +45,34 @@ For another font, add it yourself: `addFallbackFontFile("/path/to/font.ttf")`.
 Missing files are ignored. (Color emoji fonts are not probed: SDL_ttf cannot
 scale their bitmaps.)
 
+## Partial repainting
+
+A `Form` draws into a persistent backbuffer texture (device pixels) and copies
+it to the window, so a repaint only needs to redraw what changed:
+
+* `c.invalidate()` marks the whole control dirty; `c.invalidateRect(r)` (or
+  `c.invalidate(r)`) marks only `r`, in the client coordinates of `c`. Rects are
+  clipped to what is visible (ancestors, scroll viewports), snapped outwards to
+  whole device pixels and merged when they overlap or touch; more than six
+  regions collapse into their bounding box, and a region covering most of the
+  form (or any `requestLayout`, scroll, theme or scale change, resize) repaints
+  the whole form.
+* For each dirty region the form sets the clip and paints the tree as usual
+  (parents first, siblings in z-order), so your `paint` is called with a clip
+  that may be smaller than the control. Draw as always; do not assume a full
+  frame. A control that paints a small moving part (like the `Edit` caret)
+  should invalidate that part **and** whatever it erases, e.g.
+  `invalidate(caretRect.inflate(1, 1))`.
+* `paint` must draw the control's whole look from its state (no "draw only the
+  change"): the parent's background is repainted first, so anti-aliased and
+  translucent controls composite correctly.
+* Popups and `Host` (embedding) always repaint fully. A lost render target
+  (`SDL_EVENT_RENDER_TARGETS_RESET`) forces a full repaint.
+* `form.screenshot(path)` reads the backbuffer; `form.screenshot(path, full =
+  true)` discards it and repaints everything first.
+* Debug: run with `NIMVCL_DEBUG_DIRTY=1` to outline (red) the regions each frame
+  repainted. The overlay is drawn on the window only, not in screenshots.
+
 ## Screenshots
 
 `form.screenshot(path)` and `screenshotWithPopups(form, path)` render one frame
@@ -158,7 +186,10 @@ What to know:
   unsubscribe there.
 * **`hitTest(p)`** can return false to let clicks pass through (as `Bevel` does).
 * **Properties**: use setters that call `invalidate()` for a repaint, or
-  `requestLayout()` when the size or position of siblings can change.
+  `requestLayout()` when the size or position of siblings can change. When
+  only a small part changed (a caret, a progress segment), call
+  `invalidateRect(r)` (same as `invalidate(r)`) with that rect in the control's
+  client coordinates: see "Partial repainting" below.
 * Read colors and metrics from `theme` so your control follows the light and dark
   themes, see [theming](theming.md).
 

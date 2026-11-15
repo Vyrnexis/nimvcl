@@ -48,6 +48,8 @@ echo memo.text            # lines joined with "\n"
 | `copyToClipboard()`, `cutToClipboard()`, `pasteFromClipboard()` | Clipboard |
 | `clear()` | Remove everything |
 | `scrollCaretIntoView()` | Reveal the caret |
+| `extentsExact` | True when the scroll range is exact (see below) |
+| `measureAll()` | Finish measuring a big text now |
 
 ## Tips
 
@@ -61,5 +63,21 @@ echo memo.text            # lines joined with "\n"
 * With `wantReturns` on, Enter never reaches a default button.
 * `text =` and the `lines` API work on read-only memos and clear undo.
 * Memo is built on `ScrollingControl`, so it has `scrollPos` and `scrollTo`.
+* **Big texts**: only the visible lines are drawn, and a million lines scroll
+  to the exact pixel. Up to 500 lines the scroll range (widest line, or with
+  `wordWrap` the number of wrapped rows) is always exact. A bigger text is
+  measured in the background, a few milliseconds at a time, so typing and
+  scrolling stay responsive; the range is exact for the lines measured so far
+  and settles when all are done (`extentsExact` is then true; it takes on the
+  order of 20 microseconds per line). Editing is incremental: a changed line is
+  measured at once, the widest line is tracked with a counter, and only making
+  the last widest line narrower costs one scan. While wrapping, the view stays
+  anchored on the same text when rows above it are measured.
+
+  ```nim
+  memo.text = hugeString
+  memo.measureAll()                     # optional: exact range right now (slow for 1M lines)
+  echo memo.extentsExact, " ", memo.visualRowCount
+  ```
 
 [Back to the index](../README.md)
