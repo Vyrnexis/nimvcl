@@ -16,8 +16,8 @@ type
   Label* = ref object of Control
     fAlignment: HAlign
     fLayout: VAlign
-    fWordWrap, fTransparent, fHasTextColor: bool
-    fTextColor: Color
+    fWordWrap, fTransparent: bool
+    fText: TextStyle
     fFocusControl: Control
 
 func alignment*(l: Label): HAlign = l.fAlignment
@@ -52,17 +52,28 @@ proc `focusControl=`*(l: Label, v: Control) = l.fFocusControl = v
 
 func textColor*(l: Label): Color =
   ## The own text colour (only meaningful when `hasTextColor`).
-  l.fTextColor
-func hasTextColor*(l: Label): bool = l.fHasTextColor
+  l.fText.fixedColor
+func hasTextColor*(l: Label): bool = l.fText.fixed
 proc `textColor=`*(l: Label, v: Color) =
-  l.fTextColor = v
-  l.fHasTextColor = true
+  ## A fixed colour; it does not follow theme switches (see `textRole`).
+  l.fText.setColor v
+  l.invalidate()
+func textRole*(l: Label): ThemeColor = l.fText.role
+proc `textRole=`*(l: Label, v: ThemeColor) =
+  ## Text colour by theme role (`tcMuted`, `tcAccent`, ...), resolved at paint
+  ## time so it follows theme switches. Replaces a fixed `textColor`.
+  l.fText.setRole v
   l.invalidate()
 proc resetTextColor*(l: Label) =
   ## Back to the theme's `text` colour.
-  l.fHasTextColor = false
+  l.fText.reset()
   l.invalidate()
 
+func muted*(l: Label): bool = not l.fText.fixed and l.fText.role == tcMuted
+proc `muted=`*(l: Label, v: bool) =
+  ## Shortcut for `textRole = tcMuted` (true) / `resetTextColor` (false).
+  if v: l.textRole = tcMuted
+  elif l.muted: l.resetTextColor()
 method preferredSize*(l: Label): SizeF =
   if not l.canMeasure: return sizeF(l.width, l.height)
   let txt = displayText(l.caption)
@@ -77,8 +88,7 @@ method paint*(l: Label, c: Canvas) =
   if not l.fTransparent: c.fillRect(l.clientRect, l.color)
   let col =
     if not l.isEnabled: t.textDisabled
-    elif l.fHasTextColor: l.fTextColor
-    else: t.text
+    else: l.fText.resolve(t)
   c.drawMnemonic(l.caption, l.font, l.clientRect, col, l.altHeld, l.fAlignment,
                  l.fLayout, wrap = l.fWordWrap)
   procCall paint(Control(l), c)

@@ -25,6 +25,7 @@ type
   Panel* = ref object of Container
     fBorder: PanelBorder
     fAlignment: HAlign
+    fText: TextStyle
 
   GroupBox* = ref object of Container
 
@@ -42,6 +43,24 @@ proc `alignment=`*(p: Panel, v: HAlign) =
   p.fAlignment = v
   p.invalidate()
 
+func textColor*(p: Panel): Color =
+  ## The own caption colour (only meaningful when `hasTextColor`).
+  p.fText.fixedColor
+func hasTextColor*(p: Panel): bool = p.fText.fixed
+proc `textColor=`*(p: Panel, v: Color) =
+  ## A fixed caption colour; it does not follow theme switches (see `textRole`).
+  p.fText.setColor v
+  p.invalidate()
+func textRole*(p: Panel): ThemeColor = p.fText.role
+proc `textRole=`*(p: Panel, v: ThemeColor) =
+  ## Caption colour by theme role, resolved at paint time.
+  p.fText.setRole v
+  p.invalidate()
+proc resetTextColor*(p: Panel) =
+  ## Back to the theme's `text` colour.
+  p.fText.reset()
+  p.invalidate()
+
 method inheritedColor*(p: Panel): Color = p.theme.surface
 
 method paint*(p: Panel, c: Canvas) =
@@ -56,7 +75,7 @@ method paint*(p: Panel, c: Canvas) =
                       if p.fBorder == pbRaised: t.borderStrong else: t.border,
                       t.borderWidth)
   if p.caption.len > 0:
-    let col = if p.isEnabled: t.text else: t.textDisabled
+    let col = if p.isEnabled: p.fText.resolve(t) else: t.textDisabled
     c.drawMnemonic(p.caption, p.font, r.inflate(-t.spacing), col, false,
                    p.fAlignment, vaCenter)   # no mnemonic: a Panel never activates it
   procCall paint(Control(p), c)

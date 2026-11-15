@@ -5,7 +5,9 @@
 ## by `forcedScale` when one is set (headless testing), else equal to points.
 ## The render scale (device px per logical px) is `scale`.
 
+import std/strutils
 import sdl3 except Color, Cursor
+from sdl3_image import nil
 import ../graphics/geometry
 import ./sdlutil
 
@@ -153,13 +155,21 @@ proc present*(w: PlatformWindow) = discard renderPresent(w.renderer)
 
 proc rendererName*(w: PlatformWindow): string = $getRendererName(w.renderer)
 
-proc writeBmp*(w: PlatformWindow, path: string): bool =
+proc writeImage*(w: PlatformWindow, path: string): bool =
   ## Reads back the renderer's current frame (call after drawing, before
-  ## present) and writes it as a BMP. Used for headless screenshots.
+  ## present) and writes it to `path`: a PNG when the name ends in `.png`
+  ## (case-insensitive), a BMP otherwise. Used for headless screenshots.
   let s = renderReadPixels(w.renderer, nil)
   if s == nil: return false
-  result = saveBMP(s, path.cstring)
+  result =
+    if path.toLowerAscii.endsWith(".png"): sdl3_image.savePNG(s, path.cstring)
+    else: saveBMP(s, path.cstring)
   destroySurface s
+
+proc writeBmp*(w: PlatformWindow, path: string): bool =
+  ## Same as `writeImage` (kept for compatibility; the format follows the
+  ## file extension).
+  w.writeImage(path)
 
 # ------------------------------------------------------------------ popups
 

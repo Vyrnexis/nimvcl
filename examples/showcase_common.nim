@@ -138,21 +138,6 @@ proc makeIcons*(size = 16): ImageList =
     (Shape(sImage), green), (Shape(sArchive), amber), (Shape(sCheck), green)]
   for (s, c) in shapes: result.add makeIcon(size, c, s)
 
-# ------------------------------------------------------------------ fonts
-
-proc registerCjkFont*(): bool =
-  ## The bundled fonts have no CJK glyphs. Registers a system CJK font as a
-  ## fallback when there is one and says whether it did.
-  for f in ["/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/noto-cjk/NotoSansCJK-DemiLight.ttc",
-            "/usr/share/fonts/OTF/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"]:
-    if fileExists(f):
-      addFallbackFontFile(f)
-      return true
-
 # ------------------------------------------------------------------ context
 
 type
@@ -166,7 +151,6 @@ type
     icons*: ImageList                 ## 16 px
     bigIcons*: ImageList              ## 32 px, for the icon views
     hooks*: seq[PageHook]
-    muted*: seq[Label]                ## labels that follow theme.textMuted
     shotMode*: bool                   ## screenshots: no timers, fixed values
     pickFile*: proc()                 ## the Open action
     dark*: bool
@@ -175,11 +159,8 @@ type
     cjk*: bool                        ## a CJK fallback font is registered
 
 proc newShowcase*(): Showcase =
-  Showcase(icons: makeIcons(16), bigIcons: makeIcons(32), cjk: registerCjkFont(),
+  Showcase(icons: makeIcons(16), bigIcons: makeIcons(32), cjk: cjkFallbackFont().len > 0,
            say: proc(text: string) = discard)
-
-proc refreshMuted*(ctx: Showcase) =
-  for l in ctx.muted: l.textColor = currentTheme().textMuted
 
 # ------------------------------------------------------------------ helpers
 
@@ -193,17 +174,12 @@ proc thousands*(n: int): string =
 proc mutedLabel*(ctx: Showcase, parent: Container, text: string, left = 0'f32,
                  top = 0'f32, width = -1'f32, height = -1'f32): Label =
   result = newLabel(parent, text, left, top, width, height)
-  result.textColor = currentTheme().textMuted
-  ctx.muted.add result
+  result.muted = true               # follows theme switches
 
 proc boldLabel*(parent: Container, text: string, left = 0'f32, top = 0'f32,
                 size = 14'f32): Label =
   result = newLabel(parent, text, left, top)
   result.font = font(size = size, style = {fsBold})
-
-const
-  BodyW* = 810'f32                       ## design size of a page body (at 1100x720)
-  BodyH* = 537'f32
 
 proc newPage*(ctx: Showcase, host: Container, title, subtitle: string): tuple[page, body: Panel] =
   ## A page: big title, muted subtitle, and a `body` panel that fills the rest.
@@ -221,7 +197,6 @@ proc newPage*(ctx: Showcase, host: Container, title, subtitle: string): tuple[pa
   s.margins = spacing(0, 0, 0, 12)
   let body = newPanel(page)
   body.borderStyle = pbNone
-  body.setBounds(0, 0, BodyW, BodyH)     # the design size the anchors are relative to
   body.align = alClient
   (page, body)
 

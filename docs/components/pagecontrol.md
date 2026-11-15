@@ -34,6 +34,7 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 | `activePage` | `TabSheet` | Selected page (PageControl) |
 | `pageCount`, `sheets()` | | The pages |
 | `tabs` | `seq[string]` | TabControl captions; `addTab(caption)` appends |
+| `showTabs` | bool | `false` hides the tab strip; pages are then switched by code only. Default `true` |
 | `TabSheet.caption` | string | Tab text; `&` makes a mnemonic |
 | `TabSheet.tabVisible` | bool | `false` hides the tab (like Delphi's `TabVisible`); default `true` |
 
@@ -63,6 +64,12 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 * `sheet.tabVisible = false` hides a page's tab. A page without a tab cannot be
   reached by click, arrows or Ctrl+Tab (code can still pick it with
   `activePage`). Hiding the active page's tab moves to the next selectable page.
+* `pages.showTabs = false` hides the whole strip, for wizards and "page stack"
+  layouts that drive the pages from a list, a toolbar or code. The pages move up
+  to fill the space and the control draws just its border. The user can no
+  longer switch pages (no click, arrow keys, Ctrl+Tab or Alt+letter) and the
+  control takes no focus; `activePage`, `activePageIndex`, `tabIndex` and
+  `cycle` still work, and `onChange` still fires.
 * Disabled pages cannot be selected by the user either.
 * When tabs do not fit, small arrows appear to scroll the strip.
 

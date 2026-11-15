@@ -51,6 +51,11 @@ Main tokens (all `Color` unless noted):
 | `radius`, `borderWidth`, `controlHeight`, `spacing`, `focusRingWidth` (float32) | Metrics |
 | `font`, `monoFont` (`FontSpec`) | Fonts |
 
+Text in Chinese, Japanese or Korean needs no setup when a common system CJK
+font is installed (Noto Sans/Serif CJK, WenQuanYi, Droid Sans Fallback): nimvcl
+finds it the first time text is drawn and uses it for the glyphs the bundled
+fonts lack. See [painting](painting.md#fonts).
+
 ## Per-control colors and fonts
 
 A single control can override the theme:
@@ -67,6 +72,25 @@ panel.color = rgb(255, 244, 214)
 `color` and `font` are inherited from the parent unless set (`parentColor`,
 `parentFont`). A Panel without an assigned color uses `theme.surface`, so it
 follows theme switches.
+
+A fixed `textColor` is a fixed color: it stays the same when the theme changes.
+To keep a text color that follows the theme, name it by its role instead:
+
+```nim
+let hint = newLabel(form, "Press F1 for help", 16, 130)
+hint.muted = true                    # the theme's textMuted, light or dark
+let link = newLabel(form, "Learn more", 16, 150)
+link.textRole = tcAccent             # the theme's accent
+
+let card = newPanel(form, "Status", 16, 180, 200, 40)
+card.textRole = tcMuted              # Panel captions too
+```
+
+`ThemeColor` is `tcText`, `tcMuted`, `tcAccent`, `tcDanger` or `tcDisabled`.
+The color is looked up every time the control paints, so
+`Application.theme = themeDark()` is enough. Setting `textColor` replaces the
+role and setting a role replaces `textColor`; `resetTextColor()` goes back to
+the plain theme text. In your own controls use `theme.resolve(tcMuted)`.
 
 ## HiDPI
 

@@ -26,6 +26,7 @@ let opt = newCheckBox(group, "Enabled", left = 12, top = 28)
 | `borderStyle` | `PanelBorder` | Panel: `pbNone` (flat), `pbSingle`, `pbRaised` |
 | `alignment` | `HAlign` | Panel caption alignment (centered by default) |
 | `color` | Color | Panel fill; default is `theme.surface` |
+| `textColor`, `textRole` | Color, `ThemeColor` | Panel caption color: fixed, or a theme role such as `tcMuted` that follows theme switches. `resetTextColor()` undoes both |
 | `padding` | `Spacing` | Space kept free inside; used by aligned children |
 | `align`, `anchors`, `margins` | | See [layout](../guide/layout.md) |
 | `clientArea` | `RectF` | GroupBox only: area below the caption |

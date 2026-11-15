@@ -17,6 +17,9 @@
 ## select a disabled sheet through `tabIndex`/`activePage`. Hiding the active
 ## sheet's tab moves the selection to the next selectable sheet.
 ##
+## `showTabs = false` hides the strip (pages are then switched by code only:
+## no click, arrow keys, Ctrl+Tab or Alt+letter, and the control takes no focus).
+##
 ## Mnemonics: `&` in a sheet caption is underlined while Alt is held;
 ## Alt+letter selects that page (when the sheet is enabled).
 ##
@@ -48,6 +51,7 @@ type
     fFirst: int                 # first tab shown (strip scroll position)
     fHotTab: int                # -1 none, tab index, or -2/-3 scroll arrows
     fFillBody: bool
+    fHideTabs: bool             # no strip: pages are switched by code only
     fEnsure: bool               # scroll the selected tab into view on next paint
     onChange*: NotifyEvent
     onChanging*: TabChangingEvent
@@ -81,9 +85,23 @@ method tabVisible*(t: TabBase, i: int): bool {.base.} = true
 
 func tabIndex*(t: TabBase): int = t.fIndex
 
+func showTabs*(t: TabBase): bool = not t.fHideTabs
+proc `showTabs=`*(t: TabBase, v: bool) =
+  ## `false` hides the tab strip: the control is just a bordered page area and
+  ## the user cannot switch pages (no click, arrows, Ctrl+Tab or Alt+letter);
+  ## code still can (`tabIndex`, `activePage`, `cycle`). Default `true`.
+  if v == not t.fHideTabs: return
+  t.fHideTabs = not v
+  t.fFirst = 0
+  t.fHotTab = -1
+  t.needsLayout = true      # the padding (strip height) changed
+  t.requestLayout()
+  t.invalidate()
+
 proc stripHeight*(t: TabBase): float32 =
-  ## Height of the tab strip (derived from the theme, no window needed).
-  t.theme.controlHeight
+  ## Height of the tab strip (derived from the theme, no window needed); 0
+  ## when `showTabs` is false.
+  if t.fHideTabs: 0'f32 else: t.theme.controlHeight
 
 proc tabWidth(t: TabBase, i: int): float32 =
   if not t.tabVisible(i): return 0
@@ -193,7 +211,7 @@ proc firstVisibleTab*(t: TabBase): int =
 
 # ---------------------------------------------------------- base behaviour
 
-method canFocus*(t: TabBase): bool = t.isVisible and t.isEnabled
+method canFocus*(t: TabBase): bool = t.isVisible and t.isEnabled and not t.fHideTabs
 
 method doMouseDown*(t: TabBase, button: MouseButton, shift: ShiftState,
                     x, y: float32) =
@@ -223,7 +241,7 @@ method doMouseLeave*(t: TabBase) =
 
 proc handleTabKey(t: TabBase, key: var Key, shift: ShiftState): bool =
   ## Shortcuts shared by the focused strip and the form-level hook.
-  if ssAlt in shift or ssSuper in shift: return false
+  if t.fHideTabs or ssAlt in shift or ssSuper in shift: return false
   if ssCtrl in shift:
     if key == keyTab: t.cycle(if ssShift in shift: -1 else: 1)
     elif key == keyPageDown and ssShift notin shift: t.cycle(1)
@@ -235,6 +253,7 @@ proc handleTabKey(t: TabBase, key: var Key, shift: ShiftState): bool =
 
 method activateMnemonic*(t: TabBase, ch: Rune): bool =
   ## Alt+letter selects the tab whose caption has that mnemonic.
+  if t.fHideTabs: return false
   for i in 0 ..< t.tabCount:
     if t.selectable(i) and mnemonicOf(t.tabText(i)) == ch:
       t.tabIndex = i
@@ -244,6 +263,7 @@ method doKeyDown*(t: TabBase, key: var Key, shift: ShiftState) =
   procCall doKeyDown(Control(t), key, shift)
   if key == Key(0): return
   if t.handleTabKey(key, shift): return
+  if t.fHideTabs: return
   if shift * {ssCtrl, ssAlt, ssSuper} != {}: return
   var handled = true
   template go(i: int) =
@@ -269,9 +289,12 @@ method paint*(t: TabBase, c: Canvas) =
     t.fEnsure = false
     t.ensureVisible(t.fIndex)
   # body
-  let body = rectF(0, h - 1, w, max(t.height - h + 1, 0))
+  let body = rectF(0, max(h - 1, 0), w, max(t.height - max(h - 1, 0), 0))
   if t.fFillBody: c.fillRoundRect(body, th.radius, th.surface)
   c.strokeRoundRect(body, th.radius, th.border, th.borderWidth)
+  if t.fHideTabs:
+    procCall paint(Control(t), c)
+    return
   let right = t.stripRight
   c.pushClip(rectF(0, 0, right + 2, h))
   var selR = rectF(0, 0, 0, 0)
@@ -317,7 +340,7 @@ method paint*(t: TabBase, c: Canvas) =
   procCall paint(Control(t), c)
 
 method padding*(t: TabBase): Spacing =
-  spacing(1, t.stripHeight, 1, 1)
+  spacing(1, max(t.stripHeight, 1), 1, 1)
 
 proc initTabBase(t: TabBase, owner: Component) =
   t.initContainer(owner)
@@ -372,6 +395,7 @@ func tabVisible*(s: TabSheet): bool = not s.fTabHidden
 proc initTabSheet*(s: TabSheet, owner: Component = nil) =
   s.initContainer(owner)
   s.setBounds(0, 0, 200, 100)
+  s.designSet = false      # sized by the page control: its first layout is the design
   s.align = alClient
 
 # -------------------------------------------------------------- PageControl

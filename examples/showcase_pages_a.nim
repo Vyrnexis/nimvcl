@@ -12,8 +12,7 @@ proc buildButtons*(ctx: Showcase, body: Container) =
   let gb = card(body, "Push buttons", 0, 0, 396, 150, {akLeft, akTop, akRight})
   var clicks = 0
   let counter = newLabel(gb, "Nothing clicked yet", 16, 112)
-  counter.textColor = currentTheme().textMuted
-  ctx.muted.add counter
+  counter.muted = true
   proc hit(what: string) =
     inc clicks
     counter.caption = what & " clicked (" & $clicks & " in total)"
@@ -53,8 +52,7 @@ proc buildButtons*(ctx: Showcase, body: Container) =
   let summary = newLabel(cb, "", 210, 70, 170, 60)
   summary.wordWrap = true
   summary.autoSize = false
-  ctx.muted.add summary
-  summary.textColor = currentTheme().textMuted
+  summary.muted = true
   proc refresh(s: Control) =
     let st = case tri.state
              of cbUnchecked: "off"
@@ -245,8 +243,7 @@ proc buildText*(ctx: Showcase, body: Container) =
   ro.onChange = proc(s: Control) = memo.readOnly = ro.checked
   let pos = newLabel(right, "", 262, 486)
   pos.anchors = {akRight, akBottom}
-  ctx.muted.add pos
-  pos.textColor = currentTheme().textMuted
+  pos.muted = true
   proc count(s: Control) = pos.caption = $memo.lines.count & " lines"
   memo.onChange = count
   count(nil)
@@ -367,12 +364,11 @@ proc sizeText(n: int): string =
   else: formatFloat(n / (1024 * 1024), ffDecimal, 1) & " MB"
 
 proc buildLists*(ctx: Showcase, body: Container) =
-  let pages = newPageControl(body, 0, 0, BodyW, BodyH)
+  let pages = newPageControl(body)
   pages.align = alClient
   ctx.listPages = pages
   # ------------------------------------------------ ListBox
   let lbSheet = newTabSheet(pages, "&ListBox")
-  lbSheet.setBounds(0, 0, 808, 508)
   let fruit = ["Apple", "Apricot", "Banana", "Blackberry", "Blueberry", "Cherry",
                "Coconut", "Cranberry", "Date", "Fig", "Grape", "Grapefruit", "Guava",
                "Kiwi", "Lemon", "Lime", "Lychee", "Mango", "Melon", "Nectarine",
@@ -417,7 +413,6 @@ proc buildLists*(ctx: Showcase, body: Container) =
 
   # ------------------------------------------------ TreeView
   let trSheet = newTabSheet(pages, "&TreeView")
-  trSheet.setBounds(0, 0, 808, 508)
   let tree = newTreeView(trSheet, 16, 16, 320, 470)
   tree.anchors = {akLeft, akTop, akBottom}
   tree.images = ctx.icons
@@ -488,7 +483,6 @@ proc buildLists*(ctx: Showcase, body: Container) =
 
   # ------------------------------------------------ ListView
   let lvSheet = newTabSheet(pages, "List&View")
-  lvSheet.setBounds(0, 0, 808, 508)
   let lv = newListView(lvSheet, 16, 56, 790, 436)
   lv.anchors = {akLeft, akTop, akRight, akBottom}
   lv.smallImages = ctx.icons

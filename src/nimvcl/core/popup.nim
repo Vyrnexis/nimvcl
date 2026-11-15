@@ -311,7 +311,8 @@ proc paintPopups*(onError: proc(e: ref CatchableError) = nil) =
 proc screenshotWithPopups*(f: Form, path: string): bool =
   ## Like `Form.screenshot`, with the form's open popups drawn over the form at
   ## their places (popups are separate windows, so a plain screenshot of the
-  ## form shows none of them). Headless/demo helper.
+  ## form shows none of them). The format follows the extension as for
+  ## `Form.screenshot`. Headless/demo helper.
   f.show()
   f.syncMetrics()
   f.ui.paintFrame(clear = true, present = false)
@@ -325,6 +326,6 @@ proc screenshotWithPopups*(f: Form, path: string): bool =
     cv.popClip()
     cv.popTranslate()
   cv.endFrame()
-  f.win.writeBmp(path)
+  f.win.writeImage(path)
 
 closePopupsProc = proc(f: Form) = closeAllPopups(f)

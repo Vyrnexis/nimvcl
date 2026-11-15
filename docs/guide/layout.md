@@ -65,6 +65,35 @@ At layout time nimvcl adds the total size change since then. Two consequences:
 Set `left`, `top`, `width`, `height` (or call `setBounds`) when you place a
 control. That is what records the baseline.
 
+#### Containers that your layout sizes
+
+A container that you never sized yourself has no design size of its own. It
+starts at its constructor's default (a panel is 200x100) and is then stretched
+by `align`, so its *first layout* size is its baseline. The natural code works:
+
+```nim
+let body = newPanel(page)            # no width/height given
+body.align = alClient
+let edit = newEdit(body, "", 10, 10, 100)
+edit.anchors = {akLeft, akTop, akRight}
+form.show()
+# edit keeps left 10 and width 100 at the panel's first real size; from there
+# it follows every resize (it grows when the panel grows).
+```
+
+The rule in one sentence: **a container's design size is the size you gave it
+explicitly (`width = ...`, `setBounds`, or width/height passed to the
+constructor); without one, it is its size at its first layout.** Children you
+add before that first layout are placed against that size. Children you add
+later are relative to the container's size at that moment.
+
+If you do size a container explicitly, say `newPanel(page, "", 0, 0, 400, 300)`
+and then `align = alClient`, the anchors are relative to 400x300 and the child
+moves or stretches by however much bigger the panel turns out. Use this when you
+laid your children out for a particular size. Containers that are hidden
+(`visible = false`, like the inactive pages of a `PageControl`) get their first
+layout when they are first shown.
+
 ## Margins and padding
 
 `margins` (on a control) is the space around it. `padding` (on a container) is

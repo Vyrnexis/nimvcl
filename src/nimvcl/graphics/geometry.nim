@@ -24,6 +24,11 @@ func inflate*(r: RectF, d: float32): RectF =
   ## Grows (d > 0) or shrinks (d < 0) on every side.
   rectF(r.x - d, r.y - d, r.w + 2 * d, r.h + 2 * d)
 
+func inflate*(r: RectF, dx, dy: float32): RectF =
+  ## Grows (positive) or shrinks (negative) by `dx` left and right and by `dy`
+  ## top and bottom.
+  rectF(r.x - dx, r.y - dy, r.w + 2 * dx, r.h + 2 * dy)
+
 func intersect*(a, b: RectF): RectF =
   ## Intersection; an empty rect (w = h = 0) when they do not overlap.
   let x0 = max(a.x, b.x)

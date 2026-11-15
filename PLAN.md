@@ -354,6 +354,10 @@ comments and `docs/`):
   so popups fall back to small top-level windows (`docs/popups-menus.md`).
   Tests and screenshots use that path; Wayland uses `xdg_popup`, X11
   override-redirect windows.
+- **Anchor baseline of parent-sized containers**: a container that was never
+  sized explicitly (constructor default size only) has its first layout size as
+  design size, so children added before it follow the size `align` gives it.
+  An explicit size is still the design size (`docs/guide/layout.md`).
 - **Same-`align` siblings** are ordered by child order, not by Top/Left as in
   the VCL.
 - **FlowPanel/GridPanel** position every visible child themselves and ignore
@@ -364,7 +368,6 @@ comments and `docs/`):
 Known limitations, not yet fixed:
 - **float32 scroll position**: lists beyond about 700,000 rows scroll in
   quantised steps (fine for navigation).
-- **No CJK fallback font**: text in CJK scripts needs a font chosen by the app.
 - **Caret blink repaints the whole form** (no dirty rectangles yet).
 - **Memo extents are estimated** for documents over 500 lines (the scroll range
   is approximate until the lines have been measured).

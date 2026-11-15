@@ -23,9 +23,38 @@ control.
 | `measureText(text, font, maxWidth)` | Returns a `SizeF` |
 | `pushClip(rect)` / `popClip()`, `pushTranslate(dx, dy)` / `popTranslate()` | State |
 
+Rectangle helpers: `r.inflate(d)` grows or shrinks every side by `d`;
+`r.inflate(dx, dy)` uses `dx` left and right and `dy` top and bottom
+(negative values shrink).
+
 Helpers: `rectF(x, y, w, h)`, `pointF`, `sizeF`, colors `rgb(r, g, b)`,
 `rgba(r, g, b, a)`, `hex"#2563eb"`, `clBlack`, `clWhite`, `clTransparent`,
 and fonts `font(family, size, style)` with `fsBold`, `fsItalic`.
+
+## Fonts
+
+The bundled fonts are Noto Sans and Noto Sans Mono. For glyphs they lack,
+nimvcl keeps a global fallback list. It holds the Noto Symbols fonts and, when
+one is installed, **a system CJK font**: the first of Noto Sans CJK, Noto Serif
+CJK, WenQuanYi (Micro Hei / Zen Hei) or Droid Sans Fallback found in the usual
+places on Arch, Debian/Ubuntu and Fedora. Nothing is loaded until text is first
+drawn, and nothing happens if no such font exists (CJK then shows as empty
+boxes). `cjkFallbackFont()` tells you which file was picked (`""` for none).
+
+For another font, add it yourself: `addFallbackFontFile("/path/to/font.ttf")`.
+Missing files are ignored. (Color emoji fonts are not probed: SDL_ttf cannot
+scale their bitmaps.)
+
+## Screenshots
+
+`form.screenshot(path)` and `screenshotWithPopups(form, path)` render one frame
+without showing a window on screen (handy with `SDL_VIDEO_DRIVER=offscreen`).
+The format follows the file name: a path ending in `.png` writes a PNG, anything
+else a BMP.
+
+```nim
+doAssert form.screenshot("build/form.png")
+```
 
 ## PaintBox: draw without subclassing
 

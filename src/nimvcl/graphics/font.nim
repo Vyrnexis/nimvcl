@@ -25,6 +25,31 @@ type
     ttfStyle*: uint32         ## SDL_ttf style flags (synthetic bold/italic only; underline and strike-out are drawn by the Canvas)
 
 const
+  CjkCandidates = [
+    # Noto Sans CJK: Arch (noto-fonts-cjk), Debian/Ubuntu, Fedora, openSUSE
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/google-noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/OTF/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-DemiLight.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc",
+    # Noto Serif CJK
+    "/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/google-noto-cjk/NotoSerifCJK-Regular.ttc",
+    # WenQuanYi
+    "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+    "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+    # Droid Sans Fallback
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/usr/share/fonts/droid/DroidSansFallbackFull.ttf",
+    "/usr/share/fonts/TTF/DroidSansFallback.ttf"]
   DefaultFontSize* = 14'f32
   DefaultFamily* = "sans"
   MonoFamily* = "mono"
@@ -40,6 +65,7 @@ var
   fallbackFiles: seq[string]
   fallbackEpoch = 0
   initialized = false
+  cjkFile = ""
 
 func font*(family = "", size = DefaultFontSize, style: set[FontStyle] = {}): FontSpec =
   ## Builds a `FontSpec`.
@@ -100,6 +126,19 @@ proc ensureFontRegistry() =
   # with addFallbackFontFile once colour glyph scaling is solved.
   for f in ["NotoSansSymbols2-Regular.ttf", "NotoSansSymbols-Regular.ttf"]:
     addFallbackFontFile(sys / f)   # probes the path; no fontconfig yet
+  # One common CJK font (first found), as the LAST fallback: the bundled fonts
+  # and the symbol fonts win for the glyphs they have.
+  for f in CjkCandidates:
+    if fileExists(f):
+      cjkFile = f
+      addFallbackFontFile(f)
+      break
+
+proc cjkFallbackFont*(): string =
+  ## The system CJK font that was added to the fallback list ("" when none
+  ## was found). The probe runs with the font registry, on first use.
+  ensureFontRegistry()
+  cjkFile
 
 proc fallbackFontFiles*(): seq[string] =
   ## Current global fallback list (paths).

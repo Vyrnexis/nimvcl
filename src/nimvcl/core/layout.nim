@@ -20,7 +20,10 @@
 ##    inserted) and the parent size that rect belongs to. A container's design
 ##    size (`designSize`) is its own explicitly set size until its first layout
 ##    (window-manager resizes, `hostSized`, do not count); a container never
-##    explicitly sized uses its size at its first layout. Children placed before
+##    explicitly sized uses its size at its first layout (the constructors' own
+##    default size is not an explicit size: `placeControl`/`initTabSheet` clear
+##    `designSet`, so an `alClient` panel is designed against what `align` gives
+##    it, not against 200x100). Children placed before
 ##    the container's first layout follow `designSize`; children added/placed
 ##    after it are relative to the size at that moment. At layout, with
 ##    dw/dh = current size - base size, from the DESIGN rect: left+right

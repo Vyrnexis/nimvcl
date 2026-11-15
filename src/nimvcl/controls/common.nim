@@ -39,18 +39,47 @@ import ../core/[types, control, theme, input]
 export math, geometry, color, font, canvas, types, control, theme, input
 
 type
+  TextStyle* = object
+    ## Text colour of a control that has one of its own: nothing set (theme
+    ## text), a fixed `Color`, or a `ThemeColor` role resolved at paint time.
+    ## Setting one replaces the other.
+    hasColor: bool
+    color: Color
+    role: ThemeColor
+
   VisualState* = enum
     ## What a clickable control looks like.
     vsNormal, vsHover, vsPressed, vsDisabled
+
+func fixed*(s: TextStyle): bool = s.hasColor
+func fixedColor*(s: TextStyle): Color = s.color
+func role*(s: TextStyle): ThemeColor = s.role
+proc setColor*(s: var TextStyle, v: Color) =
+  s.hasColor = true
+  s.color = v
+  s.role = tcText
+proc setRole*(s: var TextStyle, v: ThemeColor) =
+  s.hasColor = false
+  s.role = v
+proc reset*(s: var TextStyle) = s = TextStyle()
+func resolve*(s: TextStyle, t: Theme): Color =
+  ## The colour to draw with under theme `t`.
+  if s.hasColor: s.color else: t.resolve(s.role)
 
 # ---------------------------------------------------------------- creation
 
 proc placeControl*[T: Control](c: T, parent: Container,
                                left, top, width, height: float32): T {.discardable.} =
   ## Applies the common constructor arguments (see the module comment).
+  # A container left at its constructor's default size has no design size
+  # of its own: its first layout decides (see layout.nim, step 4).
+  let defaultSize = width < 0 and height < 0 and Control(c) of Container
   c.setBounds(left, top,
               (if width >= 0: width else: c.width),
               (if height >= 0: height else: c.height))
+  if defaultSize:
+    let k = Container(Control(c))
+    if not k.layoutInitialized: k.designSet = false
   if parent != nil: parent.insertControl c
   c
 

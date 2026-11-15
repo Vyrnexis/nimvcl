@@ -384,8 +384,8 @@ proc paintIfDirty*(f: Form): bool =
 
 proc screenshot*(f: Form, path: string): bool =
   ## Headless helper: shows the form, lays out, paints one frame (without
-  ## presenting) and saves it as a BMP.
+  ## presenting) and saves it as a PNG when `path` ends in `.png`, else as a BMP.
   f.show()
   f.syncMetrics()
   f.fUi.paintFrame(clear = true, present = false)
-  f.fUi.win.writeBmp(path)
+  f.fUi.win.writeImage(path)

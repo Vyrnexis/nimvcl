@@ -192,16 +192,13 @@ form SettingsForm:
     align = alClient
     hint = "Ctrl+Tab switches the page"
     margins = spacing(0, 4, 10, 10)
-    # The pages are designed at 692x457 (their size on the 900x640 form); the
-    # anchors then adapt them to whatever size the window manager gives.
     TabSheet generalPage:
       caption = "&General"
-      width = 692; height = 457
       # Small windows scroll the page instead of clipping it: the canvas follows
       # the page size down to a minimum, below which the ScrollBox scrolls.
       ScrollBox generalScroll:
         align = alClient
-        width = 692; height = 457       # design size, like the sheet
+        width = 692; height = 457       # the size the canvas below was drawn for
         hScrollMode = sbmNever          # the canvas shrinks to its minimum width instead
         Panel generalCanvas:
           borderStyle = pbNone
@@ -272,12 +269,11 @@ form SettingsForm:
               hint = "Nothing is opened"
     TabSheet appearancePage:
       caption = "A&ppearance"
-      width = 692; height = 457
       # Small windows scroll the page instead of clipping it: the canvas follows
       # the page size down to a minimum, below which the ScrollBox scrolls.
       ScrollBox appearanceScroll:
         align = alClient
-        width = 692; height = 457       # design size, like the sheet
+        width = 692; height = 457       # the size the canvas below was drawn for
         hScrollMode = sbmNever          # the canvas shrinks to its minimum width instead
         Panel appearanceCanvas:
           borderStyle = pbNone
@@ -324,12 +320,11 @@ form SettingsForm:
             hint = "Applying the settings"
     TabSheet editorPage:
       caption = "Ed&itor"
-      width = 692; height = 457
       # Small windows scroll the page instead of clipping it: the canvas follows
       # the page size down to a minimum, below which the ScrollBox scrolls.
       ScrollBox editorScroll:
         align = alClient
-        width = 692; height = 457       # design size, like the sheet
+        width = 692; height = 457       # the size the canvas below was drawn for
         hScrollMode = sbmNever          # the canvas shrinks to its minimum width instead
         Panel editorCanvas:
           borderStyle = pbNone
@@ -368,7 +363,6 @@ form SettingsForm:
               hint = "Add a final line break on save"
     TabSheet advancedPage:
       caption = "Advan&ced"
-      width = 692; height = 457
       ScrollBox advanced:
         align = alClient
         autoContentSize = true

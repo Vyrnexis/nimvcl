@@ -404,6 +404,82 @@ suite "anchors: design baseline":
     layout r
     check c.box == b(-90, -40, 50, 20)
 
+suite "anchors: default-sized containers":
+  test "constructor default size is not a design size (alClient panel)":
+    let r = root(800, 600)
+    let panel = newPanel(r)            # 200x100 by default, then stretched
+    panel.align = alClient
+    let c = newControl()
+    c.setBounds(10, 10, 100, 20)
+    c.anchors = {akLeft, akTop, akRight}
+    c.parent = panel
+    let ui = newUiRoot(r)
+    layout r
+    check panel.box == b(0, 0, 800, 600)
+    check c.box == b(10, 10, 100, 20)  # as given, relative to the first real size
+    ui.resize(900, 600)
+    layout r
+    check c.box == b(10, 10, 200, 20)
+    ui.resize(800, 600)
+    layout r
+    check c.box == b(10, 10, 100, 20)
+
+  test "bottom/right anchors keep their gap to the first real size":
+    let r = root(800, 600)
+    let panel = newPanel(r, "", 0, 0)
+    panel.align = alClient
+    let c = newControl()
+    c.setBounds(700, 560, 90, 30)
+    c.anchors = {akRight, akBottom}
+    c.parent = panel
+    let ui = newUiRoot(r)
+    layout r
+    check c.box == b(700, 560, 90, 30)
+    ui.resize(1000, 700)
+    layout r
+    check c.box == b(900, 660, 90, 30)
+
+  test "alClient panel inside a page that is shown later":
+    let r = root(800, 600)
+    let page = newPanel(r)
+    page.align = alClient
+    page.visible = false
+    let body = newPanel(page)
+    body.align = alClient
+    let c = newControl()
+    c.setBounds(10, 10, 100, 20)
+    c.anchors = {akLeft, akTop, akRight}
+    c.parent = body
+    layout r                           # the page is hidden: nothing laid out yet
+    page.visible = true
+    layout r
+    check body.width == 800
+    check c.box == b(10, 10, 100, 20)
+
+  test "nested default-sized containers (tab sheet in a page control)":
+    let r = root(800, 600)
+    let pc = newPageControl(r)
+    pc.align = alClient
+    let sheet = newTabSheet(pc, "One")
+    let c = newControl()
+    c.setBounds(10, 10, 100, 20)
+    c.anchors = {akLeft, akTop, akRight}
+    c.parent = sheet
+    layout r
+    check c.box == b(10, 10, 100, 20)
+    check sheet.width > 700
+
+  test "an explicit size still is the design size":
+    let r = root(800, 600)
+    let panel = newPanel(r, "", 0, 0, 400, 300)   # explicit: designed at 400x300
+    panel.align = alClient
+    let c = newControl()
+    c.setBounds(300, 200, 50, 20)
+    c.anchors = {akRight, akBottom}
+    c.parent = panel
+    layout r
+    check c.box == b(700, 500, 50, 20)
+
 suite "rounding":
   test "fractional margins and heights snap and stack without gaps":
     let r = root(100, 100)

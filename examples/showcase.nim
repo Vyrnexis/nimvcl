@@ -19,7 +19,6 @@
 # showcase_pages_a / _b (the nine pages), showcase_frame (a `frame`).
 
 import std/[os, strutils]
-from sdl3 import loadBMP, savePNG, destroySurface
 import nimvcl
 import ./showcase_common, ./showcase_pages_a, ./showcase_pages_b
 
@@ -108,7 +107,6 @@ form ShowcaseForm:
     self.ctx.dark = on
     Application.theme = if on: themeDark() else: themeLight()
     self.darkAct.checked = on
-    self.ctx.refreshMuted()
     self.statusBar.panels[2].text = if on: "Dark theme" else: "Light theme"
     self.brand.invalidate()
 
@@ -260,19 +258,10 @@ form ShowcaseForm:
 
 # ------------------------------------------------------------ screenshots
 
-proc toPng(bmp, png: string) =
-  let s = loadBMP(bmp.cstring)
-  if s == nil: quit "cannot read " & bmp
-  if not savePNG(s, png.cstring): quit "cannot write " & png
-  destroySurface s
-  removeFile bmp
-
 proc shoot(f: ShowcaseForm, dir, name: string) =
   discard f.paintIfDirty()
   Application.paintForms()
-  let bmp = dir / (name & ".bmp")
-  if not screenshotWithPopups(f, bmp): quit "screenshot failed for " & name
-  toPng(bmp, dir / (name & ".png"))
+  if not screenshotWithPopups(f, dir / (name & ".png")): quit "screenshot failed for " & name
   echo "wrote ", dir / (name & ".png")
 
 const ShotNames = ["buttons", "text", "ranges", "lists", "bigdata", "layout", "painting",

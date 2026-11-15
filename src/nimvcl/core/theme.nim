@@ -23,6 +23,21 @@ type
     # fonts
     font*, monoFont*: FontSpec
 
+type
+  ThemeColor* = enum
+    ## A colour named by its role in the theme. Controls that take one resolve
+    ## it when they paint, so it follows theme switches (unlike a fixed `Color`).
+    tcText, tcMuted, tcAccent, tcDanger, tcDisabled
+
+func resolve*(t: Theme, c: ThemeColor): Color =
+  ## The theme's colour for the role `c`.
+  case c
+  of tcText: t.text
+  of tcMuted: t.textMuted
+  of tcAccent: t.accent
+  of tcDanger: t.danger
+  of tcDisabled: t.textDisabled
+
 proc baseTheme(): Theme =
   Theme(radius: 4, borderWidth: 1, controlHeight: 28, spacing: 8,
         focusRingWidth: 2,
