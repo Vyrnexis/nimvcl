@@ -15,7 +15,7 @@ jobs:
       - name: Install toolchain and SDL3
         run: |
           pacman -Syu --noconfirm --needed git gcc nim nimble sdl3 sdl3_ttf sdl3_image noto-fonts
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install dependencies
         run: nimble install -d -y
       - name: Build examples
