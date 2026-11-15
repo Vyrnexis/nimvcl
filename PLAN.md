@@ -264,19 +264,42 @@ Each phase ends with something you can run, plus tests. The sizes are rough.
   shared by menus, toolbars and shortcuts.
 - *Done when:* a CRUD demo runs over 100k virtual rows and scrolls smoothly.
 
-**Phase 7: editor set (large)**
-- A code editor control (gutter, syntax-highlighting hook, large files),
-  docking or tearable panels, more sophisticated splitter layouts.
-- *Done when:* a small text editor demo is built with nimvcl.
+**Phase 7: editor and designer building blocks (large)**
 
-**Phase 8: designer (large)**
-- A text form format (like DFM) with load and save at runtime.
-- A visual form designer app written in nimvcl that generates `form` code or
-  the text format.
+These are reusable library parts. The IDE application itself lives in a
+separate repo, `nimvcl-ide` (phase 8), the way Delphi's VCL and its IDE were
+separate.
+
+- **7a. `CodeEdit`:** a code editor control (Delphi's SynEdit), separate from
+  Memo. It has a line-number gutter, a syntax-highlighting hook (a tokenizer
+  per language, with Nim built in), current-line highlighting, bracket
+  matching, folding, find and replace, and a buffer that opens very large
+  files quickly. *Done when:* a small text editor demo (tabs, file tree,
+  editor, find bar) is built with nimvcl.
+- **7b. Docking:** panels that can be dragged out, docked to edges or tabbed
+  together, with the layout saved and restored.
+- **7c. Property registry, form files and inspector:**
+  - A macro-generated registry of each control's published properties (names,
+    types, getters and setters), playing the part of Delphi's RTTI.
+  - A text form format, `.nfm` (like `.dfm`). It is the designer's source of
+    truth. `loadForm MainForm, "MainForm.nfm"` reads it at compile time and
+    produces a typed form, just as the `form` macro does, so code stays fully
+    checked. The same file can also be loaded at runtime.
+  - An object inspector control (property grid) built on the registry.
+- **7d. Design mode:** a form surface where controls are selected, moved and
+  resized instead of used, with selection handles, snapping and a grid.
+
+**Phase 8: `nimvcl-ide` (large, separate repo)**
+- A Delphi 7-style IDE built from phase 7 parts: component palette, form
+  designer, object inspector, code editor tabs, project files.
+- Editing a form writes the `.nfm`; double-clicking an event adds a handler
+  stub to the form's `.nim` file, as Delphi does with `.dfm` and `.pas`.
 
 **Phase 9: reach (ongoing)**
+- Windows and macOS builds checked in CI (`windows-latest`, `macos-latest`:
+  build and headless tests). There is no Windows or Mac machine for visual
+  checks yet, so the README says so.
 - An SDL_GPU backend for `Canvas`.
-- Verified Windows and macOS builds.
 - Accessibility through AccessKit (C API).
 - RTL and bidirectional text checks.
 
