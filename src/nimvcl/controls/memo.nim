@@ -123,7 +123,7 @@ proc tw(e: Memo, s: string): float32 =
   if s.len == 0: return 0
   if e.canMeasure:
     let ctx = e.renderCtx
-    return ctx.measureDevice(s, e.font).w / ctx.scale
+    return ctx.measureWidthDevice(s, e.font) / ctx.scale
   float32(runeCount(s)) * e.font.size * 0.55'f32
 
 proc tabW(e: Memo): float32 =
@@ -165,8 +165,8 @@ proc slotIn(e: Memo, seg: string, x: float32): int =
   let n = snapIndex(seg, ctx.fitPrefix(seg, e.font, xd))
   if n >= seg.len: return seg.len
   let n2 = nextBoundary(seg, n)
-  let w1 = ctx.measureDevice(seg[0 ..< n], e.font).w
-  let w2 = ctx.measureDevice(seg[0 ..< n2], e.font).w
+  let w1 = ctx.measureWidthDevice(seg[0 ..< n], e.font)
+  let w2 = ctx.measureWidthDevice(seg[0 ..< n2], e.font)
   if xd - w1 < w2 - xd: n else: n2
 
 proc widthTabs(e: Memo, s: string, a, b: int): float32 =
@@ -473,12 +473,6 @@ proc sweepStep(e: Memo, budgetMs: float): bool =
     e.ensureLayout(i)
     inc i
     inc cnt
-    if (cnt and 255) == 0 and e.canMeasure:
-      # every measured line leaves a cached text object behind: advance the
-      # frame and trim, so a million-line sweep does not pile up gigabytes
-      let ctx = e.renderCtx
-      ctx.beginFrameTick()
-      ctx.sweep()
     if (cnt and 31) == 0 and
        float((getMonoTime() - t0).inMicroseconds) > budgetMs * 1000: break
   e.fSweep = i

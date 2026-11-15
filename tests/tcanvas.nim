@@ -505,3 +505,21 @@ suite "images and platform helpers":
     var ev: Event
     ev.user.`type` = base + 1
     check userEventType(ev) == base + 1
+
+suite "text measuring":
+  setup:
+    doAssert initSdl(InitFlags(0)), sdlError()
+    doAssert initTtf(), sdlError()
+  teardown:
+    quitTtf()
+    quitSdl()
+
+  test "measureWidthDevice matches measureDevice and caches nothing":
+    withTarget(t, 200, 100, 1.5'f32):
+      let spec = font(size = 14)
+      for s in ["Hello, world", "  leading and trailing  ", "Ωμέγα Ж ñ ß ç ø",
+                "tab\tless?", "WAVAWA ffi fl", "→ ✓ ★", "日本語のテキスト"]:
+        let before = t.ctx.textCount
+        let w = t.ctx.measureWidthDevice(s, spec)
+        check t.ctx.textCount == before
+        check abs(w - t.ctx.measureDevice(s, spec).w) <= 1'f32

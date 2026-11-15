@@ -233,6 +233,19 @@ proc measureDevice*(ctx: RenderContext, str: string, spec: FontSpec,
   discard getTextSize(t, w, h)
   (w.float32, h.float32)
 
+proc measureWidthDevice*(ctx: RenderContext, str: string, spec: FontSpec): float32 =
+  ## Width of a single line of text in device pixels, without creating a
+  ## cached text object. Use it for bulk measuring (e.g. sweeping every line
+  ## of a big document); `measureDevice` is cheaper for text that is drawn.
+  ctx.checkOpen()
+  if str.len == 0: return 0
+  let f = ctx.fontFor(ctx.fontKey(spec))
+  var mw: cint
+  var ml: csize_t
+  if not measureString(f, str.cstring, str.len.csize_t, 0, mw, ml):
+    return ctx.measureDevice(str, spec).w
+  mw.float32
+
 proc fitPrefix*(ctx: RenderContext, str: string, spec: FontSpec,
                 maxPx: float32): int =
   ## Number of leading bytes of `str` that fit in `maxPx` device pixels.
