@@ -22,7 +22,8 @@ bar.onChange = proc(sender: Control) =
 | `min`, `max` | float32 | The range |
 | `pageSize` | float32 | Visible part of the range; sets the thumb length |
 | `position` | float32 | Within `min .. max - pageSize` |
-| `smallChange` | float32 | One line: arrow click, wheel notch is 3 lines |
+| `smallChange` | float32 | One line: arrow click; a wheel notch is `wheelLines` lines |
+| `wheelLines` | int | Lines per wheel notch (default 3, at least 1); same name and meaning as on ScrollBox |
 | `largeChange` | float32 | One page: track click (0 = `pageSize`) |
 | `showArrows` | bool | Add arrow buttons (off by default) |
 

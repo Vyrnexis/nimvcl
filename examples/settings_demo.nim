@@ -197,142 +197,175 @@ form SettingsForm:
     TabSheet generalPage:
       caption = "&General"
       width = 692; height = 457
-      GridPanel identGrid:
-        left = 16; top = 14; width = 660; height = 112
-        anchors = {akLeft, akTop, akRight}
-        borderStyle = pbNone
-        Label nameLabel:
-          caption = "&Name"; autoSize = false; layout = vaBottom
-          margins = spacing(0, 0, 0, 3)
-          focusControl = self.nameEdit
-        Label emailLabel:
-          caption = "E&mail"; autoSize = false; layout = vaBottom
-          margins = spacing(12, 0, 0, 3)
-          focusControl = self.emailEdit
-        Edit nameEdit:
-          placeholder = "Your full name"
-          margins = spacing(0, 0, 0, 0)
-          hint = "The name shown in documents"
-        Edit emailEdit:
-          placeholder = "name@example.com"
-          margins = spacing(12, 0, 0, 0)
-          hint = "Used for notifications"
-        Label langLabel:
-          caption = "&Language"; autoSize = false; layout = vaBottom
-          margins = spacing(0, 0, 0, 3)
-          focusControl = self.language
-        Label countryLabel:
-          caption = "C&ountry"; autoSize = false; layout = vaBottom
-          margins = spacing(12, 0, 0, 3)
-          focusControl = self.country
-        ComboBox language:
-          style = csDropDownList
-          hint = "User interface language"
-        ComboBox country:
-          margins = spacing(12, 0, 0, 0)
-          hint = "Type to complete the country name"
-      CheckBox updates:
-        caption = "Check for &updates"; checked = true; left = 16; top = 152
-        hint = "Look for new versions at startup"
-      CheckBox minimised:
-        caption = "Start minimi&sed"; left = 16; top = 180
-        hint = "Start in the system tray"
-      CheckBox usage:
-        caption = "Send usage s&tatistics"; left = 16; top = 208
-        hint = "Anonymous, never shared"
-      Label autosaveLabel:
-        caption = "Auto-save ever&y (min)"; left = 240; top = 152
-        focusControl = self.autosave
-      SpinEdit autosave:
-        left = 240; top = 174; width = 120
-        minValue = 0; maxValue = 120; value = 10
-        hint = "0 turns auto-save off"
-      GroupBox startupGroup:
-        caption = "On startup"; left = 16; top = 252; width = 660; height = 120
-        anchors = {akLeft, akTop, akRight}
-        RadioButton startLast:
-          caption = "Open the last &document"; checked = true; left = 16; top = 32
-          hint = "Restore the previous session"
-        RadioButton startWelcome:
-          caption = "Show the &welcome page"; left = 16; top = 58
-          hint = "A short tour"
-        RadioButton startEmpty:
-          caption = "Start with an empty wor&kspace"; left = 16; top = 84
-          hint = "Nothing is opened"
+      # Small windows scroll the page instead of clipping it: the canvas follows
+      # the page size down to a minimum, below which the ScrollBox scrolls.
+      ScrollBox generalScroll:
+        align = alClient
+        width = 692; height = 457       # design size, like the sheet
+        hScrollMode = sbmNever          # the canvas shrinks to its minimum width instead
+        Panel generalCanvas:
+          borderStyle = pbNone
+          left = 0; top = 0; width = 692; height = 457
+          anchors = {akLeft, akTop, akRight, akBottom}
+          constraints = constraints(minWidth = 340, minHeight = 390)
+          GridPanel identGrid:
+            left = 16; top = 14; width = 660; height = 112
+            anchors = {akLeft, akTop, akRight}
+            borderStyle = pbNone
+            Label nameLabel:
+              caption = "&Name"; autoSize = false; layout = vaBottom
+              margins = spacing(0, 0, 0, 3)
+              focusControl = self.nameEdit
+            Label emailLabel:
+              caption = "E&mail"; autoSize = false; layout = vaBottom
+              margins = spacing(12, 0, 0, 3)
+              focusControl = self.emailEdit
+            Edit nameEdit:
+              placeholder = "Your full name"
+              margins = spacing(0, 0, 0, 0)
+              hint = "The name shown in documents"
+            Edit emailEdit:
+              placeholder = "name@example.com"
+              margins = spacing(12, 0, 0, 0)
+              hint = "Used for notifications"
+            Label langLabel:
+              caption = "&Language"; autoSize = false; layout = vaBottom
+              margins = spacing(0, 0, 0, 3)
+              focusControl = self.language
+            Label countryLabel:
+              caption = "C&ountry"; autoSize = false; layout = vaBottom
+              margins = spacing(12, 0, 0, 3)
+              focusControl = self.country
+            ComboBox language:
+              style = csDropDownList
+              hint = "User interface language"
+            ComboBox country:
+              margins = spacing(12, 0, 0, 0)
+              hint = "Type to complete the country name"
+          CheckBox updates:
+            caption = "Check for &updates"; checked = true; left = 16; top = 152
+            hint = "Look for new versions at startup"
+          CheckBox minimised:
+            caption = "Start minimi&sed"; left = 16; top = 180
+            hint = "Start in the system tray"
+          CheckBox usage:
+            caption = "Send usage s&tatistics"; left = 16; top = 208
+            hint = "Anonymous, never shared"
+          Label autosaveLabel:
+            caption = "Auto-save ever&y (min)"; left = 240; top = 152
+            focusControl = self.autosave
+          SpinEdit autosave:
+            left = 240; top = 174; width = 120
+            minValue = 0; maxValue = 120; value = 10
+            hint = "0 turns auto-save off"
+          GroupBox startupGroup:
+            caption = "On startup"; left = 16; top = 252; width = 660; height = 120
+            anchors = {akLeft, akTop, akRight}
+            RadioButton startLast:
+              caption = "Open the last &document"; checked = true; left = 16; top = 32
+              hint = "Restore the previous session"
+            RadioButton startWelcome:
+              caption = "Show the &welcome page"; left = 16; top = 58
+              hint = "A short tour"
+            RadioButton startEmpty:
+              caption = "Start with an empty wor&kspace"; left = 16; top = 84
+              hint = "Nothing is opened"
     TabSheet appearancePage:
       caption = "A&ppearance"
       width = 692; height = 457
-      Label fontLabel:
-        caption = "Font &size"; left = 16; top = 14
-        focusControl = self.fontSize
-      TrackBar fontSize:
-        left = 16; top = 36; width = 560
-        anchors = {akLeft, akTop, akRight}
-        min = 8; max = 32; position = 14; frequency = 4
-        hint = "Editor font size"
-      Label fontValue:
-        caption = "14 pt"; left = 600; top = 40
-        anchors = {akTop, akRight}
-      GroupBox previewGroup:
-        caption = "Preview"; left = 16; top = 84; width = 660; height = 84
-        anchors = {akLeft, akTop, akRight}
-        Label preview:
-          caption = "The quick brown fox jumps over the lazy dog"
-          left = 16; top = 34
-      Label themeLabel:
-        caption = "&Theme"; left = 16; top = 184
-        focusControl = self.themeCombo
-      ComboBox themeCombo:
-        style = csDropDownList
-        left = 16; top = 206; width = 200
-        hint = "Colour theme"
-      Label accentLabel:
-        caption = "Accent colour"; left = 240; top = 184
-      FlowPanel swatchPanel:
-        left = 240; top = 206; width = 436; height = 36
-        anchors = {akLeft, akTop, akRight}
-        hGap = 6
-      Label applyingLabel:
-        caption = "Applying..."; left = 16; top = 268
-        visible = false
-      ProgressBar applying:
-        left = 16; top = 290; width = 300
-        anchors = {akLeft, akTop, akRight}
-        style = pbsMarquee; visible = false
-        hint = "Applying the settings"
+      # Small windows scroll the page instead of clipping it: the canvas follows
+      # the page size down to a minimum, below which the ScrollBox scrolls.
+      ScrollBox appearanceScroll:
+        align = alClient
+        width = 692; height = 457       # design size, like the sheet
+        hScrollMode = sbmNever          # the canvas shrinks to its minimum width instead
+        Panel appearanceCanvas:
+          borderStyle = pbNone
+          left = 0; top = 0; width = 692; height = 457
+          anchors = {akLeft, akTop, akRight, akBottom}
+          constraints = constraints(minWidth = 340, minHeight = 330)
+          Label fontLabel:
+            caption = "Font &size"; left = 16; top = 14
+            focusControl = self.fontSize
+          TrackBar fontSize:
+            left = 16; top = 36; width = 560
+            anchors = {akLeft, akTop, akRight}
+            min = 8; max = 32; position = 14; frequency = 4
+            hint = "Editor font size"
+          Label fontValue:
+            caption = "14 pt"; left = 600; top = 40
+            anchors = {akTop, akRight}
+          GroupBox previewGroup:
+            caption = "Preview"; left = 16; top = 84; width = 660; height = 84
+            anchors = {akLeft, akTop, akRight}
+            Label preview:
+              caption = "The quick brown fox jumps over the lazy dog"
+              left = 16; top = 34
+          Label themeLabel:
+            caption = "&Theme"; left = 16; top = 184
+            focusControl = self.themeCombo
+          ComboBox themeCombo:
+            style = csDropDownList
+            left = 16; top = 206; width = 200
+            hint = "Colour theme"
+          Label accentLabel:
+            caption = "Accent colour"; left = 240; top = 184
+          FlowPanel swatchPanel:
+            left = 240; top = 206; width = 436; height = 36
+            anchors = {akLeft, akTop, akRight}
+            hGap = 6
+          Label applyingLabel:
+            caption = "Applying..."; left = 16; top = 268
+            visible = false
+          ProgressBar applying:
+            left = 16; top = 290; width = 300
+            anchors = {akLeft, akTop, akRight}
+            style = pbsMarquee; visible = false
+            hint = "Applying the settings"
     TabSheet editorPage:
       caption = "Ed&itor"
       width = 692; height = 457
-      Memo sample:
-        left = 16; top = 14; width = 660; height = 250
-        anchors = {akLeft, akTop, akRight, akBottom}
-        hint = "A sample document"
-      CheckBox wrap:
-        caption = "&Word wrap"; left = 16; top = 276
-        anchors = {akLeft, akBottom}
-        hint = "Wrap long lines in the editor"
-      GridPanel optionsGrid:
-        left = 16; top = 312; width = 660; height = 96
-        anchors = {akLeft, akRight, akBottom}
-        Label tabLabel:
-          caption = "T&ab width"; autoSize = false; layout = vaCenter
-          margins = spacing(0, 2)
-          focusControl = self.tabSize
-        SpinEdit tabSize:
-          minValue = 1; maxValue = 16; value = 4; margins = spacing(0, 2)
-          hint = "Spaces per tab"
-        CheckBox lineNumbers:
-          caption = "Line &numbers"; checked = true; margins = spacing(0, 2)
-          hint = "Show line numbers"
-        CheckBox highlightLine:
-          caption = "Highlight the current &line"; margins = spacing(0, 2)
-          hint = "Tint the line with the caret"
-        CheckBox trimSpaces:
-          caption = "&Trim trailing spaces"; margins = spacing(0, 2)
-          hint = "Remove trailing blanks on save"
-        CheckBox finalNewline:
-          caption = "En&d files with a newline"; margins = spacing(0, 2)
-          hint = "Add a final line break on save"
+      # Small windows scroll the page instead of clipping it: the canvas follows
+      # the page size down to a minimum, below which the ScrollBox scrolls.
+      ScrollBox editorScroll:
+        align = alClient
+        width = 692; height = 457       # design size, like the sheet
+        hScrollMode = sbmNever          # the canvas shrinks to its minimum width instead
+        Panel editorCanvas:
+          borderStyle = pbNone
+          left = 0; top = 0; width = 692; height = 457
+          anchors = {akLeft, akTop, akRight, akBottom}
+          constraints = constraints(minWidth = 340, minHeight = 380)
+          Memo sample:
+            left = 16; top = 14; width = 660; height = 250
+            anchors = {akLeft, akTop, akRight, akBottom}
+            hint = "A sample document"
+          CheckBox wrap:
+            caption = "&Word wrap"; left = 16; top = 276
+            anchors = {akLeft, akBottom}
+            hint = "Wrap long lines in the editor"
+          GridPanel optionsGrid:
+            left = 16; top = 312; width = 660; height = 96
+            anchors = {akLeft, akRight, akBottom}
+            Label tabLabel:
+              caption = "T&ab width"; autoSize = false; layout = vaCenter
+              margins = spacing(0, 2)
+              focusControl = self.tabSize
+            SpinEdit tabSize:
+              minValue = 1; maxValue = 16; value = 4; margins = spacing(0, 2)
+              hint = "Spaces per tab"
+            CheckBox lineNumbers:
+              caption = "Line &numbers"; checked = true; margins = spacing(0, 2)
+              hint = "Show line numbers"
+            CheckBox highlightLine:
+              caption = "Highlight the current &line"; margins = spacing(0, 2)
+              hint = "Tint the line with the caret"
+            CheckBox trimSpaces:
+              caption = "&Trim trailing spaces"; margins = spacing(0, 2)
+              hint = "Remove trailing blanks on save"
+            CheckBox finalNewline:
+              caption = "En&d files with a newline"; margins = spacing(0, 2)
+              hint = "Add a final line break on save"
     TabSheet advancedPage:
       caption = "Advan&ced"
       width = 692; height = 457

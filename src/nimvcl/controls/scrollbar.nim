@@ -3,7 +3,7 @@
 ## Range model (floats, so it can scroll by pixels): `position` lives in
 ## `min .. max - pageSize`; `pageSize` is the visible part of the range and sets
 ## the thumb length (`pageSize` 0 gives a minimum-size thumb). `smallChange` is
-## a line (arrow click, wheel notch = 3 lines), `largeChange` a page (click on
+## a line (arrow click, wheel notch = `wheelLines` lines, 3 by default), `largeChange` a page (click on
 ## the track; 0 means `pageSize`).
 ##
 ## Look: no arrows by default (`showArrows` adds them); a transparent track and
@@ -12,7 +12,7 @@
 ## (`scrollTrack`, `scrollThumb`, `scrollThumbHover`). The bar is not focusable.
 ##
 ## Mouse: drag the thumb (the press captures the pointer), click the track to
-## page toward the click, wheel scrolls (3 lines per notch; a horizontal bar
+## page toward the click, wheel scrolls (`wheelLines`, 3, lines per notch; a horizontal bar
 ## also takes `dx` / Shift+wheel). The wheel is only `handled` when the
 ## position moved, so at its limits it keeps bubbling. There is no auto-repeat
 ## while the button is held.
@@ -36,6 +36,7 @@ type
     fMin, fMax, fPage, fPos: float32
     fSmall, fLarge: float32
     fArrows: bool
+    fWheelLines: int
     fHot, fThumbHot, fDragging: bool
     fGrab: float32
     onChange*: NotifyEvent
@@ -53,6 +54,8 @@ func position*(s: ScrollBar): float32 = s.fPos
 func smallChange*(s: ScrollBar): float32 = s.fSmall
 func largeChange*(s: ScrollBar): float32 = s.fLarge
 func showArrows*(s: ScrollBar): bool = s.fArrows
+func wheelLines*(s: ScrollBar): int = s.fWheelLines
+proc `wheelLines=`*(s: ScrollBar, v: int) = s.fWheelLines = system.max(v, 1)
 
 func maxPosition*(s: ScrollBar): float32 =
   ## Highest reachable position: `max - pageSize` (never below `min`).
@@ -220,7 +223,7 @@ method doMouseWheel*(s: ScrollBar, shift: ShiftState, dx, dy: float32,
     else: dy
   if d == 0: return
   let before = s.fPos
-  s.scrollBy(scWheel, -d * 3 * s.fSmall)
+  s.scrollBy(scWheel, -d * float32(s.fWheelLines) * s.fSmall)
   if s.fPos != before: handled = true
 
 method doExit*(s: ScrollBar) =
@@ -236,17 +239,11 @@ method captureLost*(s: ScrollBar) =
 # -------------------------------------------------------------------- paint
 
 proc drawArrow(c: Canvas, r: RectF, dir: int, vertical: bool, col: Color) =
-  ## dir -1 = up/left, +1 = down/right.
-  let cx = r.x + r.w / 2
-  let cy = r.y + r.h / 2
-  let a = 3'f32
-  let d = float32(dir)
-  if vertical:
-    c.fillPolygon([pointF(cx - a, cy + d * a / 2), pointF(cx + a, cy + d * a / 2),
-                   pointF(cx, cy - d * a / 2)], col)
-  else:
-    c.fillPolygon([pointF(cx + d * a / 2, cy - a), pointF(cx + d * a / 2, cy + a),
-                   pointF(cx - d * a / 2, cy)], col)
+  ## dir -1 = up/left, +1 = down/right (common.nim's triangle).
+  let ctr = pointF(r.x + r.w / 2, r.y + r.h / 2)
+  let d = if vertical: (if dir < 0: adUp else: adDown)
+          else: (if dir < 0: adLeft else: adRight)
+  common.drawArrow(c, ctr, 3.5, d, col)
 
 method paint*(s: ScrollBar, c: Canvas) =
   let t = s.theme
@@ -280,12 +277,13 @@ proc initScrollBar*(s: ScrollBar, owner: Component = nil,
   s.fKind = kind
   s.fMax = 100
   s.fSmall = 1
+  s.fWheelLines = 3
   if kind == sbVertical: s.setBounds(0, 0, DefaultScrollBarSize, 100)
   else: s.setBounds(0, 0, 100, DefaultScrollBarSize)
 
 proc newScrollBar*(parent: Container = nil, kind = sbVertical,
                    left = 0'f32, top = 0'f32,
-                   width = -1'f32, height = -1'f32): ScrollBar =
+                   width = -1'f32, height = -1'f32): ScrollBar {.discardable.} =
   ## Convention note: the main property is `kind` (default 12 px thick, 100 long).
   new result
   result.initScrollBar(parent, kind)

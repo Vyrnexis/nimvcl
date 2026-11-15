@@ -233,7 +233,7 @@ proc handleTabKey(t: TabBase, key: var Key, shift: ShiftState): bool =
     return true
   false
 
-method activateMnemonic*(t: TabBase, ch: char): bool =
+method activateMnemonic*(t: TabBase, ch: Rune): bool =
   ## Alt+letter selects the tab whose caption has that mnemonic.
   for i in 0 ..< t.tabCount:
     if t.selectable(i) and mnemonicOf(t.tabText(i)) == ch:
@@ -350,7 +350,7 @@ proc initTabControl*(t: TabControl, owner: Component = nil) =
 
 proc newTabControl*(parent: Container = nil, tabs: seq[string] = @[],
                     left = 0'f32, top = 0'f32, width = -1'f32,
-                    height = -1'f32): TabControl =
+                    height = -1'f32): TabControl {.discardable.} =
   new result
   result.initTabControl(parent)
   result.tabs = tabs
@@ -531,12 +531,12 @@ proc initPageControl*(p: PageControl, owner: Component = nil) =
   p.fFillBody = true
 
 proc newPageControl*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                     width = -1'f32, height = -1'f32): PageControl =
+                     width = -1'f32, height = -1'f32): PageControl {.discardable.} =
   new result
   result.initPageControl(parent)
   result.placeControl(parent, left, top, width, height)
 
-proc newTabSheet*(pc: PageControl, caption = ""): TabSheet =
+proc newTabSheet*(pc: PageControl, caption = ""): TabSheet {.discardable.} =
   ## Adds a page. The first one becomes active; the others start hidden.
   new result
   result.initTabSheet(pc)
@@ -547,7 +547,7 @@ proc newTabSheet*(pc: PageControl, caption = ""): TabSheet =
     pc.syncPages()
     pc.invalidate()
 
-proc newTabSheet*(parent: Container, caption = ""): TabSheet =
+proc newTabSheet*(parent: Container, caption = ""): TabSheet {.discardable.} =
   ## Container-typed overload (the `form` macro creates children through it):
   ## a PageControl parent gets a page like above, any other parent a plain sheet.
   if parent of PageControl:

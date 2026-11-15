@@ -86,7 +86,7 @@ proc initScrollBox*(b: ScrollBox, owner: Component = nil) =
   b.fDirty = true
 
 proc newScrollBox*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                   width = -1'f32, height = -1'f32): ScrollBox =
+                   width = -1'f32, height = -1'f32): ScrollBox {.discardable.} =
   new result
   result.initScrollBox(parent)
   result.placeControl(parent, left, top, width, height)

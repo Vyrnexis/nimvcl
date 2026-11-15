@@ -11,7 +11,7 @@ flow.hGap = 8
 flow.vGap = 8
 flow.padding = spacing(8)
 for i in 1 .. 10:
-  discard newButton(flow, "Item " & $i, 0, 0, 80, 28)   # wraps at the panel width
+  newButton(flow, "Item " & $i, 0, 0, 80, 28)   # wraps at the panel width
 ```
 
 ## Common properties

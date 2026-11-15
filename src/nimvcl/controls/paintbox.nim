@@ -15,7 +15,7 @@ proc initPaintBox*(p: PaintBox, owner: Component = nil) =
   p.setBounds(0, 0, 100, 100)
 
 proc newPaintBox*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                  width = -1'f32, height = -1'f32): PaintBox =
+                  width = -1'f32, height = -1'f32): PaintBox {.discardable.} =
   new result
   result.initPaintBox(parent)
   result.placeControl(parent, left, top, width, height)

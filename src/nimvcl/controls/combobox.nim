@@ -507,7 +507,7 @@ proc initComboBox*(c: ComboBox, owner: Component = nil) =
     if c.fOpen and c.fList.itemIndex >= 0: c.pickAndClose()
 
 proc newComboBox*(parent: Container = nil, style = csDropDown, left = 0'f32,
-                  top = 0'f32, width = -1'f32, height = -1'f32): ComboBox =
+                  top = 0'f32, width = -1'f32, height = -1'f32): ComboBox {.discardable.} =
   ## `parent` (also the owner) gets the control appended when non-nil.
   new result
   result.initComboBox(parent)

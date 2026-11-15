@@ -83,7 +83,7 @@ method paint*(l: Label, c: Canvas) =
                  l.fLayout, wrap = l.fWordWrap)
   procCall paint(Control(l), c)
 
-method activateMnemonic*(l: Label, ch: char): bool =
+method activateMnemonic*(l: Label, ch: Rune): bool =
   if l.fFocusControl == nil or mnemonicOf(l.caption) != ch: return false
   if not (l.fFocusControl.isVisible and l.fFocusControl.isEnabled): return false
   setFocus(l.fFocusControl)
@@ -100,7 +100,7 @@ proc initLabel*(l: Label, owner: Component = nil) =
   l.autoSize = true
 
 proc newLabel*(parent: Container = nil, caption = "", left = 0'f32, top = 0'f32,
-               width = -1'f32, height = -1'f32): Label =
+               width = -1'f32, height = -1'f32): Label {.discardable.} =
   new result
   result.initLabel(parent)
   result.caption = caption

@@ -43,7 +43,7 @@ proc start(t: Timer) =
     raise newException(IOError, "SDL_AddTimer failed")
   registry[t.fId] = t
 
-proc newTimer*(owner: Component = nil, interval = 1000): Timer =
+proc newTimer*(owner: Component = nil, interval = 1000): Timer {.discardable.} =
   new result
   result.initComponent(owner)
   result.fInterval = interval

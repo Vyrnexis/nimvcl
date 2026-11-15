@@ -43,7 +43,8 @@ list.onChange = proc(sender: Control) =
 | Method | Description |
 |---|---|
 | `selected(i)`, `selectedIndices()`, `selCount` | Read the selection |
-| `setSelected(i, v)`, `setSelection(indices)`, `selectAll()`, `clearSelection()` | Change it |
+| `setSelected(i, v)`, `selectAll()`, `clearSelection()` | Change it |
+| `setSelection(indices, focus = -1)` | Replace the whole selection in one step: one `onChange`; `focus` (default: the first index) becomes the focused row and is scrolled into view; out-of-range indices are ignored |
 | `makeVisible(i)` | Scroll a row into view |
 | `indexAt(point)`, `itemRect(i)` | Hit testing |
 
@@ -56,6 +57,9 @@ list.onChange = proc(sender: Control) =
   list.onData = proc(sender: Control, index: int): string = "Row " & $index
   list.count = 1_000_000
   ```
+* Deleting the focused row sets `itemIndex` to -1. Turning `multiSelect` off
+  keeps only the focused row selected.
+* In virtual mode `clear`, `delete` and `items` do nothing: change `count`.
 * With `sorted`, `insert` ignores the index.
 * ListBox scrolls on its own. Wheel and keyboard scrolling work out of the box.
 

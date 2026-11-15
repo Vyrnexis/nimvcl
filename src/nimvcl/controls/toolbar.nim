@@ -214,14 +214,17 @@ proc initToolButton*(b: ToolButton, owner: Component = nil) =
   b.autoSize = true
 
 proc newToolButton*(parent: Container = nil, caption = "",
-                    kind = tbsButton, glyph: GlyphProc = nil): ToolButton =
-  ## `parent` is usually a ToolBar.
+                    kind = tbsButton, glyph: GlyphProc = nil,
+                    left = 0'f32, top = 0'f32,
+                    width = -1'f32, height = -1'f32): ToolButton {.discardable.} =
+  ## `parent` is usually a ToolBar (which positions its buttons; `left`/`top`
+  ## matter only in other containers).
   new result
   result.initToolButton(parent)
   result.fKind = kind
   result.fGlyph = glyph
   result.caption = caption
-  if parent != nil: parent.insertControl result
+  result.placeControl(parent, left, top, width, height)
 
 # ----------------------------------------------------------------- ToolBar
 
@@ -240,6 +243,9 @@ proc `images=`*(t: ToolBar, v: ImageList) =
   t.invalidate()
   t.requestLayout()
   for c in t.children: c.requestLayout()
+
+method releaseResources*(t: ToolBar) =
+  t.images = nil
 
 func flat*(t: ToolBar): bool = t.fFlat
 proc `flat=`*(t: ToolBar, v: bool) =
@@ -280,7 +286,10 @@ proc initToolBar*(t: ToolBar, owner: Component = nil) =
   t.align = alTop
   t.autoSize = true
 
-proc newToolBar*(parent: Container = nil): ToolBar =
+proc newToolBar*(parent: Container = nil, left = 0'f32, top = 0'f32,
+                 width = -1'f32, height = -1'f32): ToolBar {.discardable.} =
+  ## The bar is `alTop` and auto-sizing: `left`/`top`/`width`/`height` matter
+  ## only after changing `align` / `autoSize`.
   new result
   result.initToolBar(parent)
-  if parent != nil: parent.insertControl result
+  result.placeControl(parent, left, top, width, height)

@@ -457,3 +457,56 @@ suite "actions":
     own.action = a
     a.groupIndex = 0
     check own.kind == tbsCheck
+
+  test "Control.free unlinks the action and drops image list subscriptions":
+    let x = fixture()
+    let a = newAction(x.acts, "a")
+    let il = newImageList()
+    let panel = newPanel(x.f, "", 10, 100, 200, 100)
+    let btn = newButton(panel, "b", 0, 0)
+    btn.action = a
+    let bar2 = newToolBar(x.f)
+    bar2.images = il
+    let tv = newTreeView(panel, 0, 50, 100, 40)
+    tv.images = il
+    let lv = newListView(panel, 0, 90, 100, 40)
+    lv.smallImages = il
+    lv.largeImages = il
+    let before = il.listenerCount
+    check before == 4 and a.clientCount == 1
+    panel.free()                                   # takes the whole subtree along
+    check a.clientCount == 0 and btn.action == nil
+    check il.listenerCount == 1                    # only the toolbar outside the panel
+    check panel.parent == nil and x.f.controlCount == x.f.children.len
+    check x.f.children.find(panel) < 0
+    bar2.free()
+    check il.listenerCount == 0
+    a.enabled = false
+    check btn.enabled                              # no longer mirrored
+
+  test "freeing a MainMenu or PopupMenu, deleting or clearing items releases their actions":
+    let x = fixture()
+    let a = newAction(x.acts, "a")
+    let it1 = x.file.addItem("one")
+    let it2 = x.file.addItem("two")
+    let sub = x.file.addItem("sub")
+    let it3 = sub.addItem("three")
+    it1.action = a; it2.action = a; it3.action = a
+    check a.clientCount == 3
+    x.file.delete(0)
+    check a.clientCount == 2 and it1.action == nil
+    x.file.clear()                                 # recursive: sub-items too
+    check a.clientCount == 0
+    let pm = newPopupMenu(x.f)
+    let il = newImageList()
+    pm.images = il
+    let pit = pm.addItem("p")
+    pit.action = a
+    x.mm.images = il
+    let mit = x.mm.addItem("m")
+    mit.action = a
+    check a.clientCount == 2 and il.listenerCount == 2
+    pm.free()
+    check a.clientCount == 1 and il.listenerCount == 1 and pm.owner == nil
+    x.mm.free()
+    check a.clientCount == 0 and il.listenerCount == 0

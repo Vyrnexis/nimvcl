@@ -104,7 +104,7 @@ proc initFlowPanel*(f: FlowPanel, owner: Component = nil) =
   f.setBounds(0, 0, 200, 100)
 
 proc newFlowPanel*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                   width = -1'f32, height = -1'f32): FlowPanel =
+                   width = -1'f32, height = -1'f32): FlowPanel {.discardable.} =
   new result
   result.initFlowPanel(parent)
   result.placeControl(parent, left, top, width, height)
@@ -246,7 +246,7 @@ proc initGridPanel*(g: GridPanel, owner: Component = nil) =
   g.setBounds(0, 0, 200, 100)
 
 proc newGridPanel*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                   width = -1'f32, height = -1'f32): GridPanel =
+                   width = -1'f32, height = -1'f32): GridPanel {.discardable.} =
   new result
   result.initGridPanel(parent)
   result.placeControl(parent, left, top, width, height)

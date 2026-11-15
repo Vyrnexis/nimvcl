@@ -47,6 +47,8 @@ closeBtn.isCancel = true                     # Esc clicks it
 
 * The Delphi names `Default` and `Cancel` clash with Nim, so use `isDefault` and
   `isCancel`.
+* Enter (or Space) clicks once per press: holding the key down does not repeat
+  the click. For the default button, Enter's auto-repeat is ignored too.
 * A focused button handles Enter itself, so the default button only gets Enter
   when another kind of control has the focus.
 * `modalResult` runs after `onClick`.

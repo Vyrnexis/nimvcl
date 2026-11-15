@@ -1,7 +1,8 @@
 ## Plain enums and value types shared by the core. Pure Nim, no SDL.
 ## (Event callback types mention `Control` and live in control.nim.)
 
-import std/[hashes, strutils]
+import std/[hashes, strutils, unicode]
+export unicode.Rune, unicode.`==`
 
 type
   Align* = enum
@@ -108,6 +109,15 @@ const
   keyRCtrl*     = Key(0x400000e4)
   keyRShift*    = Key(0x400000e5)
   keyRAlt*      = Key(0x400000e6)
+
+func keyRune*(k: Key): Rune =
+  ## The lowercased character a printable key stands for (any script: SDL
+  ## keycodes are Unicode code points); Rune(0) for control, named and
+  ## modifier keys.
+  let v = uint32(k)
+  if v <= 0x20 or v == 0x7f or v >= 0x110000 or (v >= 0xD800 and v < 0xE000):
+    return Rune(0)
+  toLower(Rune(int(v)))
 
 func key*(c: char): Key =
   ## Key for a printable character; letters map to their lowercase keycode.

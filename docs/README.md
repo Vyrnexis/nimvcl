@@ -13,7 +13,8 @@ let form = newForm(nil, 480, 320)   # owner, width, height
 
 Every control is created with `newXxx(parent, <main property>, ..., left, top,
 width, height)`. All arguments are optional, and a size you leave out gives the
-control's default size. Each component page has a quick example, then tables for
+control's default size. The parent owns the control, so constructors are
+`{.discardable.}`: `newLabel(form, "Hi", 10, 10)` works as a statement. Each component page has a quick example, then tables for
 properties, events and methods.
 
 ## Guide

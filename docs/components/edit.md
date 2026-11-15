@@ -28,7 +28,7 @@ pass.password = true                       # shows dots
 | `charCase` | `EditCharCase` | `ecNormal`, `ecUpperCase`, `ecLowerCase` |
 | `numbersOnly` | bool | Accept only digits |
 | `borderStyle` | `EditBorder` | `ebSingle` or `ebNone` |
-| `autoSelect` | bool | Select all when the edit gets the focus |
+| `autoSelect` | bool | Select all when the edit gets the focus (also by a click: see Tips) |
 | `selStart`, `selLength`, `selText`, `caretPos` | int / string | Selection and caret (UTF-8 byte indexes) |
 
 ## Events
@@ -52,6 +52,12 @@ pass.password = true                       # shows dots
 
 ## Tips
 
+* With `autoSelect`, tabbing into the edit or clicking it selects all the text.
+  The click that gives the edit the focus keeps that selection (it does not
+  place the caret); dragging, or a later click, works normally, and a double
+  click selects a word.
+* Pasting turns line breaks and tabs into spaces (a single line cannot hold
+  them). Shift+Backspace deletes backward like Backspace; Shift+Delete cuts.
 * Indexes are byte offsets into the UTF-8 text, not character counts.
 * Edit does not handle Enter or Esc, so a default or cancel button still gets them.
 * Tab moves focus away. Edit is a tab stop by default.

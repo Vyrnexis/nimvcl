@@ -67,7 +67,7 @@ proc initPanel*(p: Panel, owner: Component = nil) =
   p.setBounds(0, 0, 200, 100)
 
 proc newPanel*(parent: Container = nil, caption = "", left = 0'f32, top = 0'f32,
-               width = -1'f32, height = -1'f32): Panel =
+               width = -1'f32, height = -1'f32): Panel {.discardable.} =
   new result
   result.initPanel(parent)
   result.caption = caption
@@ -113,7 +113,7 @@ method paint*(g: GroupBox, c: Canvas) =
                    vaCenter)
   procCall paint(Control(g), c)
 
-method activateMnemonic*(g: GroupBox, ch: char): bool =
+method activateMnemonic*(g: GroupBox, ch: Rune): bool =
   ## Alt+letter focuses the first focusable control inside the box.
   if mnemonicOf(g.caption) != ch: return false
   let stops = tabStops(g)
@@ -126,7 +126,7 @@ proc initGroupBox*(g: GroupBox, owner: Component = nil) =
   g.setBounds(0, 0, 200, 100)
 
 proc newGroupBox*(parent: Container = nil, caption = "", left = 0'f32,
-                  top = 0'f32, width = -1'f32, height = -1'f32): GroupBox =
+                  top = 0'f32, width = -1'f32, height = -1'f32): GroupBox {.discardable.} =
   new result
   result.initGroupBox(parent)
   result.caption = caption

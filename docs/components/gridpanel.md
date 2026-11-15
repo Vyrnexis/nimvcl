@@ -11,10 +11,10 @@ grid.columns = @[gsAbsolute(90), gsPercent(100)]   # fixed, then the rest
 grid.rows = @[gsAuto(), gsAuto()]                  # as tall as the content
 grid.padding = spacing(8)
 
-discard newLabel(grid, "Name:")                    # cell 0,0
-discard newEdit(grid)                              # cell 0,1
-discard newLabel(grid, "City:")                    # cell 1,0
-discard newEdit(grid)                              # cell 1,1
+newLabel(grid, "Name:")                    # cell 0,0
+newEdit(grid)                              # cell 0,1
+newLabel(grid, "City:")                    # cell 1,0
+newEdit(grid)                              # cell 1,1
 ```
 
 ## Common properties
@@ -49,6 +49,8 @@ Only the common ones.
 * Children without `setCell` take the free cells in row-major order. Children
   beyond the last cell are not placed.
 * No columns or rows means one 100% track on that axis.
+* A child that is removed from the panel loses its explicit cell (`setCell`).
+* Children keep their `autoSize` size; the grid stretches them to their cell.
 * A child's `margins` make a gap inside its cell.
 
 [Back to the index](../README.md)

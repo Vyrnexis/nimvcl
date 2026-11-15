@@ -65,6 +65,23 @@ mirrors the action now and after every later change. A click on the client runs
 the action. A `ToolButton` becomes a check button when the action is `autoCheck`
 or grouped.
 
+### Releasing a client
+
+An action keeps its linked clients in a list, so a removed control or menu item
+stays alive for as long as the action does. Release clients when you throw them
+away:
+
+| What you do | What happens to the link |
+|---|---|
+| `client.action = nil` | Unlinks that one client |
+| `control.free()` | Removes the control and all its children from the form and unlinks their actions (and image list subscriptions) |
+| `menuItem.delete(i)` / `menuItem.clear()` | The removed items (and their sub-items) are unlinked |
+| `popupMenu.free()`, `mainMenu.free()` | Unlinks every item and drops the menu's image list subscription |
+| `action.free()` | Unlinks every client and removes the action from its list |
+
+Plain `parent = nil` or `removeControl` only detaches a control (it may come
+back later), so it keeps the link: call `free()` when it is gone for good.
+
 ## Updating state on idle
 
 `onUpdate` runs once after each batch of events and right before a menu opens,

@@ -999,7 +999,7 @@ proc initDrawGrid*(g: DrawGrid, owner: Component = nil) =
   g.refreshContent()
 
 proc newDrawGrid*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                  width = -1'f32, height = -1'f32): DrawGrid =
+                  width = -1'f32, height = -1'f32): DrawGrid {.discardable.} =
   new result
   result.initDrawGrid(parent)
   result.placeControl(parent, left, top, width, height)
@@ -1216,7 +1216,7 @@ proc initStringGrid*(g: StringGrid, owner: Component = nil) =
   g.fOptions = {goThumbTracking, goColSizing, goRangeSelect, goEditing, goTabs}
 
 proc newStringGrid*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                    width = -1'f32, height = -1'f32): StringGrid =
+                    width = -1'f32, height = -1'f32): StringGrid {.discardable.} =
   new result
   result.initStringGrid(parent)
   result.placeControl(parent, left, top, width, height)

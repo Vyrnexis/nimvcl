@@ -61,7 +61,7 @@ method canFocus*(r: RadioButton): bool = r.isVisible and r.isEnabled
 
 method preferredSize*(r: RadioButton): SizeF = indicatorPreferredSize(r)
 
-method activateMnemonic*(r: RadioButton, ch: char): bool =
+method activateMnemonic*(r: RadioButton, ch: Rune): bool =
   if mnemonicOf(r.caption) != ch: return false
   setFocus(r)
   r.doClick()
@@ -168,7 +168,7 @@ proc initRadioButton*(r: RadioButton, owner: Component = nil) =
 
 proc newRadioButton*(parent: Container = nil, caption = "", checked = false,
                      left = 0'f32, top = 0'f32,
-                     width = -1'f32, height = -1'f32): RadioButton =
+                     width = -1'f32, height = -1'f32): RadioButton {.discardable.} =
   new result
   result.initRadioButton(parent)
   result.caption = caption

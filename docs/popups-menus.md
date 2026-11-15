@@ -51,10 +51,11 @@ order therefore only matters between handlers that claim the same key.
 ## Mnemonics
 
 `&` in a caption underlines the next character while Alt is held (`&&` is a
-literal `&`). `parseMnemonic`, `displayText`, `mnemonicOf` and
+literal `&`; any script works, case-insensitively, as the mnemonic is a
+lowercased `Rune`). `parseMnemonic`, `displayText`, `mnemonicOf` and
 `drawMnemonic` are in `controls/common.nim`. The Alt state lives on `UiRoot`
 (`altHeld`; `control.altHeld`). Alt+letter calls the method
-`activateMnemonic(ch)` of the first visible, enabled control (tree order) that
+`activateMnemonic(ch: Rune)` of the first visible, enabled control (tree order) that
 claims it, unless a menu bar item took the key first: Button clicks,
 CheckBox/RadioButton focus and toggle, Label focuses its `focusControl`,
 TabSheet captions select the page, GroupBox focuses its first control.

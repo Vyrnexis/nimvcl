@@ -121,6 +121,19 @@ proc newBadge*(parent: Container = nil): Badge =
 * `nimvcl form: `Button` has no property `captoin``, at the property's line.
 * `nimvcl form: unknown control type `Buttn`: ...`, at the child's line.
 * `nimvcl form: duplicate name `ok` ...`.
+* `nimvcl form: `caption` is reserved in `MyForm`...`: a child (or `var`) cannot
+  be named like a field or property of `Component`, `Control` or `Form`, since
+  the generated field would clash with it. Reserved: `name`, `tag`, `owner`,
+  `components`, `actionLink`, `caption`, `parent`, `left`, `top`, `width`,
+  `height`, `align`, `anchors`, `margins`, `padding`, `constraints`,
+  `autoSize`, `visible`, `enabled`, `hint`, `cursor`, `font`, `parentFont`,
+  `color`, `parentColor`, `tabStop`, `tabOrder`, `children`, `host`, `ui`,
+  `win`, `menuBar`, `popupMenus`, `position`, `borderStyle`, `formStyle`,
+  `modalResult`, `designRect`, `designBase`, `designBaseSet` and the event
+  names `onClick`, `onDblClick`, `onMouseEnter`, `onMouseLeave`, `onEnter`,
+  `onExit`, `onResize`, `onMouseDown`, `onMouseUp`, `onMouseMove`, `onShow`,
+  `onHide`, `onActivate`, `onDeactivate`, `onClose`, `onCloseQuery`. Pick
+  another name, such as `captionEdit`.
 * `onChange: ...` on a non-`NotifyEvent` event (e.g. `Form.onClose`) is
   rejected with a hint to write the full `proc`.
 * A value of the wrong type gives the compiler's own type error on the
@@ -135,7 +148,8 @@ proc newBadge*(parent: Container = nil): Badge =
 * Procs inside the block are not forward-declared: a proc can only call procs
   written above it (order them by dependency or add a forward declaration).
 * The shorthand body is a statement block; a trailing non-void expression
-  needs `discard`.
+  needs `discard`. (Control constructors themselves are `{.discardable.}`, so
+  `newLabel(...)` as a statement needs nothing.)
 * Generated code refers to `Form`, `Frame`, `Container`, `Component`, `Control`,
   `NotifyEvent`, `placeControl` by name, so `import nimvcl` is required in the
   module that uses the macros.

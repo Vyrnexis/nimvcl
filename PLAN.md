@@ -2,9 +2,10 @@
 
 A Delphi VCL-style UI library for Nim, drawn entirely with SDL3.
 
-Status: phases 0-4 are done (the MVP), phase 5 (standard set) is nearly done:
-everything except ComboBox and Memo is built and tested (those are being
-added); see "Progress and deviations" at the end.
+Status: phases 0-6 are done (the MVP, the standard set and the business set),
+and a deep review round has landed on top of them. Phases 7-9 (editor set,
+designer, reach) have not started. See "Progress and deviations" and "Open
+issues" at the end.
 
 ## 1. Goal
 
@@ -168,6 +169,9 @@ replaceable (SDL_GPU, tests) and stops SDL types from leaking into the public AP
   renderer. So each `Form` keeps a registry of what it owns and frees it
   explicitly on close; the hooks only check that this happened. This is the
   riskiest point in the core design, so it is decided and tested in phase 1.
+- Controls themselves are plain ORC refs. Things that hold clients strongly
+  from outside (an `Action`'s links, an `ImageList`'s listener closures) are
+  released by `Control.free` (and `PopupMenu.free`, `MenuItem.delete/clear`).
 
 ## 3. Repository layout
 
@@ -244,7 +248,7 @@ Each phase ends with something you can run, plus tests. The sizes are rough.
 - *Done when:* the phase 3 demo is rewritten with the macro at about the same
   amount of code as a DFM file, and the macro tests pass.
 
-**Phase 5: standard set (large)** (in progress: all but ComboBox and Memo done)
+**Phase 5: standard set (large)** (done)
 - Scrolling: `ScrollBar` and `ScrollBox` (smooth wheel, touchpad).
 - `ListBox`, `ComboBox` (popup via `createPopupWindow`, using `xdg_popup` on
   Wayland), `Memo` (multi-line edit), `SpinEdit`, `TrackBar`, `ProgressBar`.
@@ -255,7 +259,7 @@ Each phase ends with something you can run, plus tests. The sizes are rough.
 - `FlowPanel` and `GridPanel`.
 - *Done when:* a "settings app" demo uses every control.
 
-**Phase 6: business set (large)**
+**Phase 6: business set (large)** (done)
 - `ListView` (report and icon views, sort, virtual mode), `TreeView` (lazy
   nodes), `StringGrid` and `DrawGrid` (with editing), `ActionList` and actions
   shared by menus, toolbars and shortcuts.
@@ -306,14 +310,35 @@ is incremental and can be reordered by what you want to build first.
 
 ## 8. Progress and deviations
 
-Phases 0-4 are done. Phase 5 has: ScrollBar, ScrollBox, ListBox, ProgressBar,
-TrackBar, SpinEdit, Splitter, StatusBar, ToolBar, PageControl/TabControl,
-FlowPanel/GridPanel, MainMenu/PopupMenu, hints, message/input dialogs and the
-native file dialogs, popup windows, `&` mnemonics, a shared key-handler chain,
-modal ownership (`runModalLoop`). ComboBox and Memo are in progress; the
-"settings app" demo that uses every control comes after them. Phase 5
-additions that were not in the plan: layout-owner hook (`arrangeChildren`),
-visibility notification (`visibilityChanged`), umbrella `import nimvcl`.
+Done: phases 0-4 (the MVP) and phases 5 and 6. Phase 5 delivered ScrollBar,
+ScrollBox, ListBox, ComboBox, Memo, ProgressBar, TrackBar, SpinEdit, Splitter,
+StatusBar, ToolBar, PageControl/TabControl, FlowPanel/GridPanel, MainMenu/
+PopupMenu, hints, message/input dialogs and the native file dialogs, popup
+windows, `&` mnemonics, a shared key-handler chain and modal ownership
+(`runModalLoop`); its exit criterion is `examples/settings_demo`. Phase 6
+delivered ListView (report/icon/list views, virtual mode), TreeView (lazy
+nodes), DrawGrid/StringGrid (editing), ImageList, and ActionList/Action; its
+exit criterion is `examples/crud_demo` over 100k virtual rows. Additions that
+were not in the plan: layout-owner hook (`arrangeChildren`), visibility
+notification (`visibilityChanged`), anchors from a design-size baseline,
+`captureLost`, umbrella `import nimvcl`, end-user docs in `docs/`, a showcase
+example and a Frame macro.
+
+**Review round** (commit 4a952a6 and the refinement pass after it): about 95
+findings fixed across core, graphics, platform and controls, each with a
+regression test. Highlights: handler copies before calling (no use-after-free),
+per-job error handling in the queue, `try/finally` around showModal/run/paint,
+font changes re-measure descendants, key auto-repeat flag (`keyIsRepeat`),
+display scale from pixel density, `captureLost`, list/tree/grid index
+bookkeeping on insert/delete/clear, grid and ImageList change notification,
+PageControl active-sheet tracking and `TabSheet.tabVisible`, Memo line-break
+rule, form macro reserved names. The refinement pass added: mnemonics on Runes
+(any script, e.g. Cyrillic `&Файл`), a `wheelLines` setting on ScrollBar shared
+with ScrollingControl, `{.discardable.}` on every control constructor, the
+`newXxx(parent, <main property>, ..., left, top, width, height)` convention for
+Splitter, StatusBar, ToolBar and ToolButton, scrolling pages in the settings
+demo, and `Control.free` (plus `PopupMenu.free`, and release on `MenuItem.delete`/
+`clear`) so Actions and ImageLists no longer keep removed controls alive.
 
 Deviations from the plan, decided while building (details in the module
 comments and `docs/`):
@@ -333,3 +358,19 @@ comments and `docs/`):
   the VCL.
 - **FlowPanel/GridPanel** position every visible child themselves and ignore
   its `align` (the property is untouched).
+
+## 9. Open issues
+
+Known limitations, not yet fixed:
+- **float32 scroll position**: lists beyond about 700,000 rows scroll in
+  quantised steps (fine for navigation).
+- **No CJK fallback font**: text in CJK scripts needs a font chosen by the app.
+- **Caret blink repaints the whole form** (no dirty rectangles yet).
+- **Memo extents are estimated** for documents over 500 lines (the scroll range
+  is approximate until the lines have been measured).
+- **`goColMoving`** (dragging grid columns) is not implemented.
+- **Real Wayland/X11 popups and IME are untested**: only the offscreen fallback
+  and the SDL contracts are covered by the tests.
+- **`onSelectItem` per-item calls**: selecting or clearing a huge selection
+  calls the handler once per changed item.
+

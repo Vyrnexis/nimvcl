@@ -2,7 +2,7 @@
 ## on their top-level-window fallback (see tpopup.nim). Events are built by
 ## hand and fed through Application.dispatch.
 
-import std/[unittest, monotimes, times]
+import std/[unittest, monotimes, times, unicode]
 import nimvcl
 import nimvcl/controls/menus
 
@@ -72,9 +72,9 @@ proc clickItem(f: Form, p: PopupWindow, it: MenuItem) =
 
 suite "menu items":
   test "mnemonics":
-    check parseMnemonic("&File") == (text: "File", index: 0, ch: 'f')
-    check parseMnemonic("E&xit") == (text: "Exit", index: 1, ch: 'x')
-    check parseMnemonic("Tom && Jerry") == (text: "Tom & Jerry", index: -1, ch: '\0')
+    check parseMnemonic("&File") == (text: "File", index: 0, ch: "f".runeAt(0))
+    check parseMnemonic("E&xit") == (text: "Exit", index: 1, ch: "x".runeAt(0))
+    check parseMnemonic("Tom && Jerry") == (text: "Tom & Jerry", index: -1, ch: Rune(0))
     check parseMnemonic("a&b&c").index == 1
     check parseMnemonic("-").text == "-"
   test "shortcut text and parsing":

@@ -19,7 +19,7 @@ proc initFrame*(f: Frame, owner: Component = nil) =
   f.borderStyle = pbNone
 
 proc newFrame*(parent: Container = nil, left = 0'f32, top = 0'f32,
-               width = -1'f32, height = -1'f32): Frame =
+               width = -1'f32, height = -1'f32): Frame {.discardable.} =
   new result
   result.initFrame(parent)
   result.placeControl(parent, left, top, width, height)

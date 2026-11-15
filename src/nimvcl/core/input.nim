@@ -364,7 +364,7 @@ func hasKeyHandler*(ui: UiRoot, id: string): bool =
   for e in ui.fKeyHandlers:
     if e.id == id: return true
 
-proc findMnemonic(c: Control, ch: char): bool =
+proc findMnemonic(c: Control, ch: Rune): bool =
   ## Depth-first: the first visible, enabled control that claims `ch`.
   if not c.visible or not c.enabled: return false
   if c.activateMnemonic(ch): return true
@@ -384,9 +384,9 @@ proc runKeyChain(ui: UiRoot, k: var Key, shift: ShiftState) =
     e.hook(k, shift)
     if k == Key(0): return
   if shift * {ssCtrl, ssAlt, ssSuper} == {ssAlt}:
-    let u = uint32(k)
-    if u > 0x20 and u < 0x7f:
-      if findMnemonic(ui.root, char(u).toLowerAscii): k = Key(0)
+    let r = keyRune(k)
+    if int(r) != 0:
+      if findMnemonic(ui.root, r): k = Key(0)
 
 proc setAlt*(ui: UiRoot, v: bool) =
   ## Records the state of the Alt key (the Application also feeds it with Alt

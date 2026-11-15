@@ -38,7 +38,7 @@
 ## keys the focused control did not use. Needs `import nimvcl/controls/menus`
 ## to be linked in (the umbrella does).
 
-import std/strutils
+import std/[strutils, unicode]
 import ../core/[form, popup, application, timer]
 import ../graphics/context
 import ./common, ./imagelist
@@ -84,7 +84,7 @@ type
     subItem: MenuItem
     delay: Timer
     navigate: proc(dir: int)
-    altKey: proc(ch: char): bool
+    altKey: proc(ch: Rune): bool
 
   MainMenu* = ref object of Control
     fRoot: MenuItem
@@ -227,13 +227,25 @@ proc add*(m, child: MenuItem): MenuItem {.discardable.} =
   m.insert(child, m.fItems.len)
   child
 
+proc releaseLinks(m: MenuItem) =
+  ## Unlinks the actions of `m` and its sub-items (a removed item is gone for
+  ## good; an `Action` would otherwise keep it alive).
+  if m.actionLink != nil: m.actionLink.release()
+  for it in m.fItems: it.releaseLinks()
+
 proc delete*(m: MenuItem, index: int) =
-  m.fItems[index].fParent = nil
+  ## Removes the sub-item for good: its action link is released.
+  let it = m.fItems[index]
+  it.fParent = nil
   m.fItems.delete(index)
+  it.releaseLinks()
 
 proc clear*(m: MenuItem) =
-  for it in m.fItems: it.fParent = nil
+  ## Removes every sub-item for good: their action links are released.
+  let old = m.fItems
+  for it in old: it.fParent = nil
   m.fItems.setLen(0)
+  for it in old: it.releaseLinks()
 
 proc addItem*(m: MenuItem, caption: string, onClick: MenuItemEvent = nil,
               shortcut = noShortcut): MenuItem {.discardable.} =
@@ -353,7 +365,7 @@ proc closeSub(p: MenuPanel) =
 proc showPanel(owner: Form, root: MenuItem, anchor: RectF, placement: Placement,
                parent: PopupWindow, selectFirst: bool,
                navigate: proc(dir: int) = nil,
-               altKey: proc(ch: char): bool = nil): PopupWindow
+               altKey: proc(ch: Rune): bool = nil): PopupWindow
 
 proc setHot(p: MenuPanel, idx: int, fromMouse: bool)
 proc step(p: MenuPanel, dir: int): int
@@ -535,8 +547,8 @@ method doKeyDown*(p: MenuPanel, key: var Key, shift: ShiftState) =
     elif p.navigate != nil: p.navigate(-1)
   elif k == keyEnter or k == keySpace:
     if p.hot >= 0: p.activate(p.hot, true)
-  elif shift * {ssCtrl} == {} and uint32(k) > 0x20 and uint32(k) < 0x7f:
-    let ch = char(uint32(k)).toLowerAscii
+  elif shift * {ssCtrl} == {} and int(keyRune(k)) != 0:
+    let ch = keyRune(k)
     if ssAlt in shift:
       used = p.altKey != nil and p.altKey(ch)
     else:
@@ -558,7 +570,7 @@ method doKeyDown*(p: MenuPanel, key: var Key, shift: ShiftState) =
 proc showPanel(owner: Form, root: MenuItem, anchor: RectF, placement: Placement,
                parent: PopupWindow, selectFirst: bool,
                navigate: proc(dir: int) = nil,
-               altKey: proc(ch: char): bool = nil): PopupWindow =
+               altKey: proc(ch: Rune): bool = nil): PopupWindow =
   let panel = newPanel(owner, root)
   panel.navigate = navigate
   panel.altKey = altKey
@@ -585,7 +597,7 @@ proc initPopupMenu*(m: PopupMenu, owner: Component = nil) =
   m.initComponent(owner)
   m.fRoot = newMenuItem()
 
-proc newPopupMenu*(owner: Component = nil): PopupMenu =
+proc newPopupMenu*(owner: Component = nil): PopupMenu {.discardable.} =
   new result
   result.initPopupMenu(owner)
 
@@ -614,6 +626,20 @@ proc close*(m: PopupMenu) =
     let p = m.fShown
     m.fShown = nil
     if p.isOpen: closePopup(p)
+
+proc free*(m: PopupMenu) =
+  ## Frees the menu for good: closes it, unlinks the actions of its items,
+  ## drops its image list subscription and detaches it from its owner.
+  m.close()
+  m.images = nil
+  m.fRoot.releaseLinks()
+  for t in m.fTargets:
+    let f = t.menuForm
+    if f != nil:
+      let i = f.popupMenus.find(RootRef(m))
+      if i >= 0: f.popupMenus.delete(i)
+  m.fTargets.setLen(0)
+  if m.owner != nil: m.owner.removeComponent(m)
 
 proc popup*(m: PopupMenu, form: Form, x, y: float32,
             selectFirst = false): PopupWindow {.discardable.} =
@@ -730,6 +756,9 @@ proc `images=`*(m: MainMenu, v: ImageList) =
     m.fImgListener = v.addListener(proc() =
       m.invalidate()
       if m.fDrop != nil and m.fDrop.isOpen: m.fDrop.content.invalidate())
+method releaseResources*(m: MainMenu) =
+  m.images = nil
+  m.fRoot.releaseLinks()
 proc add*(m: MainMenu, item: MenuItem): MenuItem {.discardable.} = m.fRoot.add item
 proc addItem*(m: MainMenu, caption: string, onClick: MenuItemEvent = nil,
               shortcut = noShortcut): MenuItem {.discardable.} =
@@ -763,7 +792,7 @@ proc openDropdown*(m: MainMenu, idx: int, selectFirst = false) =
       if not c.fDisabled and c.hasSubmenu:
         mm.openDropdown(v[n], true)
         return
-  let alt = proc(ch: char): bool =
+  let alt = proc(ch: Rune): bool =
     for i in mm.visibleIndices:
       let c = mm.fRoot[i]
       if not c.fDisabled and c.hasSubmenu and parseMnemonic(c.caption).ch == ch:
@@ -782,11 +811,11 @@ proc openDropdown*(m: MainMenu, idx: int, selectFirst = false) =
     if pn.delay != nil: pn.delay.free()
   m.invalidate()
 
-proc openByMnemonic*(m: MainMenu, ch: char): bool =
+proc openByMnemonic*(m: MainMenu, ch: Rune): bool =
   ## Opens the dropdown whose caption has the mnemonic `ch`.
   for i in m.visibleIndices:
     let c = m.fRoot[i]
-    if not c.fDisabled and c.hasSubmenu and parseMnemonic(c.caption).ch == ch.toLowerAscii:
+    if not c.fDisabled and c.hasSubmenu and parseMnemonic(c.caption).ch == ch.toLower:
       m.openDropdown(i, true)
       return true
 
@@ -860,8 +889,8 @@ proc handleMenuKey(f: Form, key: var Key, shift: ShiftState) =
     if k == keyF10 and mods == {}:
       if bar.openFirst(): key = Key(0)
       return
-    if mods == {ssAlt} and uint32(k) > 0x20 and uint32(k) < 0x7f:
-      if bar.openByMnemonic(char(uint32(k))):
+    if mods == {ssAlt} and int(keyRune(k)) != 0:
+      if bar.openByMnemonic(keyRune(k)):
         key = Key(0)
         return
   if (k == keyApplication and mods == {}) or (k == keyF10 and mods == {ssShift}):
@@ -905,7 +934,7 @@ proc `menu=`*(f: Form, m: MainMenu) =
   m.sendToBack()
   registerForm(f)
 
-proc newMainMenu*(parent: Container = nil): MainMenu =
+proc newMainMenu*(parent: Container = nil): MainMenu {.discardable.} =
   ## With a `Form` as `parent` the menu becomes the form's `menu`; with another
   ## container it is just a control there (shortcuts work when the container's
   ## root is a Form that was given the menu with `form.menu = ...`).

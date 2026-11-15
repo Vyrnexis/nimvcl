@@ -7,7 +7,10 @@
 ##
 ##   proc newXxx*(parent: Container = nil, <main property> = "", ...,
 ##                left = 0'f32, top = 0'f32,
-##                width = -1'f32, height = -1'f32): Xxx
+##                width = -1'f32, height = -1'f32): Xxx {.discardable.}
+##
+## The constructors are `{.discardable.}`: the parent owns the control (VCL
+## style), so `newLabel(form, "Hi", 10, 10)` works as a statement.
 ##
 ## * `parent` is also the Component owner. When non-nil the control is
 ##   appended to `parent`'s children (`insertControl`). With nil the control is
@@ -57,13 +60,11 @@ func mnemonicRune*(caption: string, at: int): Rune =
   ## The lowercased rune starting at byte `at` of `caption`.
   toLower(runeAt(caption, at))
 
-func parseMnemonic*(caption: string): tuple[text: string, index: int, ch: char] =
+func parseMnemonic*(caption: string): tuple[text: string, index: int, ch: Rune] =
   ## Removes the `&` markers: `text` is what is drawn, `index` the byte
   ## position of the mnemonic character in it (-1: none), `ch` that character
-  ## lowercased (case-insensitive for any script via unicode `toLower`). `ch` is
-  ## a `char`, so only characters up to U+00FF fit (`&é` gives '\xE9', the
-  ## Latin-1 value of the key code); wider ones give '\0' (see `mnemonicRune`).
-  ## `&&` is a literal `&`.
+  ## lowercased (a `Rune`: case-insensitive for any script via unicode `toLower`;
+  ## Rune(0) when there is none). `&&` is a literal `&`.
   result.index = -1
   var i = 0
   while i < caption.len:
@@ -74,8 +75,7 @@ func parseMnemonic*(caption: string): tuple[text: string, index: int, ch: char] 
       else:
         if i + 1 < caption.len and result.index < 0:
           result.index = result.text.len
-          let m = mnemonicRune(caption, i + 1)
-          result.ch = if int(m) < 0x100: char(int(m)) else: '\0'
+          result.ch = mnemonicRune(caption, i + 1)
         inc i
     else:
       result.text.add caption[i]
@@ -85,9 +85,9 @@ func displayText*(caption: string): string =
   ## The caption without `&` markers.
   if '&' in caption: parseMnemonic(caption).text else: caption
 
-func mnemonicOf*(caption: string): char =
-  ## The lowercase mnemonic character of `caption`, '\0' when there is none.
-  if '&' in caption: parseMnemonic(caption).ch else: '\0'
+func mnemonicOf*(caption: string): Rune =
+  ## The lowercase mnemonic character of `caption`, Rune(0) when there is none.
+  if '&' in caption: parseMnemonic(caption).ch else: Rune(0)
 
 proc altHeld*(c: Control): bool =
   ## An Alt key is down in the window of `c` (mnemonics are underlined).

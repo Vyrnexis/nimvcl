@@ -150,7 +150,7 @@ proc initControl*(c: Control, owner: Component = nil) =
   c.fParentFont = true
   c.fParentColor = true
 
-proc newControl*(owner: Component = nil): Control =
+proc newControl*(owner: Component = nil): Control {.discardable.} =
   new result
   result.initControl(owner)
 
@@ -158,7 +158,7 @@ proc initContainer*(c: Container, owner: Component = nil) =
   c.initControl(owner)
   c.needsLayout = true
 
-proc newContainer*(owner: Component = nil): Container =
+proc newContainer*(owner: Component = nil): Container {.discardable.} =
   new result
   result.initContainer(owner)
 
@@ -429,8 +429,14 @@ method isTabStop*(c: Control): bool {.base.} =
   ## Base: the `tabStop` property. RadioButton overrides it (one stop per group).
   c.fTabStop
 
-method activateMnemonic*(c: Control, ch: char): bool {.base.} =
-  ## Alt+`ch` (lowercase ASCII) was pressed and no menu bar item took it. A
+method releaseResources*(c: Control) {.base.} =
+  ## Called by `free`: drop subscriptions that keep `c` alive from the outside
+  ## (image list listeners). Overridden by controls that make such links.
+  ## Base: nothing.
+  discard
+
+method activateMnemonic*(c: Control, ch: Rune): bool {.base.} =
+  ## Alt+`ch` (a lowercased character of any script, see `keyRune`) was pressed and no menu bar item took it. A
   ## control whose caption has the mnemonic `ch` activates itself and returns
   ## true. Only called for visible, enabled controls (see `UiRoot`). Base: false.
   false
@@ -740,6 +746,23 @@ proc insertControl*(c: Container, child: Control, index = -1) =
   c.invalidate(child.visualRect)
   c.childBoundsChanged(child)
   if child.fVisible: child.notifyVisibility()
+
+proc releaseTree(c: Control) =
+  if c of Container:
+    for k in Container(c).fChildren: releaseTree(k)
+  if c.actionLink != nil: c.actionLink.release()
+  c.releaseResources()
+
+proc free*(c: Control) =
+  ## Frees `c` permanently (VCL `Free`): removes it from its parent and owner,
+  ## unlinks the action of `c` and of every descendant and drops their image
+  ## list subscriptions, so nothing outside keeps the subtree alive. Without
+  ## it an `Action` (its client links) or an `ImageList` (its change
+  ## listeners) holds on to a removed control. Do not use `c` afterwards; to
+  ## only move a control use `parent=`. Forms are closed, not freed.
+  if c.fParent != nil: c.fParent.removeControl(c)
+  if c.owner != nil: c.owner.removeComponent(c)
+  releaseTree(c)
 
 proc `parent=`*(c: Control, p: Container) =
   ## Re-parents: removes from the old parent, appends to the new one (nil just

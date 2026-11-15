@@ -13,9 +13,11 @@
 ##
 ## Change notification: every change (`add`, `insert`, `delete`, `clear`,
 ## `[]=`, `width=`, `height=`) bumps `version` and calls the listeners added
-## with `addListener` (`TreeView` and `ListView` subscribe while the list is
-## assigned, so they repaint / re-measure by themselves). A control that keeps
-## an ImageList should `removeListener` when it lets go of it.
+## with `addListener` (`TreeView`, `ListView`, `ToolBar` and the menus subscribe
+## while the list is assigned, so they repaint / re-measure by themselves). A
+## control that keeps an ImageList should `removeListener` when it lets go of it;
+## `Control.free` does that for the stock controls (a listener closure keeps its
+## client alive for as long as the list lives).
 
 import ../graphics/[geometry, canvas, image]
 export image
@@ -41,6 +43,9 @@ proc addListener*(l: ImageList, cb: proc() {.closure.}): int =
   inc l.fNextId
   l.fListeners.add (l.fNextId, cb)
   l.fNextId
+
+func listenerCount*(l: ImageList): int = l.fListeners.len
+  ## How many change listeners are subscribed (controls unsubscribe in `free`).
 
 proc removeListener*(l: ImageList, id: int) =
   for i in 0 ..< l.fListeners.len:

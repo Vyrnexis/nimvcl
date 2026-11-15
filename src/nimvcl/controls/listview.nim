@@ -965,6 +965,9 @@ proc `largeImages=`*(lv: ListView, v: ImageList) =
   lv.watchImages(lv.fLarge, v, lv.fLargeListener)
   lv.fLarge = v
   lv.refresh()
+method releaseResources*(lv: ListView) =
+  lv.smallImages = nil
+  lv.largeImages = nil
 proc `itemHeight=`*(lv: ListView, v: float32) =
   lv.fItemHeight = max(v, 0)
   lv.refresh()
@@ -1534,7 +1537,7 @@ proc initListView*(lv: ListView, owner: Component = nil) =
   lv.viewStyle = vsReport
 
 proc newListView*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                  width = -1'f32, height = -1'f32): ListView =
+                  width = -1'f32, height = -1'f32): ListView {.discardable.} =
   new result
   result.initListView(parent)
   result.placeControl(parent, left, top, width, height)

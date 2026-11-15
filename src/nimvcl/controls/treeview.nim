@@ -1029,6 +1029,8 @@ proc `images=`*(tv: TreeView, v: ImageList) =
       tv.refresh()
       tv.invalidate())
   tv.refresh()
+method releaseResources*(tv: TreeView) =
+  tv.images = nil
 proc `indent=`*(tv: TreeView, v: float32) =
   tv.fIndent = max(v, 8)
   tv.invalidate()
@@ -1350,7 +1352,7 @@ proc initTreeView*(tv: TreeView, owner: Component = nil) =
   tv.padding = spacing(1)
 
 proc newTreeView*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                  width = -1'f32, height = -1'f32): TreeView =
+                  width = -1'f32, height = -1'f32): TreeView {.discardable.} =
   new result
   result.initTreeView(parent)
   result.placeControl(parent, left, top, width, height)

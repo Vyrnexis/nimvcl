@@ -86,7 +86,7 @@ proc initImageControl*(i: ImageControl, owner: Component = nil) =
 
 proc newImageControl*(parent: Container = nil, picture: Image = nil,
                       left = 0'f32, top = 0'f32,
-                      width = -1'f32, height = -1'f32): ImageControl =
+                      width = -1'f32, height = -1'f32): ImageControl {.discardable.} =
   new result
   result.initImageControl(parent)
   result.fPicture = picture

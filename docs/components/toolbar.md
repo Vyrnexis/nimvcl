@@ -12,7 +12,7 @@ let open = newToolButton(bar, "Open")
 open.hint = "Open a file"
 open.onClick = proc(sender: Control) = echo "open"
 
-discard newToolButton(bar, kind = tbsSeparator)   # a gap
+newToolButton(bar, kind = tbsSeparator)   # a gap
 let bold = newToolButton(bar, "Bold", tbsCheck)   # toggles `down`
 bold.onClick = proc(sender: Control) =
   echo "bold is ", ToolButton(sender).down

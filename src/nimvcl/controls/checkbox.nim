@@ -48,7 +48,7 @@ method canFocus*(b: CheckBox): bool = b.isVisible and b.isEnabled
 
 method preferredSize*(b: CheckBox): SizeF = indicatorPreferredSize(b)
 
-method activateMnemonic*(b: CheckBox, ch: char): bool =
+method activateMnemonic*(b: CheckBox, ch: Rune): bool =
   if mnemonicOf(b.caption) != ch: return false
   setFocus(b)
   b.doClick()
@@ -145,7 +145,7 @@ proc initCheckBox*(b: CheckBox, owner: Component = nil) =
 
 proc newCheckBox*(parent: Container = nil, caption = "", checked = false,
                   left = 0'f32, top = 0'f32,
-                  width = -1'f32, height = -1'f32): CheckBox =
+                  width = -1'f32, height = -1'f32): CheckBox {.discardable.} =
   new result
   result.initCheckBox(parent)
   result.caption = caption

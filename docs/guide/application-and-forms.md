@@ -24,7 +24,7 @@ Useful `Application` members:
 | `terminate()` | Leave the loop |
 | `mainForm`, `activeForm`, `forms` | The registry of open forms |
 | `onIdle: proc()` | Called after each batch of events |
-| `onException: proc(e: ref Exception)` | Handler errors (default: re-raise) |
+| `onException: proc(e: ref Exception)` | Errors from handlers, queued jobs, layout and paint (default: re-raise). A failing queued job does not stop the others |
 | `theme = themeDark()` | Switch the theme, see [theming](theming.md) |
 | `clipboard` | Read or write the clipboard text |
 | `processMessages()` | Pump events by hand inside a long loop |

@@ -48,7 +48,8 @@ What happens here:
   event loop until the main form closes.
 * Every control constructor is `newXxx(parent, <main property>, ..., left, top,
   width, height)`. Passing `form` as `parent` puts the button inside it. Leave
-  out the size to get the control's default size.
+  out the size to get the control's default size. The parent owns the new
+  control, so you can call a constructor as a statement (no `discard`).
 * Events are plain fields: `onClick = proc(sender: Control) = ...`.
 
 Build and run it:

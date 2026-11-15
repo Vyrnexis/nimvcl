@@ -535,6 +535,27 @@ suite "capture lost (finding 17)":
     check not tb.isDragging
     f.feed(ekMouseUp, 18, 113)
 
+  test "ScrollBar wheel step honours wheelLines":
+    let f = newForm(nil, 400, 240)
+    f.show()
+    let sb = newScrollBar(f, sbVertical, 300, 10, 12, 100)
+    sb.setRange(0, 1000, 20)
+    sb.smallChange = 10
+    f.settle()
+    check sb.wheelLines == 3
+    var h = false
+    sb.doMouseWheel({}, 0, -1, h)
+    check sb.position == 30 and h
+    sb.wheelLines = 5
+    h = false
+    sb.doMouseWheel({}, 0, -1, h)
+    check sb.position == 80
+    sb.wheelLines = 0                       # clamped to 1
+    check sb.wheelLines == 1
+    let sc = newScrollBox(f, 10, 10, 100, 100)
+    sc.wheelLines = 7
+    check sc.vScrollBar.wheelLines == 7 and sc.hScrollBar.wheelLines == 7
+
   test "Splitter drops its drag":
     let f = newForm(nil, 400, 240)
     f.show()

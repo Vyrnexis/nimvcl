@@ -61,7 +61,10 @@ func contentSize*(c: ScrollingControl): SizeF = c.fContent
 func scrollPos*(c: ScrollingControl): PointF = c.fPos
 func scrollsChildren*(c: ScrollingControl): bool = c.fScrollsChildren
 func wheelLines*(c: ScrollingControl): int = c.fWheelLines
-proc `wheelLines=`*(c: ScrollingControl, v: int) = c.fWheelLines = max(v, 1)
+proc `wheelLines=`*(c: ScrollingControl, v: int) =
+  c.fWheelLines = max(v, 1)
+  if c.fHBar != nil: c.fHBar.wheelLines = c.fWheelLines   # the embedded bars agree
+  if c.fVBar != nil: c.fVBar.wheelLines = c.fWheelLines
 
 method scrollLineSize*(c: ScrollingControl): SizeF {.base.} =
   ## Pixels of one line: width = horizontal step, height = vertical step.

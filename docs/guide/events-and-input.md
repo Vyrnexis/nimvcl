@@ -109,6 +109,10 @@ Key constants: `keyEnter`, `keyEscape`, `keyTab`, `keySpace`, `keyBackspace`,
 `ShiftState` is a set of `ssShift`, `ssCtrl`, `ssAlt`, `ssSuper` (and mouse
 buttons `ssLeft`, `ssRight`, `ssMiddle`, `ssDouble`).
 
+A held key sends repeated key-downs. Inside a custom control, `keyIsRepeat(c)`
+tells an auto-repeat from a fresh press (the stock Button uses it so Enter
+clicks once per press), see [painting](painting.md#custom-controls).
+
 `onKeyPress` receives typed text (after the keyboard layout and IME). Set
 `text = ""` to swallow it.
 
@@ -123,6 +127,15 @@ form.addKeyHandler("myhotkeys", proc(k: var Key, shift: ShiftState) =
     echo "refresh"
     k = Key(0))
 ```
+
+## Mouse capture
+
+While a mouse button is held, the control that got the press receives the mouse
+events even outside its bounds (the capture). If the capture is taken away
+without a mouse-up (the window loses focus or is hidden, or the control is
+hidden, disabled or removed), the control's `captureLost` method runs. Custom
+controls that track a drag override it to reset their state, see
+[painting](painting.md#custom-controls).
 
 ## Focus and tab order
 
@@ -146,6 +159,13 @@ A group of `RadioButton`s counts as one tab stop; arrow keys move inside it.
 An `&` in a caption underlines the next letter while Alt is held. Alt+letter
 activates the control: a Button is clicked, a CheckBox toggles, a Label focuses
 its `focusControl`, a TabSheet is selected. Use `&&` for a literal `&`.
+
+Mnemonics work for any script and ignore case: `&Файл` is activated by Alt+Ф
+(or Alt+ф) on a Cyrillic layout. A mnemonic is a `Rune`: `parseMnemonic(caption)`
+returns `(text, index, ch)` with `ch` the lowercased `Rune` (`Rune(0)` when
+there is none), `mnemonicOf(caption)` returns just that, and
+`keyRune(key)` gives the lowercased character of a printable key. A custom
+control takes part by overriding `activateMnemonic(c, ch: Rune): bool`.
 
 ```nim
 let nameLbl = newLabel(form, "&Name:", 16, 16)

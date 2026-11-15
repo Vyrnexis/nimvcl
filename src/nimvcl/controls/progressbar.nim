@@ -136,7 +136,7 @@ proc initProgressBar*(p: ProgressBar, owner: Component = nil) =
   p.setBounds(0, 0, 150, 18)
 
 proc newProgressBar*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                     width = -1'f32, height = -1'f32): ProgressBar =
+                     width = -1'f32, height = -1'f32): ProgressBar {.discardable.} =
   new result
   result.initProgressBar(parent)
   result.placeControl(parent, left, top, width, height)

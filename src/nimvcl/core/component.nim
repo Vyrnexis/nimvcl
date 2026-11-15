@@ -17,6 +17,11 @@ method clientClicked*(l: ActionLinkBase) {.base.} =
   ## The linked client was clicked (after its own state change and `onClick`).
   discard
 
+method release*(l: ActionLinkBase) {.base.} =
+  ## Unlinks the client from its action (both strong references go away).
+  ## Called when the client is freed (`Control.free`, deleted menu items).
+  discard
+
 proc removeComponent*(owner, c: Component)
 
 proc insertComponent*(owner, c: Component) =
@@ -36,7 +41,7 @@ proc initComponent*(c: Component, owner: Component = nil) =
   c.owner = nil
   if owner != nil: owner.insertComponent(c)
 
-proc newComponent*(owner: Component = nil): Component =
+proc newComponent*(owner: Component = nil): Component {.discardable.} =
   new result
   result.initComponent(owner)
 

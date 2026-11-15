@@ -107,7 +107,7 @@ proc state(b: Button): VisualState =
 
 method canFocus*(b: Button): bool = b.isVisible and b.isEnabled
 
-method activateMnemonic*(b: Button, ch: char): bool =
+method activateMnemonic*(b: Button, ch: Rune): bool =
   if mnemonicOf(b.caption) != ch: return false
   b.click()
   true
@@ -204,7 +204,7 @@ proc initButton*(b: Button, owner: Component = nil) =
   b.tabStop = true
 
 proc newButton*(parent: Container = nil, caption = "", left = 0'f32, top = 0'f32,
-                width = -1'f32, height = -1'f32): Button =
+                width = -1'f32, height = -1'f32): Button {.discardable.} =
   new result
   result.initButton(parent)
   result.caption = caption

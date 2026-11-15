@@ -7,6 +7,16 @@ first). Forms, `Align` and `Anchors`, `onClick` events, actions, menus, and a
 **Status:** early. The API can still change. See [PLAN.md](PLAN.md) for the
 architecture and roadmap.
 
+![The nimvcl showcase: buttons and choices](docs/images/showcase-buttons.png)
+
+<p>
+<img src="docs/images/showcase-listview-dark.png" width="32%" alt="ListView in the dark theme">
+<img src="docs/images/showcase-bigdata.png" width="32%" alt="A virtual ListView over 100,000 rows">
+<img src="docs/images/showcase-painting.png" width="32%" alt="Custom painting on a PaintBox">
+</p>
+
+Run the gallery yourself: `nim c -r examples/showcase.nim`.
+
 ## Features
 
 - Control tree with VCL-style properties and events: `align`, `anchors`,

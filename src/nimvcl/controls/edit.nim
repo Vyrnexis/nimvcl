@@ -226,7 +226,7 @@ proc initEdit*(e: Edit, owner: Component = nil) =
     if e.onChange != nil: e.onChange(e)
 
 proc newEdit*(parent: Container = nil, text = "", left = 0'f32, top = 0'f32,
-              width = -1'f32, height = -1'f32): Edit =
+              width = -1'f32, height = -1'f32): Edit {.discardable.} =
   ## `parent` (also the owner) gets the control appended when non-nil.
   new result
   result.initEdit(parent)

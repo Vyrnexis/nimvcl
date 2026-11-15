@@ -661,6 +661,35 @@ suite "settings demo":
       check f.statusBar.top + f.statusBar.height == f.height
     f.finish()
 
+  test "small window: the pages scroll instead of clipping their content":
+    let f = newSettingsForm()
+    f.width = 640; f.height = 480
+    f.show()
+    f.syncMetrics()
+    discard f.paintIfDirty()
+    # General: the last group is cut off until the page is scrolled
+    let sc = f.generalScroll
+    check sc.vScrollBar.visible and sc.vScrollBar.canScroll
+    check not sc.hScrollBar.visible
+    let v = sc.viewport
+    check sc.rectInAncestor(f.startEmpty).bottom > v.bottom
+    sc.scrollTo(0, sc.maxScroll.y)
+    discard f.paintIfDirty()
+    check sc.rectInAncestor(f.startEmpty).bottom <= sc.viewport.bottom + 0.5
+    # Appearance and Editor scroll too
+    f.clickTab(f.pages, 1)
+    discard f.paintIfDirty()
+    check f.appearanceScroll.vScrollBar.visible
+    f.clickTab(f.pages, 2)
+    discard f.paintIfDirty()
+    check f.editorScroll.vScrollBar.visible
+    # a big window needs no scrolling at all
+    f.setBounds(f.left, f.top, 1200, 800)
+    f.syncMetrics()
+    discard f.paintIfDirty()
+    check not f.editorScroll.vScrollBar.visible
+    f.finish()
+
   test "track bar: mouse drag and keys change the font size live":
     let f = newShown()
     f.clickTab(f.pages, 1)

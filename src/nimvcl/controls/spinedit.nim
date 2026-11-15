@@ -240,7 +240,7 @@ proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
   s.buttons = b
 
 proc newSpinEdit*(parent: Container = nil, value = 0, left = 0'f32, top = 0'f32,
-                  width = -1'f32, height = -1'f32): SpinEdit =
+                  width = -1'f32, height = -1'f32): SpinEdit {.discardable.} =
   new result
   result.initSpinEdit(parent)
   result.value = value

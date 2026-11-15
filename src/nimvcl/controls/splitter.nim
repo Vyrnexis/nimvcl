@@ -142,8 +142,11 @@ proc initSplitter*(s: Splitter, owner: Component = nil) =
   s.align = alLeft
   s.cursor = crSizeWE
 
-proc newSplitter*(parent: Container = nil, align = alLeft): Splitter =
+proc newSplitter*(parent: Container = nil, align = alLeft,
+                  left = 0'f32, top = 0'f32,
+                  width = -1'f32, height = -1'f32): Splitter {.discardable.} =
+  ## Convention note: the main property is `align` (the edge it splits at).
   new result
   result.initSplitter(parent)
   result.align = align
-  if parent != nil: parent.insertControl result
+  result.placeControl(parent, left, top, width, height)

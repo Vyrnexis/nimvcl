@@ -522,7 +522,7 @@ proc initMemo*(e: Memo, owner: Component = nil) =
   e.model.onChanged = proc(first, oldN, newN: int) = e.modelChanged(first, oldN, newN)
 
 proc newMemo*(parent: Container = nil, text = "", left = 0'f32, top = 0'f32,
-              width = -1'f32, height = -1'f32): Memo =
+              width = -1'f32, height = -1'f32): Memo {.discardable.} =
   new result
   result.initMemo(parent)
   if text.len > 0: result.model.setText(text)

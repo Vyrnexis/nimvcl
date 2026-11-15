@@ -79,6 +79,8 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 * In a DrawGrid, `rect` excludes the 1 px grid line. Use `cellTextColor(state)` and
   `drawCellText` for theme-correct text.
 * Without `goEditing`, cells are read-only. Enter or F2 starts editing.
+* `autoFitColumn` measures the header rows and at most 400 rows below the first
+  visible one; for exact auto-fit of huge grids handle `onMeasureColumn`.
 * Not implemented: column dragging (`goColMoving`).
 
 [Back to the index](../README.md)

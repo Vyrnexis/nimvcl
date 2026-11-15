@@ -272,17 +272,17 @@ proc link(a: Action, l: ActionLink) =
   a.fLinks.add l
   l.apply()
 
+method release(l: ActionLink) =
+  if l.upgraded and l.ctl != nil and l.ctl of ToolButton:
+    ToolButton(l.ctl).down = false
+    ToolButton(l.ctl).kind = l.origKind
+    l.upgraded = false
+  l.detach()
+  if l.action != nil: l.action.unlink(l)
+  l.action = nil
+
 proc releaseClient(c: Component) =
-  let old = c.actionLink
-  if old != nil and old of ActionLink:
-    let l = ActionLink(old)
-    if l.upgraded and l.ctl != nil and l.ctl of ToolButton:
-      ToolButton(l.ctl).down = false
-      ToolButton(l.ctl).kind = l.origKind
-      l.upgraded = false
-    l.detach()
-    if l.action != nil: l.action.unlink(l)
-    l.action = nil
+  if c.actionLink != nil: c.actionLink.release()
 
 proc `action=`*(m: MenuItem, a: Action) =
   ## Links the item to `a` (nil unlinks; a previous link is replaced).
@@ -391,12 +391,12 @@ proc initActionList*(l: ActionList, owner: Component = nil) =
   l.initComponent(owner)
   l.ensureHook()
 
-proc newActionList*(owner: Component = nil): ActionList =
+proc newActionList*(owner: Component = nil): ActionList {.discardable.} =
   new result
   result.initActionList(owner)
 
 proc newAction*(owner: Component = nil, caption = "", onExecute: ActionEvent = nil,
-                shortcut = noShortcut): Action =
+                shortcut = noShortcut): Action {.discardable.} =
   ## A standalone action (not in a list; no list-level shortcut handling).
   new result
   result.initAction(owner)
@@ -405,7 +405,7 @@ proc newAction*(owner: Component = nil, caption = "", onExecute: ActionEvent = n
   result.fShortcut = shortcut
 
 proc newAction*(list: ActionList, caption = "", onExecute: ActionEvent = nil,
-                shortcut = noShortcut): Action =
+                shortcut = noShortcut): Action {.discardable.} =
   ## Creates an action owned by `list` and adds it.
   new result
   result.initAction(list)

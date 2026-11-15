@@ -40,7 +40,7 @@ ListItem: `caption`, `subItems`, `imageIndex`, `checked`, `selected`, `data`, `t
 |---|---|
 | `onSelectItem(sender, item, selected)` | Selection changed |
 | `onChange` | Focus or selection changed |
-| `onItemDblClick(sender, index, column)` | Double click |
+| `onItemDblClick(sender, index, column)` | Double click on an item (not the header or empty space); `column` is the report-view column under the pointer, -1 in other views |
 | `onItemChecked(sender, item)` | A check box toggled |
 | `onColumnClick(sender, column)` | Header clicked: sort here |
 | `onColumnResize`, `onEditing`, `onEdited` | Resize and rename |
@@ -52,7 +52,9 @@ ListItem: `caption`, `subItems`, `imageIndex`, `checked`, `selected`, `data`, `t
 | Method | Description |
 |---|---|
 | `sortByColumn(col, order)`, `sortItems(cmp)` | Sort the items |
-| `selectedIndices()`, `selected(i)`, `setSelected(i, v)`, `selectAll()` | Selection |
+| `selectedIndices()`, `selected(i)`, `selCount`, `setSelected(i, v)`, `selectAll()` | Read and change the selection |
+| `setSelection(indices, focus = -1)` | Replace the whole selection in one step |
+| `clearSelection()` | Select nothing |
 | `makeVisible(i)`, `itemAt(point)` | Scrolling and hit test |
 | `beginEdit(i)` / `endEdit(cancel)` | Rename |
 | `refreshData()` | Virtual mode: data changed |
@@ -69,6 +71,11 @@ ListItem: `caption`, `subItems`, `imageIndex`, `checked`, `selected`, `data`, `t
     item.caption = "Row " & $item.index
   lv.itemsCount = 1_000_000
   ```
+* `itemIndex = i` selects exactly item `i`. To select many from code, call
+  `lv.setSelection([2, 5, 9], focus = 5)`: it fires `onChange` once and
+  `onSelectItem` only for items whose state changed, and it is fast even with
+  100,000 selected rows in virtual mode. Plain Space toggles the focused item
+  when `multiSelect` is on and `extendedSelect` is off.
 * Sorting is yours: handle `onColumnClick` and call `sortByColumn`.
 * Sub-item `k` is column `k + 1`; the caption is column 0.
 * Drag the right edge of a column header to resize it.

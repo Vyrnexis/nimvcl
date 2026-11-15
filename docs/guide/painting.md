@@ -78,14 +78,16 @@ method doMouseDown*(g: Gauge, button: MouseButton, shift: ShiftState,
   procCall doMouseDown(Control(g), button, shift, x, y)   # keep onMouseDown
 
 proc newGauge*(parent: Container = nil, left = 0'f32, top = 0'f32,
-               width = -1'f32, height = -1'f32): Gauge =
+               width = -1'f32, height = -1'f32): Gauge {.discardable.} =
   new result
   result.initControl(parent)
   result.setBounds(0, 0, 160, 20)         # default size
   result.placeControl(parent, left, top, width, height)
 ```
 
-Use it like any stock control: `let g = newGauge(form, 16, 16)`.
+Use it like any stock control: `let g = newGauge(form, 16, 16)`. Make the
+constructor `{.discardable.}` like the stock ones, since the parent owns the
+control.
 
 What to know:
 
@@ -99,6 +101,32 @@ What to know:
   with `procCall` when you override.
 * **Focus**: override `canFocus` (return `c.isVisible and c.isEnabled`) and set
   `tabStop = true` for a control that takes keyboard input.
+* **`captureLost()`**: a control that tracks a drag (or a repeat timer) gets the
+  mouse capture taken away without a mouse-up when the window loses focus or is
+  hidden, or when the control itself is hidden, disabled or removed. Override it
+  to reset your drag state, and call the base:
+
+  ```nim
+  method captureLost*(g: Gauge) =
+    g.dragging = false                  # your own field
+    g.invalidate()
+    procCall captureLost(Control(g))
+  ```
+* **`keyIsRepeat(c)`**: true while `c` handles a key-down that is an
+  auto-repeat (the key is held). Check it in `doKeyDown` when something must
+  happen once per press, as the stock Button does for Enter:
+
+  ```nim
+  method doKeyDown*(g: Gauge, key: var Key, shift: ShiftState) =
+    if key == keyEnter and not g.keyIsRepeat:
+      g.value = 1
+      key = Key(0)
+    procCall doKeyDown(Control(g), key, shift)
+  ```
+* **Freeing**: `g.free()` removes the control from its parent for good and
+  unlinks its action. Override `releaseResources` (a method on `Control`) if
+  your control subscribes to something long-lived, such as an `ImageList`:
+  unsubscribe there.
 * **`hitTest(p)`** can return false to let clicks pass through (as `Bevel` does).
 * **Properties**: use setters that call `invalidate()` for a repaint, or
   `requestLayout()` when the size or position of siblings can change.

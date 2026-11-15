@@ -107,8 +107,12 @@ proc initStatusBar*(b: StatusBar, owner: Component = nil) =
   b.setBounds(0, 0, 200, 24)
   b.align = alBottom
 
-proc newStatusBar*(parent: Container = nil, simpleText = ""): StatusBar =
+proc newStatusBar*(parent: Container = nil, simpleText = "",
+                   left = 0'f32, top = 0'f32,
+                   width = -1'f32, height = -1'f32): StatusBar {.discardable.} =
+  ## Convention note: the main property is `simpleText`. The bar is `alBottom`,
+  ## so left/top matter only after changing `align`.
   new result
   result.initStatusBar(parent)
   if simpleText.len > 0: result.simpleText = simpleText
-  if parent != nil: parent.insertControl result
+  result.placeControl(parent, left, top, width, height)

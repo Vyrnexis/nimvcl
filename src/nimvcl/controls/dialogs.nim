@@ -349,12 +349,12 @@ proc executeModal*(d: FileDialogBase): bool =
   runModalLoop(proc(): bool = finished)
   result = accepted
 
-proc newOpenDialog*(owner: Component = nil): OpenDialog =
+proc newOpenDialog*(owner: Component = nil): OpenDialog {.discardable.} =
   new result
   result.initComponent(owner)
-proc newSaveDialog*(owner: Component = nil): SaveDialog =
+proc newSaveDialog*(owner: Component = nil): SaveDialog {.discardable.} =
   new result
   result.initComponent(owner)
-proc newSelectFolderDialog*(owner: Component = nil): SelectFolderDialog =
+proc newSelectFolderDialog*(owner: Component = nil): SelectFolderDialog {.discardable.} =
   new result
   result.initComponent(owner)

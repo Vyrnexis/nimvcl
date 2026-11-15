@@ -8,8 +8,7 @@ when the content is bigger than the box.
 ```nim
 let box = newScrollBox(form, 16, 16, 300, 200)
 for i in 0 ..< 20:
-  let cb = newCheckBox(box, "Option " & $i, left = 8, top = float32(8 + i * 28))
-  discard cb
+  newCheckBox(box, "Option " & $i, left = 8, top = float32(8 + i * 28))
 box.vScrollMode = sbmAuto                 # bars only when needed
 ```
 
@@ -21,7 +20,7 @@ box.vScrollMode = sbmAuto                 # bars only when needed
 | `contentSize` | `SizeF` | Set it to fix the size (turns `autoContentSize` off) |
 | `hScrollMode`, `vScrollMode` | `ScrollBarMode` | `sbmAuto`, `sbmAlways`, `sbmNever` |
 | `scrollPos` | `PointF` | Current scroll position |
-| `wheelLines` | int | Wheel speed |
+| `wheelLines` | int | Lines per wheel notch (default 3); its scrollbars follow it |
 | `hScrollBar`, `vScrollBar` | `ScrollBar` | The embedded bars |
 
 ## Events

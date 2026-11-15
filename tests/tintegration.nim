@@ -2,7 +2,7 @@
 ## layout-owner hook, visibility notification, mnemonics, modal ownership.
 ## Headless (offscreen SDL).
 
-import std/[unittest]
+import std/[unittest, unicode]
 import nimvcl                       # the umbrella must be enough
 
 proc ev(f: Form, kind: EventKind, k = Key(0), shift: ShiftState = {}): PlatformEvent =
@@ -153,13 +153,13 @@ suite "phase 5 round 2":
   test "parseMnemonic and displayText":
     check parseMnemonic("&Open").text == "Open"
     check parseMnemonic("&Open").index == 0
-    check parseMnemonic("&Open").ch == 'o'
+    check parseMnemonic("&Open").ch == "o".runeAt(0)
     check parseMnemonic("Sa&ve && go").text == "Save & go"
     check parseMnemonic("Sa&ve && go").index == 2
     check parseMnemonic("A && B").index == -1
     check displayText("&&x") == "&x"
-    check mnemonicOf("Fi&nd") == 'n'
-    check mnemonicOf("none") == '\0'
+    check mnemonicOf("Fi&nd") == "n".runeAt(0)
+    check mnemonicOf("none") == Rune(0)
 
   test "alt state is tracked and cleared on focus loss":
     let f = newShown()

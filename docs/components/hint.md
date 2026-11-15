@@ -40,6 +40,8 @@ None.
   ancestor that has one.
 * A hint hides when the mouse leaves, on click, wheel or key press, when the window
   loses focus, and never shows while a menu is open.
+* A disabled control never gets hover, but if it has its own `hint` that hint
+  still shows when the mouse rests on it.
 * Moving from one hinted control to another shortly after a hint shows the next
   one after only 100 ms.
 * Importing `nimvcl` is enough to enable hints. Colors come from the theme

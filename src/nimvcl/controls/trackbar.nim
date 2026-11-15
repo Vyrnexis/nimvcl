@@ -224,7 +224,7 @@ proc initTrackBar*(t: TrackBar, owner: Component = nil) =
   t.setBounds(0, 0, 150, 32)
 
 proc newTrackBar*(parent: Container = nil, left = 0'f32, top = 0'f32,
-                  width = -1'f32, height = -1'f32): TrackBar =
+                  width = -1'f32, height = -1'f32): TrackBar {.discardable.} =
   new result
   result.initTrackBar(parent)
   result.placeControl(parent, left, top, width, height)

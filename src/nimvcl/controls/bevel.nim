@@ -40,7 +40,7 @@ proc initBevel*(b: Bevel, owner: Component = nil) =
   b.setBounds(0, 0, 50, 50)
 
 proc newBevel*(parent: Container = nil, shape = bsBox, left = 0'f32,
-               top = 0'f32, width = -1'f32, height = -1'f32): Bevel =
+               top = 0'f32, width = -1'f32, height = -1'f32): Bevel {.discardable.} =
   new result
   result.initBevel(parent)
   result.fShape = shape

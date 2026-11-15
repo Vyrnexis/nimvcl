@@ -43,7 +43,9 @@ Only the common ones (`onClick`, `onResize`, mouse events).
 
 ## Tips
 
-* Panel draws its caption behind its children.
+* Panel draws its caption behind its children. A `&` in a Panel caption is
+  stripped but is not a mnemonic: nothing is underlined and Alt+letter does
+  nothing (use a Label with `focusControl`, or a GroupBox).
 * A GroupBox computes its own `padding`, so setting it has no effect. Aligned
   children sit below the caption. For `alNone` children add `captionHeight` to `top`
   or position inside `clientArea`.

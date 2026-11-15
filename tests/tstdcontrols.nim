@@ -5,7 +5,7 @@
 import std/[unittest, monotimes, times, unicode]
 import nimvcl/core/[types, control, form, application, input, layout]
 import nimvcl/platform/[events, window]
-import nimvcl/controls/[common, button, edit, panel, progressbar, trackbar,
+import nimvcl/controls/[common, button, checkbox, edit, panel, progressbar, trackbar,
                         spinedit, splitter, statusbar, toolbar, pagecontrol,
                         flowpanel, label]
 
@@ -791,17 +791,35 @@ suite "standard controls":
     check tb.preferredSize.h == tb.theme.controlHeight
 
   test "mnemonics: non-ASCII characters, case-insensitive":
-    check parseMnemonic("&Éclair").ch == '\xE9'
-    check parseMnemonic("&éclair").ch == '\xE9'
-    check parseMnemonic("&Save").ch == 's'
+    check parseMnemonic("&Éclair").ch == "é".runeAt(0)
+    check parseMnemonic("&éclair").ch == "é".runeAt(0)
+    check parseMnemonic("&Save").ch == "s".runeAt(0)
     check parseMnemonic("&Éclair").text == "Éclair" and parseMnemonic("a&éb").index == 1
-    check mnemonicOf("&Ωmega") == '\0'           # beyond Latin-1: no char value
+    check mnemonicOf("&Ωmega") == "ω".runeAt(0)   # beyond Latin-1 works too
+    check mnemonicOf("none") == Rune(0)
     check mnemonicRune("&Ωmega", 1) == "ω".runeAt(0)
     let f = newShown()
     let b = newButton(f, "&éclair", 10, 10, 80, 28)
     var hit = 0
     b.onClick = proc(s: Control) = inc hit
-    check b.activateMnemonic('\xE9')
+    check b.activateMnemonic("é".runeAt(0))
+    check hit == 1
+
+  test "mnemonics: Cyrillic caption activated by Alt + the Cyrillic key":
+    check parseMnemonic("&Файл").ch == "ф".runeAt(0)
+    check parseMnemonic("&Файл").text == "Файл"
+    check keyRune(Key(0x424)) == "ф".runeAt(0)       # Ф folds to ф
+    check keyRune(keyF1) == Rune(0) and keyRune(keyEnter) == Rune(0)
+    let f = newShown()
+    let b = newButton(f, "&Файл", 10, 10, 80, 28)
+    let c = newCheckBox(f, "&Дальше", false, 10, 50)
+    var hit = 0
+    b.onClick = proc(s: Control) = inc hit
+    f.tap(Key(0x444), {ssAlt})                        # Alt+ф
+    check hit == 1
+    f.tap(Key(0x434), {ssAlt})                        # Alt+д
+    check c.checked
+    f.tap(Key(0x436), {ssAlt})                        # Alt+ж: nothing
     check hit == 1
 
   test "button: Enter activates once per press, not per auto-repeat":

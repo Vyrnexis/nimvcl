@@ -35,6 +35,7 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 | `pageCount`, `sheets()` | | The pages |
 | `tabs` | `seq[string]` | TabControl captions; `addTab(caption)` appends |
 | `TabSheet.caption` | string | Tab text; `&` makes a mnemonic |
+| `TabSheet.tabVisible` | bool | `false` hides the tab (like Delphi's `TabVisible`); default `true` |
 
 ## Events
 
@@ -59,6 +60,10 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 * The first sheet created becomes active.
 * Ctrl+Tab and Ctrl+PageUp/Down switch pages while focus is inside the active
   page. Alt+letter selects a page by mnemonic (enabled sheets only).
+* `sheet.tabVisible = false` hides a page's tab. A page without a tab cannot be
+  reached by click, arrows or Ctrl+Tab (code can still pick it with
+  `activePage`). Hiding the active page's tab moves to the next selectable page.
+* Disabled pages cannot be selected by the user either.
 * When tabs do not fit, small arrows appear to scroll the strip.
 
 [Back to the index](../README.md)
