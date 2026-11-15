@@ -33,7 +33,7 @@
 ## Alt: `altHeld` follows the Alt key events (cleared on focus loss) and
 ## repaints the tree when it changes, so captions can underline their mnemonic.
 
-import std/[algorithm, strutils, os, math]
+import std/[algorithm, os, math]
 import ../graphics/[geometry, context, canvas]
 import ../platform/[window, events, cursors]
 import ./types, ./control, ./layout

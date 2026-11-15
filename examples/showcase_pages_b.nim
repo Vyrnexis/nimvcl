@@ -9,7 +9,7 @@ import ./showcase_common, ./showcase_frame
 const
   FirstNames = ["Ada", "Alan", "Grace", "Linus", "Margaret", "Dennis", "Barbara", "Ken",
                 "Edsger", "Donald", "Radia", "Tim", "Guido", "Anders", "Bjarne", "Yukihiro",
-                "Rob", "Niklaus", "Hedy", "Katherine", "Claude", "John", "Frances", "Leslie",
+                "Rob", "Niklaus", "Hedy", "Katherine", "Edith", "John", "Frances", "Leslie",
                 "Shafi", "Vint", "Lois", "Mary", "Jean", "Satoshi", "Andreas", "Elena",
                 "Marcus", "Priya", "Chen", "Noor", "Mateo", "Ingrid", "Tariq", "Sofia"]
   LastNames = ["Lovelace", "Turing", "Hopper", "Torvalds", "Hamilton", "Ritchie", "Liskov",

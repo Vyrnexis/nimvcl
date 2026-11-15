@@ -2,7 +2,7 @@
 ## `ImageList` at start-up, so there are no asset files), the `Showcase`
 ## context that the page builders share, and a few layout helpers.
 
-import std/[math, strutils, os]
+import std/[math, strutils]
 import nimvcl
 
 # ------------------------------------------------------------------ icons

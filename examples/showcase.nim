@@ -18,7 +18,7 @@
 # The code is split in modules: showcase_common (icons, helpers),
 # showcase_pages_a / _b (the nine pages), showcase_frame (a `frame`).
 
-import std/[os, strutils]
+import std/os
 import nimvcl
 import ./showcase_common, ./showcase_pages_a, ./showcase_pages_b
 

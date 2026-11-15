@@ -92,7 +92,7 @@
 ## selection / hover background; set `defaultDraw = false` to replace the
 ## default content. `hotTrack` underlines the caption under the mouse.
 
-import std/[sets, hashes, algorithm, strutils]
+import std/[sets, algorithm, strutils]
 import ../graphics/context
 import ../core/timer
 import ./common, ./scrolling, ./edit, ./imagelist, ./viewsupport

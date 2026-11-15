@@ -16,7 +16,7 @@
 #
 # Build: nim c --outdir:build examples/views_demo.nim
 
-import std/[os, strutils, algorithm, osproc]
+import std/[os, strutils, algorithm, osproc, sugar]
 import nimvcl
 import nimvcl/controls/[treeview, listview, imagelist]
 
@@ -246,7 +246,8 @@ proc buildToolBar(f: Form) =
     b.groupIndex = 1
     b.down = st == vsReport
     b.name = "view_" & cap
-    b.onClick = proc(s: Control) = list.viewStyle = st
+    capture st:
+      b.onClick = proc(s: Control) = list.viewStyle = st
   discard newToolButton(tb, "", tbsDivider)
   let chk = newToolButton(tb, "Check boxes", tbsCheck)
   chk.onClick = proc(s: Control) = list.checkboxes = not list.checkboxes

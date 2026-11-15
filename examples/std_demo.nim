@@ -10,7 +10,7 @@
 #
 # Build: nim c --outdir:build examples/std_demo.nim
 
-import std/[os, strutils]
+import std/[os, strutils, sugar]
 import nimvcl
 
 var
@@ -66,7 +66,8 @@ proc buildToolBar(f: Form) =
     b.groupIndex = 1
     b.down = down
     b.hint = "Align " & g
-    b.onClick = proc(s: Control) = say "align " & g
+    capture g:
+      b.onClick = proc(s: Control) = say "align " & g
   let dis = newToolButton(tb, "Disabled")
   dis.enabled = false
 
@@ -176,10 +177,11 @@ proc buildDialogPage(s: TabSheet) =
                        ("Confirmation", mtConfirmation, {mbYes, mbNo, mbCancel})]:
     let b = newButton(s, cap & "...", 16, y, 150)
     y += 36
-    b.onClick = proc(c: Control) =
-      let r = messageDlg("This is a " & cap.toLowerAscii & " message. It wraps when it " &
-                         "gets long enough to need a second line.", t, bs)
-      results.caption = cap & " -> " & $r
+    capture cap, t, bs:
+      b.onClick = proc(c: Control) =
+        let r = messageDlg("This is a " & cap.toLowerAscii & " message. It wraps when it " &
+                           "gets long enough to need a second line.", t, bs)
+        results.caption = cap & " -> " & $r
   let sm = newButton(s, "showMessage", 190, 44, 150)
   sm.onClick = proc(c: Control) = showMessage("Plain message without an icon.")
   let iq = newButton(s, "inputQuery", 190, 80, 150)

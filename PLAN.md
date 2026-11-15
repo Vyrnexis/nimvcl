@@ -303,7 +303,7 @@ is incremental and can be reordered by what you want to build first.
 
 ## 7. How the work will be done
 - Each phase is broken into tasks with a brief (goal, files, constraints, how to
-  verify) and handed to builder agents. Independent tasks run in parallel.
+  verify). Independent tasks run in parallel.
 - Every task is reviewed through `git diff` plus the tests before the next
   phase starts.
 

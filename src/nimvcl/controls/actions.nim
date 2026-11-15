@@ -49,9 +49,8 @@
 ## `client.action = nil`, or `free(action)` (unlinks all clients and removes it
 ## from its list), or `free(list)`.
 
-import std/strutils
 import ../core/[form, application]
-import ./common, ./menus, ./toolbar, ./button, ./checkbox, ./imagelist
+import ./common, ./menus, ./toolbar, ./checkbox, ./imagelist
 
 export menus, imagelist
 
