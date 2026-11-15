@@ -38,6 +38,9 @@ suite "form macro errors":
   test "duplicate child name":
     expectError("duplicate_name.nim", "duplicate name `ok`", 7)
 
+  test "child named like a Component/Control property":
+    expectError("reserved_name.nim", "`caption` is reserved", 4)
+
   test "shorthand on an event that is not a NotifyEvent":
     expectError("shorthand_not_notify.nim", "`onClose` of `Bad` is not a NotifyEvent", 5)
 

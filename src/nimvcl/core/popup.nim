@@ -147,7 +147,8 @@ proc closePopup*(p: PopupWindow) =
   if ui.win != nil:
     ui.win.destroy()
     ui.win = nil
-  if p.onClosed != nil: p.onClosed(p)
+  let h = p.onClosed        # copy: the handler may clear or replace itself
+  if h != nil: h(p)
 
 proc closeAllPopups*(owner: Form) =
   ## Closes every popup of `owner` (nil: of every form), tooltips included.
@@ -202,22 +203,29 @@ proc showPopup*(owner: Form, content: Container, anchorRectInForm: RectF,
                               ow.forcedScale)
   result = PopupWindow(owner: owner, parent: parent, kind: kind, content: content,
                        bounds: r)
-  let ui = newUiRoot(content)
+  let ui = newUiRoot(content)        # makes `ui` the host of `content`
   ui.rootGetsMouse = true
   ui.autoSizeRoot = false
   ui.win = w
   ui.theme = owner.ui.theme
+  result.ui = ui
   try:
     ui.ctx = newRenderContext(w.renderer, w.scale)
-  except IOError:
+    result.shownAt = getMonoTime()
+    content.setBounds(0, 0, r.w, r.h)
+    gPopups.add result
+    w.show()
+    paintPopup(result)
+  except CatchableError:
+    # unregister and let go of `content`, so the caller can reuse or free it
+    result.fClosed = true
+    let i = gPopups.find(result)
+    if i >= 0: gPopups.delete(i)
+    ui.closeContext()
+    ui.win = nil
     w.destroy()
+    content.host = nil
     raise
-  result.ui = ui
-  result.shownAt = getMonoTime()
-  content.setBounds(0, 0, r.w, r.h)
-  gPopups.add result
-  w.show()
-  paintPopup(result)
 
 # ---------------------------------------------------------------- events
 
@@ -243,7 +251,10 @@ proc routeKey(owner: Form, pe: PlatformEvent) =
   case pe.kind
   of ekKeyDown:
     var k = pe.key
-    top.content.doKeyDown(k, pe.shift)
+    let ui = top.ui
+    ui.keyRepeat = pe.repeat
+    try: top.content.doKeyDown(k, pe.shift)
+    finally: ui.keyRepeat = false
     if k == keyEscape and top.isOpen: closePopup(top)
   of ekKeyUp:
     var k = pe.key
@@ -284,10 +295,18 @@ proc handlePopupEvent*(pe: PlatformEvent): bool =
     false
   else: false
 
-proc paintPopups*() =
-  ## Paints the popups that need it.
-  for p in gPopups:
-    if p.ui.win != nil and p.ui.needsPaint: paintPopup(p)
+proc paintPopups*(onError: proc(e: ref CatchableError) = nil) =
+  ## Paints the popups that need it (over a copy of the list: painting may open
+  ## or close popups). A popup whose paint raises goes to `onError`, when given
+  ## (the others are still painted); without it the exception propagates.
+  let all = gPopups
+  for p in all:
+    if p.fClosed: continue
+    if p.ui.win != nil and p.ui.needsPaint:
+      try: paintPopup(p)
+      except CatchableError as e:
+        if onError == nil: raise
+        onError(e)
 
 proc screenshotWithPopups*(f: Form, path: string): bool =
   ## Like `Form.screenshot`, with the form's open popups drawn over the form at

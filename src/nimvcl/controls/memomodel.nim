@@ -57,6 +57,8 @@ type
     undoStack, redoStack: seq[Op]
     lastKind: OpKind
     lastWasWord: bool
+    pend: tuple[first, oldN, newN: int]   # change recorded by spliceLines
+    hasPend: bool
     onChanged*: proc(firstLine, oldCount, newCount: int)
     onSelection*: proc()
 
@@ -240,6 +242,13 @@ func docEnd*(m: MemoModel): MemoPos = (m.lines.high, m.lines[^1].len)
 proc fireChanged(m: MemoModel, first, oldN, newN: int) =
   if m.onChanged != nil: m.onChanged(first, oldN, newN)
 
+proc flushChanged(m: MemoModel) =
+  ## Fires the change recorded by `spliceLines` (after caret / anchor are
+  ## final, so handlers see a consistent model).
+  if m.hasPend:
+    m.hasPend = false
+    m.fireChanged(m.pend.first, m.pend.oldN, m.pend.newN)
+
 proc fireSel(m: MemoModel) =
   if m.onSelection != nil: m.onSelection()
 
@@ -366,7 +375,8 @@ proc insertSeq(lines: var seq[string], parts: seq[string], at: int) =
 
 proc spliceLines(m: MemoModel, a, b: MemoPos, repl: string): MemoPos =
   ## Raw replacement of [a, b) by `repl`; returns the end of the inserted text.
-  ## Updates the rune count and fires `onChanged`.
+  ## Updates the rune count and records the change (`flushChanged` fires
+  ## `onChanged` once the caller has set caret and anchor).
   let removedRunes = block:
     var n = 0
     if a.line == b.line: n = runeCount(m.lines[a.line][a.col ..< b.col])
@@ -386,7 +396,8 @@ proc spliceLines(m: MemoModel, a, b: MemoPos, repl: string): MemoPos =
       m.lines.deleteSeq(a.line + 1, b.line)
     result = (a.line, a.col + repl.len)
     m.fRunes += insRunes - removedRunes
-    m.fireChanged(a.line, oldN, 1)
+    m.pend = (a.line, oldN, 1)
+    m.hasPend = true
     return
   var parts = splitLines(repl)
   parts[0] = head & parts[0]
@@ -402,7 +413,8 @@ proc spliceLines(m: MemoModel, a, b: MemoPos, repl: string): MemoPos =
   else:
     for i in 0 ..< oldN: m.lines[a.line + i] = move parts[i]
     m.lines.insertSeq(parts[oldN .. ^1], b.line + 1)
-  m.fireChanged(a.line, oldN, newN)
+  m.pend = (a.line, oldN, newN)
+  m.hasPend = true
 
 proc pushOp(m: MemoModel, op: Op) =
   m.undoStack.add op
@@ -460,6 +472,7 @@ proc edit(m: MemoModel, a, b: MemoPos, repl: string, kind: OpKind,
   m.fDesiredCol = -1
   m.lastKind = kind
   m.lastWasWord = isWord
+  m.flushChanged()
   m.fireSel()
 
 proc insert*(m: MemoModel, s: string): bool =
@@ -543,43 +556,59 @@ proc setText*(m: MemoModel, s: string) =
 proc clear*(m: MemoModel) = m.setText("")
 
 # programmatic line API (clears undo; `lines.add` etc. of the control)
-proc afterLineApi(m: MemoModel) =
+proc afterLineApi(m: MemoModel, first, oldN, newN: int) =
   m.undoStack.setLen 0
   m.redoStack.setLen 0
   m.lastKind = opNone
   m.fAnchor = m.snapPos(m.fAnchor)
   m.fCaret = m.snapPos(m.fCaret)
   m.fDesiredCol = -1
+  m.fireChanged(first, oldN, newN)      # after the caret is valid again
   m.fireSel()
 
+proc lineIndexError(what: string, i, hi: int) {.noinline.} =
+  raise newException(IndexDefect, what & ": line index " & $i &
+                     " out of bounds 0.." & $hi)
+
 proc setLine*(m: MemoModel, i: int, s: string) =
-  let t = sanitize(s).replace("\n", " ")
-  m.fRunes += runeCount(t) - runeCount(m.lines[i])
+  ## Replaces line `i` (line breaks in `s` become spaces; cut to `maxLength`).
+  ## Raises IndexDefect when `i` is out of range.
+  if i < 0 or i >= m.lines.len: lineIndexError("setLine", i, m.lines.high)
+  var t = sanitize(s).replace("\n", " ")
+  let oldRunes = runeCount(m.lines[i])
+  if m.fMaxLength > 0:
+    t = truncateRunes(t, max(m.fMaxLength - (m.fRunes - oldRunes), 0))
+  m.fRunes += runeCount(t) - oldRunes
   m.lines[i] = t
-  m.fireChanged(i, 1, 1)
-  m.afterLineApi()
+  m.afterLineApi(i, 1, 1)
 
 proc insertLine*(m: MemoModel, i: int, s: string) =
   ## Inserts a line before index `i` (`i == lineCount` appends). A text with
-  ## "\n" inserts several lines.
-  let at = clamp(i, 0, m.lines.len)
-  let parts = splitLines(sanitize(s))
-  m.lines.insertSeq(parts, at)
+  ## "\n" inserts several lines. Raises IndexDefect when `i` is outside
+  ## 0 .. lineCount. With a `maxLength` the text is cut to what still fits
+  ## (each line costs one line break); nothing is inserted when not even the
+  ## break fits.
+  if i < 0 or i > m.lines.len: lineIndexError("insertLine", i, m.lines.len)
+  var t = sanitize(s)
+  if m.fMaxLength > 0:
+    let room = m.fMaxLength - m.fRunes - 1
+    if room < 0: return
+    t = truncateRunes(t, room)
+  let parts = splitLines(t)
+  m.lines.insertSeq(parts, i)
   for p in parts: m.fRunes += runeCount(p) + 1
-  m.fireChanged(at, 0, parts.len)
-  m.afterLineApi()
+  m.afterLineApi(i, 0, parts.len)
 
 proc deleteLineAt*(m: MemoModel, i: int) =
   if i < 0 or i >= m.lines.len: return
   if m.lines.len == 1:
     m.fRunes = 0
     m.lines[0] = ""
-    m.fireChanged(0, 1, 1)
+    m.afterLineApi(0, 1, 1)
   else:
     m.fRunes -= runeCount(m.lines[i]) + 1
     m.lines.delete(i)
-    m.fireChanged(i, 1, 0)
-  m.afterLineApi()
+    m.afterLineApi(i, 1, 0)
 
 # ------------------------------------------------------------- undo / redo
 
@@ -595,6 +624,7 @@ proc undo*(m: MemoModel): bool =
   discard m.spliceLines(op.start, endOfInsert(op.start, op.inserted), op.removed)
   m.restoreSel(op.anchorBefore, op.caretBefore)
   m.redoStack.add op
+  m.flushChanged()
   m.fireSel()
   true
 
@@ -604,5 +634,6 @@ proc redo*(m: MemoModel): bool =
   discard m.spliceLines(op.start, endOfInsert(op.start, op.removed), op.inserted)
   m.restoreSel(op.anchorAfter, op.caretAfter)
   m.undoStack.add op
+  m.flushChanged()
   m.fireSel()
   true

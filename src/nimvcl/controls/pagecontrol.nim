@@ -12,6 +12,11 @@
 ## Ctrl+Tab / Ctrl+PageUp/Down shortcuts work while focus is inside the active
 ## page, whatever the registration order of other handlers (menus, dialog keys).
 ##
+## Disabled sheets and sheets with `tabVisible = false` (no tab shown, like VCL)
+## cannot be selected by click, arrows, Home/End or Ctrl+Tab; code may still
+## select a disabled sheet through `tabIndex`/`activePage`. Hiding the active
+## sheet's tab moves the selection to the next selectable sheet.
+##
 ## Mnemonics: `&` in a sheet caption is underlined while Alt is held;
 ## Alt+letter selects that page (when the sheet is enabled).
 ##
@@ -24,7 +29,9 @@
 ## (inactive sheets are hidden, so their controls are out of the tab order).
 ## The first sheet created becomes active. When the active page changes while
 ## focus was inside the old sheet, focus moves to the first focusable control of
-## the new sheet (or to the strip when it has none). `activePage`,
+## the new sheet (or to the strip when it has none). The active sheet is tracked
+## by identity: removing or inserting other sheets keeps it active; removing the
+## active sheet itself activates its neighbour and fires `onChange`. `activePage`,
 ## `activePageIndex` and `tabIndex` are the same selection.
 ##
 ## TabControl: only tabs (`tabs`, `tabIndex`); the body is a plain frame that
@@ -49,8 +56,11 @@ type
     fTabs: seq[string]
 
   TabSheet* = ref object of Container
+    fTabHidden: bool
 
   PageControl* = ref object of TabBase
+    fActive: TabSheet           # the active sheet (tracked by identity)
+    fSyncing: bool
 
 const
   TabPad = 14'f32
@@ -65,6 +75,9 @@ method tabText*(t: TabBase, i: int): string {.base.} = ""
 method tabChanged*(t: TabBase, oldIndex, newIndex: int) {.base.} =
   ## Called after the index changed (before `onChange`).
   discard
+method tabEnabled*(t: TabBase, i: int): bool {.base.} = true
+method tabVisible*(t: TabBase, i: int): bool {.base.} = true
+  ## Whether tab `i` is shown in the strip.
 
 func tabIndex*(t: TabBase): int = t.fIndex
 
@@ -73,6 +86,7 @@ proc stripHeight*(t: TabBase): float32 =
   t.theme.controlHeight
 
 proc tabWidth(t: TabBase, i: int): float32 =
+  if not t.tabVisible(i): return 0
   max(t.textWidth(displayText(t.tabText(i)), t.font) + 2 * TabPad, MinTabW)
 
 proc totalTabsWidth(t: TabBase): float32 =
@@ -85,14 +99,30 @@ proc stripRight(t: TabBase): float32 =
   ## Right edge available to tabs.
   t.width - 2 - (if t.overflowing: 2 * ArrowW else: 0'f32)
 
-proc tabRect*(t: TabBase, i: int): RectF =
-  ## Tab `i` in client coordinates; empty when scrolled out to the left.
+proc rectOf(t: TabBase, i: int): RectF =
   if i < t.fFirst or i >= t.tabCount: return rectF(0, 0, 0, 0)
   var x = StripLeft
   for k in t.fFirst ..< i: x += t.tabWidth(k)
   let h = t.stripHeight
-  if i == t.fIndex: rectF(x, 1, t.tabWidth(i), h - 1)
-  else: rectF(x, 3, t.tabWidth(i), h - 3)
+  let w = t.tabWidth(i)
+  if w <= 0: return rectF(0, 0, 0, 0)
+  if i == t.fIndex: rectF(x, 1, w, h - 1)
+  else: rectF(x, 3, w, h - 3)
+
+proc normalizeFirst(t: TabBase) =
+  ## The strip is only scrolled while the tabs overflow.
+  if t.fFirst != 0 and not t.overflowing: t.fFirst = 0
+
+proc tabRect*(t: TabBase, i: int): RectF =
+  ## Tab `i` in client coordinates; empty when scrolled out to the left or
+  ## hidden.
+  t.normalizeFirst()
+  t.rectOf(i)
+
+proc tabsRight(t: TabBase): float32 =
+  ## Right edge of the last tab as currently scrolled.
+  result = StripLeft
+  for k in t.fFirst ..< t.tabCount: result += t.tabWidth(k)
 
 proc arrowRect(t: TabBase, left: bool): RectF =
   let h = t.stripHeight
@@ -102,23 +132,24 @@ proc arrowRect(t: TabBase, left: bool): RectF =
 proc tabAt*(t: TabBase, x, y: float32): int =
   ## Tab under the point, -1 none, -2 / -3 the left / right scroll arrow.
   if y < 0 or y >= t.stripHeight: return -1
+  t.normalizeFirst()
   if t.overflowing:
     if t.arrowRect(true).contains(pointF(x, y)): return -2
     if t.arrowRect(false).contains(pointF(x, y)): return -3
   if x >= t.stripRight: return -1
   for i in t.fFirst ..< t.tabCount:
-    let r = t.tabRect(i)
+    let r = t.rectOf(i)
     if x >= r.x and x < r.right: return i
     if r.x > t.stripRight: break
   -1
 
 proc ensureVisible(t: TabBase, i: int) =
-  if i < 0 or i >= t.tabCount: return
+  if i < 0 or i >= t.tabCount or not t.tabVisible(i): return
   if not t.overflowing:
     t.fFirst = 0
     return
   if i < t.fFirst: t.fFirst = i
-  while t.fFirst < i and t.tabRect(i).right > t.stripRight:
+  while t.fFirst < i and t.rectOf(i).right > t.stripRight:
     inc t.fFirst
 
 proc `tabIndex=`*(t: TabBase, v: int) =
@@ -135,12 +166,30 @@ proc `tabIndex=`*(t: TabBase, v: int) =
   t.invalidate()
   if t.onChange != nil: t.onChange(t)
 
-proc cycle*(t: TabBase, dir: int) =
-  ## Next / previous tab, wrapping.
-  let n = t.tabCount
-  if n > 1: t.tabIndex = (t.fIndex + dir + n) mod n
+proc selectable(t: TabBase, i: int): bool =
+  i >= 0 and i < t.tabCount and t.tabVisible(i) and t.tabEnabled(i)
 
-func firstVisibleTab*(t: TabBase): int = t.fFirst
+proc nextSelectable(t: TabBase, start, dir: int): int =
+  ## First selectable tab from `start` (exclusive) going `dir`; -1 none.
+  var i = start + dir
+  while i >= 0 and i < t.tabCount:
+    if t.selectable(i): return i
+    i += dir
+  -1
+
+proc cycle*(t: TabBase, dir: int) =
+  ## Next / previous selectable tab, wrapping.
+  let n = t.tabCount
+  if n < 2: return
+  for k in 1 ..< n:
+    let i = ((t.fIndex + dir * k) mod n + n) mod n
+    if t.selectable(i):
+      t.tabIndex = i
+      return
+
+proc firstVisibleTab*(t: TabBase): int =
+  t.normalizeFirst()
+  t.fFirst
 
 # ---------------------------------------------------------- base behaviour
 
@@ -150,11 +199,12 @@ method doMouseDown*(t: TabBase, button: MouseButton, shift: ShiftState,
                     x, y: float32) =
   if button == mbLeft:
     let i = t.tabAt(x, y)
-    if i >= 0: t.tabIndex = i
+    if i >= 0:
+      if t.selectable(i): t.tabIndex = i
     elif i == -2 and t.fFirst > 0:
       dec t.fFirst
       t.invalidate()
-    elif i == -3 and t.tabRect(t.tabCount - 1).right > t.stripRight:
+    elif i == -3 and t.tabsRight > t.stripRight:
       inc t.fFirst
       t.invalidate()
   procCall doMouseDown(Control(t), button, shift, x, y)
@@ -183,12 +233,10 @@ proc handleTabKey(t: TabBase, key: var Key, shift: ShiftState): bool =
     return true
   false
 
-method tabEnabled*(t: TabBase, i: int): bool {.base.} = true
-
 method activateMnemonic*(t: TabBase, ch: char): bool =
   ## Alt+letter selects the tab whose caption has that mnemonic.
   for i in 0 ..< t.tabCount:
-    if t.tabEnabled(i) and mnemonicOf(t.tabText(i)) == ch:
+    if t.selectable(i) and mnemonicOf(t.tabText(i)) == ch:
       t.tabIndex = i
       return true
 
@@ -198,10 +246,13 @@ method doKeyDown*(t: TabBase, key: var Key, shift: ShiftState) =
   if t.handleTabKey(key, shift): return
   if shift * {ssCtrl, ssAlt, ssSuper} != {}: return
   var handled = true
-  if key == keyLeft: t.tabIndex = t.fIndex - 1
-  elif key == keyRight: t.tabIndex = t.fIndex + 1
-  elif key == keyHome: t.tabIndex = 0
-  elif key == keyEnd: t.tabIndex = t.tabCount - 1
+  template go(i: int) =
+    let target = i
+    if target >= 0: t.tabIndex = target
+  if key == keyLeft: go t.nextSelectable(t.fIndex, -1)
+  elif key == keyRight: go t.nextSelectable(t.fIndex, 1)
+  elif key == keyHome: go t.nextSelectable(-1, 1)
+  elif key == keyEnd: go t.nextSelectable(t.tabCount, -1)
   else: handled = false
   if handled: key = Key(0)
 
@@ -213,6 +264,7 @@ method paint*(t: TabBase, c: Canvas) =
   let en = t.isEnabled
   let h = t.stripHeight
   let w = t.width
+  t.normalizeFirst()
   if t.fEnsure:
     t.fEnsure = false
     t.ensureVisible(t.fIndex)
@@ -224,8 +276,9 @@ method paint*(t: TabBase, c: Canvas) =
   c.pushClip(rectF(0, 0, right + 2, h))
   var selR = rectF(0, 0, 0, 0)
   for i in t.fFirst ..< t.tabCount:
-    let r = t.tabRect(i)
+    let r = t.rectOf(i)
     if r.x > right: break
+    if r.w <= 0: continue
     if i == t.fIndex:
       selR = r
       continue
@@ -254,7 +307,7 @@ method paint*(t: TabBase, c: Canvas) =
       let r = t.arrowRect(left)
       let canGo =
         if left: t.fFirst > 0
-        else: t.tabRect(t.tabCount - 1).right > right
+        else: t.tabsRight > right
       let hot = t.fHotTab == (if left: -2 else: -3) and canGo and en
       c.fillRoundRect(r, th.radius, if hot: th.hover else: th.surface)
       c.strokeRoundRect(r, th.radius, th.border, 1)
@@ -314,6 +367,8 @@ proc `caption=`*(s: TabSheet, v: string) =
 
 func caption*(s: TabSheet): string = Control(s).caption
 
+func tabVisible*(s: TabSheet): bool = not s.fTabHidden
+
 proc initTabSheet*(s: TabSheet, owner: Component = nil) =
   s.initContainer(owner)
   s.setBounds(0, 0, 200, 100)
@@ -329,49 +384,116 @@ method tabCount*(p: PageControl): int =
   for c in p.children:
     if c of TabSheet: inc result
 
+proc sheetAt(p: PageControl, i: int): TabSheet =
+  ## The `i`-th sheet (no allocation); nil when out of range.
+  if i < 0: return nil
+  var k = 0
+  for c in p.children:
+    if c of TabSheet:
+      if k == i: return TabSheet(c)
+      inc k
+
+proc sheetIndex(p: PageControl, s: TabSheet): int =
+  result = -1
+  if s == nil: return
+  var k = 0
+  for c in p.children:
+    if c of TabSheet:
+      if c == Control(s): return k
+      inc k
+
 method tabText*(p: PageControl, i: int): string =
-  p.sheets[i].caption
+  let s = p.sheetAt(i)
+  if s == nil: "" else: s.caption
 
 method tabEnabled*(p: PageControl, i: int): bool =
-  p.sheets[i].enabled
+  let s = p.sheetAt(i)
+  s != nil and s.enabled
+
+method tabVisible*(p: PageControl, i: int): bool =
+  let s = p.sheetAt(i)
+  s != nil and s.tabVisible
+
+proc showActive(p: PageControl) =
+  var k = 0
+  for c in p.children:
+    if c of TabSheet:
+      let want = k == p.fIndex
+      if c.visible != want: c.visible = want
+      inc k
 
 proc syncPages(p: PageControl) =
-  ## Keeps the index valid and shows only the active sheet.
-  let sh = p.sheets
-  if sh.len == 0:
-    p.fIndex = -1
-    return
-  if p.fIndex < 0 or p.fIndex >= sh.len: p.fIndex = clamp(p.fIndex, 0, sh.high)
-  for i, s in sh:
-    if s.visible != (i == p.fIndex): s.visible = i == p.fIndex
+  ## Keeps the index on the active sheet (tracked by identity) and shows only
+  ## that sheet. When the active sheet itself is gone its neighbour becomes
+  ## active and `onChange` fires.
+  if p.fSyncing: return
+  p.fSyncing = true
+  var lost = false
+  try:
+    let n = p.tabCount
+    if n == 0:
+      lost = p.fActive != nil
+      p.fIndex = -1
+      p.fActive = nil
+    else:
+      let at = p.sheetIndex(p.fActive)
+      if at >= 0: p.fIndex = at
+      else:
+        lost = p.fActive != nil
+        p.fIndex = clamp(p.fIndex, 0, n - 1)
+        p.fActive = p.sheetAt(p.fIndex)
+    p.showActive()
+  finally:
+    p.fSyncing = false
+  if lost:
+    p.fEnsure = true
+    p.invalidate()
+    p.tabChanged(-1, p.fIndex)
+    if p.onChange != nil: p.onChange(p)
 
 func activePageIndex*(p: PageControl): int = p.fIndex
 proc `activePageIndex=`*(p: PageControl, v: int) = p.tabIndex = v
 
 proc activePage*(p: PageControl): TabSheet =
-  let sh = p.sheets
-  if p.fIndex >= 0 and p.fIndex < sh.len: sh[p.fIndex] else: nil
+  p.sheetAt(p.fIndex)
 proc `activePage=`*(p: PageControl, s: TabSheet) =
-  let i = p.sheets.find(s)
+  let i = p.sheetIndex(s)
   if i >= 0: p.tabIndex = i
 
 proc pageCount*(p: PageControl): int = p.tabCount
 
 method tabChanged*(p: PageControl, oldIndex, newIndex: int) =
-  let sh = p.sheets
   var hadFocus = false
   let h = p.host
   var ui: UiRoot
   if h of UiRoot:
     ui = UiRoot(h)
     let f = ui.focusedControl
-    hadFocus = f != nil and oldIndex >= 0 and oldIndex < sh.len and
-               (f == Control(sh[oldIndex]) or sh[oldIndex].isAncestorOf(f))
+    let os = p.sheetAt(oldIndex)
+    hadFocus = f != nil and os != nil and
+               (f == Control(os) or os.isAncestorOf(f))
+  p.fActive = p.sheetAt(newIndex)
   p.syncPages()
-  if hadFocus and newIndex < sh.len:
-    let stops = tabStops(sh[newIndex])
-    if stops.len > 0: ui.focusControl(stops[0])
-    else: ui.focusControl(p)
+  if hadFocus:
+    let ns = p.sheetAt(newIndex)
+    if ns != nil:
+      let stops = tabStops(ns)
+      if stops.len > 0: ui.focusControl(stops[0])
+      else: ui.focusControl(p)
+
+proc `tabVisible=`*(s: TabSheet, v: bool) =
+  ## Shows / hides the sheet's tab (the sheet itself stays a page; hiding the
+  ## active sheet's tab selects the next selectable sheet).
+  if v == not s.fTabHidden: return
+  s.fTabHidden = not v
+  if s.parent != nil:
+    s.parent.invalidate()
+    if s.parent of PageControl:
+      let p = PageControl(s.parent)
+      if not v and p.fActive == s:
+        var n = p.nextSelectable(p.fIndex, 1)
+        if n < 0: n = p.nextSelectable(p.fIndex, -1)
+        if n >= 0: p.tabIndex = n
 
 proc pageKey(ui: UiRoot, key: var Key, shift: ShiftState) =
   var c = ui.focusedControl
@@ -387,6 +509,10 @@ proc ensureHook(p: PageControl) =
   if ui.hasKeyHandler("pages"): return
   ui.addKeyHandler("pages", proc(key: var Key, shift: ShiftState) =
     pageKey(ui, key, shift))
+
+method childBoundsChanged*(p: PageControl, child: Control) =
+  procCall childBoundsChanged(Container(p), child)
+  if child of TabSheet: p.syncPages()   # a sheet was added / removed
 
 method visibilityChanged*(p: PageControl) =
   p.ensureHook()                    # fires when inserted into a form/host tree

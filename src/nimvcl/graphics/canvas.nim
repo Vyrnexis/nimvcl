@@ -26,6 +26,9 @@ type
     offsets: seq[(float32, float32)]
     clips: seq[RectF]                # absolute logical rects; [0] is the full target
     ended: bool
+    savedClip: Rect                  # the renderer state found by beginFrame,
+    savedClipOn: bool                # put back by endFrame (host mode)
+    savedBlend: BlendMode
 
 const Ellipsis = "\u2026"
 
@@ -49,21 +52,30 @@ proc applyClip(c: Canvas) =
 
 proc beginFrame*(ctx: RenderContext): Canvas =
   ## Starts a frame: advances the cache clock, resets the clip and translate
-  ## stacks and enables alpha blending.
+  ## stacks and enables alpha blending. The renderer's clip rectangle and draw
+  ## blend mode found here are restored by `endFrame` (the host app's state).
   ctx.beginFrameTick()
   var w, h: cint
   discard getCurrentRenderOutputSize(ctx.renderer, w, h)
   result = Canvas(ctx: ctx)
+  result.savedClipOn = renderClipEnabled(ctx.renderer) and
+                       getRenderClipRect(ctx.renderer, result.savedClip)
+  if not getRenderDrawBlendMode(ctx.renderer, result.savedBlend):
+    result.savedBlend = BLENDMODE_NONE
   result.clips.add rectF(0, 0, w.float32 / ctx.scale, h.float32 / ctx.scale)
   discard setRenderDrawBlendMode(ctx.renderer, BLENDMODE_BLEND)
   discard setRenderClipRect(ctx.renderer, nil)
 
 proc endFrame*(c: Canvas) =
-  ## Ends the frame: restores the clip and sweeps idle cache entries. Does not
+  ## Ends the frame: restores the renderer's clip rectangle and blend mode to
+  ## what they were at `beginFrame` and sweeps idle cache entries. Does not
   ## present; the caller owns `renderPresent` (or reads pixels back).
   if c.ended: return
   c.ended = true
-  discard setRenderClipRect(renderer(c.ctx), nil)
+  let r = renderer(c.ctx)
+  if c.savedClipOn: discard setRenderClipRect(r, addr c.savedClip)
+  else: discard setRenderClipRect(r, nil)
+  discard setRenderDrawBlendMode(r, c.savedBlend)
   c.ctx.sweep()
 
 # ------------------------------------------------------------- state stacks

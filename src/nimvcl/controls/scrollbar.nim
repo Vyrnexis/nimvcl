@@ -73,7 +73,8 @@ proc `position=`*(s: ScrollBar, v: float32) =
   if n == s.fPos: return
   s.fPos = n
   s.invalidate()
-  if s.onChange != nil: s.onChange(s)
+  let h = s.onChange        # copy: the handler may clear or replace itself
+  if h != nil: h(s)
 
 proc setRange*(s: ScrollBar, min, max: float32, pageSize = 0'f32) =
   ## Sets min, max and pageSize at once (clamping `position`, one `onChange`).
@@ -84,7 +85,8 @@ proc setRange*(s: ScrollBar, min, max: float32, pageSize = 0'f32) =
   s.invalidate()
   if n != s.fPos:
     s.fPos = n
-    if s.onChange != nil: s.onChange(s)
+    let h = s.onChange
+    if h != nil: h(s)
 
 proc `min=`*(s: ScrollBar, v: float32) = s.setRange(v, s.fMax, s.fPage)
 proc `max=`*(s: ScrollBar, v: float32) = s.setRange(s.fMin, v, s.fPage)
@@ -99,7 +101,8 @@ proc `showArrows=`*(s: ScrollBar, v: bool) =
 proc scrollBy*(s: ScrollBar, code: ScrollCode, delta: float32) =
   ## A user-style move: `onScroll` may adjust the target, then `position` is set.
   var p = s.fPos + delta
-  if s.onScroll != nil: s.onScroll(s, code, p)
+  let h = s.onScroll
+  if h != nil: h(s, code, p)
   s.position = p
 
 # ---------------------------------------------------------------- geometry
@@ -148,7 +151,8 @@ proc dragTo(s: ScrollBar, mouse: float32) =
   let ts = mouse - s.fGrab
   let frac = (ts - s.trackStart) / free
   var p = s.fMin + frac * (s.maxPosition - s.fMin)
-  if s.onScroll != nil: s.onScroll(s, scThumbTrack, p)
+  let h = s.onScroll
+  if h != nil: h(s, scThumbTrack, p)
   s.position = p
 
 # ------------------------------------------------------------------- events
@@ -222,6 +226,12 @@ method doMouseWheel*(s: ScrollBar, shift: ShiftState, dx, dy: float32,
 method doExit*(s: ScrollBar) =
   s.fDragging = false
   procCall doExit(Control(s))
+
+method captureLost*(s: ScrollBar) =
+  if s.fDragging:
+    s.fDragging = false
+    s.invalidate()
+  procCall captureLost(Control(s))
 
 # -------------------------------------------------------------------- paint
 

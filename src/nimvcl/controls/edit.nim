@@ -47,6 +47,9 @@ type
     blink, dragTimer: Timer
     dragging: bool
     dragX: float32
+    enterSelAt: MonoTime               ## when autoSelect last select-all'ed on focus
+    keepSelPress: bool                 ## a press that focused an autoSelect edit keeps select-all
+    pressX: float32
     composition: string
     compCursor, compSelEnd: int        ## bytes inside `composition`
     lastDblAt: MonoTime
@@ -311,9 +314,16 @@ proc insertText*(e: Edit, s: string): bool {.discardable.} =
 proc replaceRange*(e: Edit, start, length: int, s: string): bool {.discardable.} =
   ## Replaces `length` bytes from `start` (snapped to characters) with `s`; the
   ## caret ends after the new text. `length` 0 inserts, empty `s` deletes.
-  e.model.select(start, length)
-  if s.len == 0: e.model.deleteSelection()
-  else: e.model.insert(s)
+  ## When nothing changes (filters reject the text, read-only) the previous
+  ## selection is restored.
+  let m = e.model
+  let (a0, c0) = (m.anchor, m.caret)
+  m.select(start, length)
+  result = if s.len == 0: m.deleteSelection() else: m.insert(s)
+  if not result:
+    m.setCaret(a0)
+    m.setCaret(c0, extend = true)
+    e.touched()
 
 proc copyToClipboard*(e: Edit) =
   ## Copies the selection (never for password edits).
@@ -326,14 +336,15 @@ proc cutToClipboard*(e: Edit) =
   discard e.model.deleteSelection()
 
 proc pasteFromClipboard*(e: Edit) =
-  ## Inserts the clipboard text; line breaks become spaces.
+  ## Inserts the clipboard text; line breaks and tabs become spaces (the
+  ## single-line model drops other control characters).
   if e.readOnly: return
   var s = editClipboardGet()
   if s.len == 0: return
   var t = newStringOfCap(s.len)
   var i = 0
   while i < s.len:
-    if s[i] in {'\r', '\n'}:
+    if s[i] in {'\r', '\n', '\t'}:
       if s[i] == '\r' and i + 1 < s.len and s[i + 1] == '\n': inc i
       t.add ' '
     else: t.add s[i]
@@ -394,17 +405,31 @@ method doEnter*(e: Edit) =
     e.blink = newTimer(nil, BlinkMs)
     e.blink.onTimer = proc(t: Timer) =
       let h = e.host
+      if not e.isShowing:          # hidden form: no blinking, no repaints
+        t.enabled = false
+        return
       if not e.focused or (h of UiRoot and UiRoot(h).windowInactive): return
       e.caretOn = not e.caretOn
       e.invalidate()
   e.caretOn = true
-  e.blink.enabled = true
-  if e.fAutoSelect and e.model.len > 0: e.model.selectAll()
+  e.blink.enabled = e.isShowing
+  e.keepSelPress = false
+  e.enterSelAt = MonoTime()
+  if e.fAutoSelect and e.model.len > 0:
+    e.model.selectAll()
+    e.enterSelAt = getMonoTime()   # a press focuses first, then calls doMouseDown
   e.touched()
+
+method visibilityChanged*(e: Edit) =
+  procCall visibilityChanged(Control(e))
+  if e.blink != nil and e.focused:
+    e.blink.enabled = e.isShowing
+    if e.isShowing: e.resetBlink()
 
 method doExit*(e: Edit) =
   e.composition = ""
   e.stopDrag()
+  e.keepSelPress = false
   if e.blink != nil: e.blink.enabled = false
   e.caretOn = false
   procCall doExit(Control(e))
@@ -424,6 +449,17 @@ method doMouseDown*(e: Edit, button: MouseButton, shift: ShiftState,
   if button != mbLeft or e.composition.len > 0: return
   let m = e.model
   let now = getMonoTime()
+  e.keepSelPress = e.fAutoSelect and ssDouble notin shift and e.enterSelAt != MonoTime() and
+                   (now - e.enterSelAt).inMilliseconds < 100
+  e.enterSelAt = MonoTime()
+  if e.keepSelPress:
+    # this press focused an autoSelect edit: keep the select-all unless the
+    # mouse drags (see doMouseMove)
+    e.pressX = x
+    e.dragging = true
+    e.dragX = x
+    e.touched()
+    return
   if ssDouble in shift:
     if e.isPassword: m.selectAll() else: m.selectWord(e.modelIndexAt(x))
     e.lastDblAt = now
@@ -447,6 +483,10 @@ method doMouseMove*(e: Edit, shift: ShiftState, x, y: float32) =
     e.stopDrag()
     return
   e.dragX = x
+  if e.keepSelPress:
+    if abs(x - e.pressX) < 3: return
+    e.keepSelPress = false
+    e.model.setCaret(e.modelIndexAt(e.pressX))   # a real drag starts at the press point
   let ta = e.textArea
   let outside = x < ta.x or x > ta.right
   e.model.setCaret(e.modelIndexAt(x), extend = true)
@@ -467,7 +507,9 @@ method doMouseMove*(e: Edit, shift: ShiftState, x, y: float32) =
 
 method doMouseUp*(e: Edit, button: MouseButton, shift: ShiftState, x, y: float32) =
   procCall doMouseUp(Control(e), button, shift, x, y)
-  if button == mbLeft: e.stopDrag()
+  if button == mbLeft:
+    e.keepSelPress = false
+    e.stopDrag()
 
 method doKeyDown*(e: Edit, key: var Key, shift: ShiftState) =
   procCall doKeyDown(Control(e), key, shift)
@@ -483,7 +525,7 @@ method doKeyDown*(e: Edit, key: var Key, shift: ShiftState) =
     if ctrl: m.moveWordRight(shf) else: m.moveRight(shf)
   elif key == keyHome: m.moveHome(shf)
   elif key == keyEnd: m.moveEnd(shf)
-  elif key == keyBackspace and not shf: discard m.deleteBackward(word = ctrl)
+  elif key == keyBackspace: discard m.deleteBackward(word = ctrl)
   elif key == keyDelete:
     if shf and not ctrl: e.cutToClipboard()
     else: discard m.deleteForward(word = ctrl)

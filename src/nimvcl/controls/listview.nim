@@ -41,7 +41,8 @@
 ## `itemIndex` is the focused item (-1 none). Single mode: it is the
 ## selection. `multiSelect`: click selects one, Ctrl+click toggles, Shift+click /
 ## Shift+arrows select the range of indices from the anchor, Ctrl+arrows move
-## the focus only, Ctrl+Space toggles, Ctrl+A selects all, dragging selects
+## the focus only, Ctrl+Space toggles (plain Space too without
+## `extendedSelect`), Ctrl+A selects all, dragging selects
 ## (a rubber band is not implemented). `selected(i)`, `setSelected`,
 ## `selCount`, `selectedIndices`, `selectAll`, `clearSelection`.
 ## `onSelectItem(sender, item, selected)` fires per item whose selection
@@ -140,6 +141,7 @@ type
     fItemHeight, fLastIh, fCellW, fMouseX, fMouseY: float32
     fPer, fRpc: int                  ## icon views: cells per row; list: rows per column
     fSmall, fLarge: ImageList
+    fSmallListener, fLargeListener: int
     fSortCol: int
     fSortOrder: SortOrder
     fHdrHot, fHdrDown, fResizeCol: int
@@ -297,6 +299,15 @@ proc getItem*(lv: ListView, i: int): ListItem =
     if lv.onData != nil: lv.onData(lv, result)
   else:
     result = lv.fItems[i]
+
+proc bareItem(lv: ListView, i: int): ListItem =
+  ## For deselect notifications: the stored item, or (virtual mode) a scratch
+  ## item with only its index set; `onData` is never asked, because the index
+  ## may no longer exist in the application's data.
+  if lv.fOwnerData:
+    ListItem(fView: lv, fIndex: i, imageIndex: -1, fScratch: true)
+  elif i in 0 ..< lv.fItems.len: lv.fItems[i]
+  else: ListItem(fView: lv, fIndex: i, imageIndex: -1, fScratch: true)
 
 proc itemCaption*(lv: ListView, i: int): string =
   if lv.fOwnerData:
@@ -639,7 +650,7 @@ proc setSelection*(lv: ListView, indices: openArray[int], focus = -1) =
   if f < 0 or f >= lv.count: f = first
   lv.setFocusRow(f)
   lv.fAnchor = f
-  if f >= 0 and focus >= 0: lv.makeVisible(f)
+  if f >= 0: lv.makeVisible(f)
   lv.notify(v, sn)
 
 proc setSelected*(lv: ListView, i: int, v: bool) =
@@ -709,6 +720,8 @@ proc toggleCheck*(lv: ListView, i: int) =
 
 # ------------------------------------------------------------------- items
 
+proc endEdit*(lv: ListView, cancel = false)
+
 proc renumber(lv: ListView, from0 = 0) =
   for i in from0 ..< lv.fItems.len: lv.fItems[i].fIndex = i
 
@@ -720,9 +733,10 @@ proc shiftIndices(lv: ListView, at, delta: int) =
     lv.fSel = s
   if lv.fIndex >= at: lv.fIndex += delta
   if lv.fAnchor >= at: lv.fAnchor += delta
+  if lv.fEditIdx >= at: lv.fEditIdx += delta
+  if lv.fDownIdx >= at: lv.fDownIdx += delta
+  if lv.fSlowIdx >= at: lv.fSlowIdx += delta
   lv.fHot = -1
-  lv.fDownIdx = -1
-  lv.fSlowIdx = -1
 
 proc insertItem(lv: ListView, index: int, caption: string,
                 sub: openArray[string]): ListItem =
@@ -734,17 +748,23 @@ proc insertItem(lv: ListView, index: int, caption: string,
   lv.fItems.insert(result, i)
   lv.renumber(i + 1)
   lv.refresh()
+  lv.layoutEdit()                        # the edited item may have moved
 
 proc deleteItem(lv: ListView, i: int) =
   if lv.fOwnerData or i < 0 or i >= lv.fItems.len: return
+  if lv.fEditIdx >= 0: lv.endEdit(cancel = true)   # no edit on a vanishing item
   let v = lv.fVer
   let wasSel = i in lv.fSel
+  # decide about item i BEFORE the later indices shift down onto it
+  let wasFocus = lv.fIndex == i
+  let wasAnchor = lv.fAnchor == i
+  if lv.fDownIdx == i: lv.fDownIdx = -1
+  if lv.fSlowIdx == i: lv.fSlowIdx = -1
   if wasSel and lv.onSelectItem != nil: lv.onSelectItem(lv, lv.fItems[i], false)
   lv.fSel.excl i
   lv.shiftIndices(i + 1, -1)
-  if lv.fIndex == i: lv.fIndex = -1
-  if lv.fAnchor == i: lv.fAnchor = -1
-  if lv.fEditIdx == i: lv.fEditIdx = -1
+  if wasFocus: lv.fIndex = -1
+  if wasAnchor: lv.fAnchor = -1
   lv.fItems[i].fView = nil
   lv.fItems.delete(i)
   lv.renumber(i)
@@ -754,10 +774,11 @@ proc deleteItem(lv: ListView, i: int) =
   lv.notify(v, SelSnap())
 
 proc clearItems(lv: ListView) =
+  if lv.fEditIdx >= 0: lv.endEdit(cancel = true)
   let v = lv.fVer
   let had = lv.fSel.len > 0 or lv.fIndex >= 0
   if lv.onSelectItem != nil and lv.fSel.len > 0:
-    for i in lv.selectedIndices: lv.onSelectItem(lv, lv.getItem(i), false)
+    for i in lv.selectedIndices: lv.onSelectItem(lv, lv.bareItem(i), false)
   for it in lv.fItems: it.fView = nil
   lv.fItems.setLen(0)
   lv.fCount = 0
@@ -767,6 +788,8 @@ proc clearItems(lv: ListView) =
   lv.fAnchor = -1
   lv.fHot = -1
   lv.fEditIdx = -1
+  lv.fDownIdx = -1
+  lv.fSlowIdx = -1
   if had: lv.touch()
   lv.refresh()
   lv.scrollTo(0, 0)
@@ -812,8 +835,9 @@ proc `itemsCount=`*(lv: ListView, n: int) =
     for j in lv.fSel:
       if j >= newCount: drop.add j
     drop.sort()
+    if lv.fEditIdx >= newCount: lv.endEdit(cancel = true)
     for j in drop:                       # items that no longer exist: told first
-      if lv.onSelectItem != nil: lv.onSelectItem(lv, lv.getItem(j), false)
+      if lv.onSelectItem != nil: lv.onSelectItem(lv, lv.bareItem(j), false)
       lv.fSel.excl j
       changed = true
     lv.fCount = newCount
@@ -924,10 +948,21 @@ proc `viewStyle=`*(lv: ListView, v: ListViewStyle) =
   lv.refresh()
   if lv.fIndex >= 0: lv.makeVisible(lv.fIndex)
 
+proc watchImages(lv: ListView, old, v: ImageList, id: var int) =
+  ## Re-subscribes to the image list so changes repaint / re-measure the view.
+  if old != nil and id != 0: old.removeListener(id)
+  id = 0
+  if v != nil:
+    id = v.addListener(proc() =
+      lv.refresh()
+      lv.invalidate())
+
 proc `smallImages=`*(lv: ListView, v: ImageList) =
+  lv.watchImages(lv.fSmall, v, lv.fSmallListener)
   lv.fSmall = v
   lv.refresh()
 proc `largeImages=`*(lv: ListView, v: ImageList) =
+  lv.watchImages(lv.fLarge, v, lv.fLargeListener)
   lv.fLarge = v
   lv.refresh()
 proc `itemHeight=`*(lv: ListView, v: float32) =
@@ -1101,7 +1136,9 @@ method doMouseDown*(lv: ListView, button: MouseButton, shift: ShiftState,
           let wasOnly = i == lv.fIndex and lv.fSel.len == 1 and part == lhLabel and
                         shift * {ssShift, ssCtrl, ssDouble} == {}
           lv.applyClick(i, shift)
-          lv.fDragging = lv.fMulti and lv.fExtended
+          # drag-select only after a plain click (Ctrl / Shift-click do not)
+          lv.fDragging = lv.fMulti and lv.fExtended and
+                         shift * {ssShift, ssCtrl} == {}
           lv.makeVisible(i)
           lv.notify(v, sn)
           if wasOnly and not lv.fReadOnly: lv.armSlow(i)
@@ -1284,9 +1321,9 @@ method doKeyDown*(lv: ListView, key: var Key, shift: ShiftState) =
     key = Key(0)
     lv.beginEdit(lv.fIndex)
   elif key == keySpace and lv.fIndex >= 0 and (lv.fCheckboxes or
-       (lv.fMulti and ssCtrl in shift)):
+       (lv.fMulti and (ssCtrl in shift or not lv.fExtended))):
     key = Key(0)
-    if ssCtrl in shift and lv.fMulti:
+    if lv.fMulti and (ssCtrl in shift or not lv.fCheckboxes):
       let v = lv.fVer
       let sn = lv.snap()
       lv.applyClick(lv.fIndex, {ssCtrl})
@@ -1323,7 +1360,7 @@ proc fitLines(c: Canvas, text: string, f: FontSpec, w, lineH: float32,
   while lo < hi:
     let mid = (lo + hi + 1) div 2
     var cut = mid
-    while cut > 0 and (uint8(text[cut]) and 0xC0) == 0x80 and cut < text.len: dec cut
+    while cut > 0 and cut < text.len and (uint8(text[cut]) and 0xC0) == 0x80: dec cut
     if c.measureText(text[0 ..< cut].strip(leading = false) & "…", f, w).h <=
        lineH * float32(maxLines) + 1: lo = mid
     else: hi = mid - 1

@@ -152,8 +152,18 @@ proc listChanged(c: ComboBox) =
   c.applySelection(u, false)
 
 proc `itemIndex=`*(c: ComboBox, v: int) =
+  ## Selects item `v` (-1: none, which also clears the free text of a
+  ## csDropDown). While the list is open the change is the committed value
+  ## right away (closing without a pick keeps it).
   c.fExplicit = v < 0
-  c.fList.itemIndex = v
+  if c.fOpen:
+    c.fSyncing = true
+    c.fList.itemIndex = v
+    c.fSyncing = false
+    c.fOpenIndex = c.fList.itemIndex
+  else:
+    c.fList.itemIndex = v
+  c.applySelection(false, false)      # idempotent after the list's own onChange
   c.fExplicit = false
 
 proc `text=`*(c: ComboBox, v: string) =
@@ -169,6 +179,7 @@ proc `text=`*(c: ComboBox, v: string) =
         break
     c.fList.itemIndex = idx
     c.fSyncing = false
+    if c.fOpen: c.fOpenIndex = c.fList.itemIndex
     let changed = v != c.fLastText
     c.fLastText = v
     c.fLastIndex = idx
@@ -343,9 +354,11 @@ method doKeyPress*(e: ComboEdit, text: var string) =
   let c = e.combo
   c.fSuppress = true
   c.fDirty = false
-  procCall doKeyPress(Edit(e), text)
-  if c.fDirty and c.fAutoComplete: c.autoCompleteText()
-  c.fSuppress = false
+  try:
+    procCall doKeyPress(Edit(e), text)
+    if c.fDirty and c.fAutoComplete: c.autoCompleteText()
+  finally:
+    c.fSuppress = false
   if c.fDirty:
     c.fDirty = false
     c.textEdited()
@@ -434,14 +447,31 @@ method paint*(c: ComboBox, cv: Canvas) =
 
 # ------------------------------------------------------------- construction
 
-proc add*(c: ComboBox, s: string) = c.fList.add s
-proc insert*(c: ComboBox, index: int, s: string) = c.fList.insert(index, s)
-proc delete*(c: ComboBox, i: int) = c.fList.delete i
+proc editItems(c: ComboBox, op: proc()) =
+  ## Runs a structural change of the list. While the list is open the
+  ## committed index follows its item (shifting / dropping with it) and the
+  ## result is applied at once.
+  if not c.fOpen:
+    op()
+    return
+  c.fSyncing = true
+  c.fList.itemIndex = c.fOpenIndex          # the list tracks the committed item
+  c.fSyncing = false
+  op()
+  c.fOpenIndex = c.fList.itemIndex
+  c.applySelection(false, false)
+
+proc add*(c: ComboBox, s: string) = c.editItems(proc() = c.fList.add s)
+proc insert*(c: ComboBox, index: int, s: string) =
+  c.editItems(proc() = c.fList.insert(index, s))
+proc delete*(c: ComboBox, i: int) = c.editItems(proc() = c.fList.delete i)
 proc clear*(c: ComboBox) =
-  c.fList.clear()
+  c.editItems(proc() = c.fList.clear())
   if c.fStyle == csDropDownList: c.invalidate()
 proc `[]`*(c: ComboBox, i: int): string = c.fList.itemText(i)
-proc `items=`*(c: ComboBox, v: openArray[string]) = c.fList.items = v
+proc `items=`*(c: ComboBox, v: openArray[string]) =
+  let items = @v
+  c.editItems(proc() = c.fList.items = items)
 proc `sorted=`*(c: ComboBox, v: bool) = c.fList.sorted = v
 
 proc `style=`*(c: ComboBox, v: ComboStyle) =

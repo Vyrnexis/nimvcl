@@ -55,7 +55,9 @@ proc measureContent(b: ScrollBox) =
   b.setContentSize(w, h)
 
 method childBoundsChanged*(b: ScrollBox, ch: Control) =
-  if b.fAutoContent and (ch.align == alNone):
+  # Aligned children are placed by layout itself (ignore those bounds changes),
+  # but an align change or a manual move outside layout must refresh the content.
+  if b.fAutoContent and (ch.align == alNone or not b.layouting):
     b.fDirty = true
     if not b.layouting: b.relayout()
 

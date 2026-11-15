@@ -356,3 +356,59 @@ suite "combobox":
     check not c.dropList.showFocusRect
     check newListBox().showFocusRect                  # a stand-alone list keeps it
 
+
+  test "programmatic changes while open apply and survive closeUp (review 6)":
+    let f = newShown()
+    let c = mk(f, csDropDownList, items = ["a", "b", "c", "d"])
+    c.itemIndex = 0
+    changes = 0
+    c.dropDown()
+    check c.droppedDown
+    c.itemIndex = 2
+    check c.itemIndex == 2 and c.text == "c" and changes == 1
+    c.closeUp()
+    check c.itemIndex == 2 and c.text == "c" and changes == 1
+    # delete before the committed item while open
+    c.itemIndex = 3
+    c.dropDown()
+    c.delete(0)
+    check c.itemIndex == 2 and c.dropList.itemIndex == 2 and c.text == "d"
+    c.closeUp()
+    check c.itemIndex == 2 and c.text == "d"
+    # insert before it
+    c.dropDown()
+    c.insert(0, "z")
+    check c.itemIndex == 3 and c.text == "d"
+    c.closeUp()
+    check c.itemIndex == 3 and c.text == "d"
+    # delete the committed item itself
+    c.dropDown()
+    changes = 0
+    c.delete(3)
+    check c.itemIndex == -1 and c.text == "" and changes == 1
+    c.closeUp()
+    check c.itemIndex == -1
+    # clear while open
+    c.itemIndex = 1
+    c.dropDown()
+    c.clear()
+    check c.itemIndex == -1 and c.count == 0
+    c.closeUp()
+    check c.itemIndex == -1
+    # text= while open (csDropDown)
+    let e = mk(f, csDropDown, 60, ["x", "y", "z"])
+    e.dropDown()
+    e.text = "y"
+    check e.itemIndex == 1 and e.text == "y"
+    e.closeUp()
+    check e.itemIndex == 1 and e.text == "y"
+
+  test "itemIndex = -1 clears the free text of a drop-down (review 7)":
+    let f = newShown()
+    let c = mk(f, csDropDown, items = ["alpha", "beta"])
+    c.text = "zzz"
+    changes = 0
+    c.itemIndex = -1
+    check c.text == "" and changes == 1
+    c.itemIndex = -1
+    check changes == 1

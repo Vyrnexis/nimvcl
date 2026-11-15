@@ -49,6 +49,11 @@ proc drawChevron*(c: Canvas, center: PointF, expanded: bool, color: Color) =
 
 proc typeAheadChar*(key: Key, shift: ShiftState): char =
   ## The printable ASCII character of `key` for type-ahead, '\0' otherwise.
+  ## With Shift only letters count (shifted digits / symbols arrive as text and
+  ## are not type-ahead).
   if shift * {ssCtrl, ssSuper, ssAlt} != {}: return '\0'
   let v = uint32(key)
-  if v >= 0x20 and v < 0x7f: char(v) else: '\0'
+  if v >= 0x20 and v < 0x7f:
+    if ssShift in shift and not (v >= 0x61 and v <= 0x7a): return '\0'
+    char(v)
+  else: '\0'

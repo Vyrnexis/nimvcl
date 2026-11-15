@@ -331,3 +331,121 @@ suite "listbox":
     check rects.len == 11
     check rects[0][0] == 0 and rects[0][1].y == -9  # row 0 starts above the viewport
     check rects[^1][0] == 10
+
+  test "delete before the focused row keeps the focus (review 1)":
+    let f = newShown()
+    let lb = mkList(f, 5)
+    lb.multiSelect = true
+    lb.itemIndex = 2
+    var changes = 0
+    lb.onChange = proc(s: Control) = inc changes
+    lb.delete(1)                      # row before the focus
+    check lb.itemIndex == 1 and lb.itemText(1) == "Item 2"
+    check lb.selectedIndices == @[1] and changes == 0
+    lb.delete(0)
+    check lb.itemIndex == 0 and lb.selectedIndices == @[0] and changes == 0
+    lb.delete(2)                      # row after the focus
+    check lb.itemIndex == 0 and changes == 0
+    lb.delete(0)                      # the focused row itself
+    check lb.itemIndex == -1 and lb.selCount == 0 and changes == 1
+    lb.delete(0)                      # nothing focused or selected
+    check changes == 1
+
+  test "itemIndex = -1 with nothing selected does not fire":
+    let f = newShown()
+    let lb = mkList(f, 3)
+    var changes = 0
+    lb.onChange = proc(s: Control) = inc changes
+    lb.itemIndex = -1
+    check changes == 0
+    lb.itemIndex = 1
+    lb.itemIndex = -1
+    check changes == 2 and lb.selCount == 0
+
+  test "multiSelect = false collapses to the focused row and notifies":
+    let f = newShown()
+    let lb = mkList(f, 5)
+    lb.multiSelect = true
+    lb.setSelection([1, 3], focus = 3)
+    var changes = 0
+    lb.onChange = proc(s: Control) = inc changes
+    lb.multiSelect = false
+    check lb.selectedIndices == @[3] and lb.itemIndex == 3 and changes == 1
+    # no focus: the (first) selected item
+    lb.multiSelect = true
+    lb.setSelected(0, true)
+    lb.setSelected(2, true)
+    lb.itemIndex = -1
+    lb.multiSelect = true
+    lb.setSelected(4, true)
+    lb.setSelected(2, true)
+    changes = 0
+    lb.multiSelect = false
+    check lb.selectedIndices == @[2] and lb.itemIndex == 2 and changes == 1
+    # focus without selection (Ctrl+arrow in extended mode): focus becomes the selection
+    lb.multiSelect = true
+    lb.clearSelection()
+    lb.multiSelect = false
+    check lb.itemIndex == 2 and lb.selectedIndices == @[2]
+
+  test "extended: plain Space toggles the focused row, Ctrl+Space too":
+    let f = newShown()
+    let lb = mkList(f, 5)
+    lb.multiSelect = true
+    lb.setFocus()
+    lb.itemIndex = 1
+    var changes = 0
+    lb.onChange = proc(s: Control) = inc changes
+    f.tap(keySpace)
+    check lb.selCount == 0 and changes == 1
+    f.tap(keySpace)
+    check lb.selectedIndices == @[1] and changes == 2
+    f.tap(keySpace, {ssCtrl})
+    check lb.selCount == 0 and changes == 3
+    check lb.itemIndex == 1
+
+  test "Ctrl+click then drag does not discard Ctrl-selected rows":
+    let f = newShown()
+    let lb = mkList(f, 10)
+    lb.multiSelect = true
+    f.click(rowX, rowY(1))
+    f.click(rowX, rowY(3), {ssCtrl})
+    f.feed(ekMouseDown, rowX, rowY(5), shift = {ssCtrl})
+    f.feed(ekMouseMove, rowX, rowY(7), shift = {ssCtrl, ssLeft})
+    f.feed(ekMouseUp, rowX, rowY(7), shift = {ssCtrl})
+    check lb.selectedIndices == @[1, 3, 5]
+
+  test "drag-select autoscrolls while the pointer is above/below the list":
+    let f = newShown()
+    let lb = mkList(f, 100, 102)       # 5 rows visible
+    lb.multiSelect = true
+    f.feed(ekMouseDown, rowX, rowY(2))
+    f.feed(ekMouseMove, rowX, 150, shift = {ssLeft})      # below the list
+    let first = lb.itemIndex
+    for i in 0 ..< 6: Application.processMessages(60)
+    check lb.itemIndex > first + 2
+    check lb.topIndex > 0
+    # pointer above: scrolls back up
+    f.feed(ekMouseMove, rowX, 2, shift = {ssLeft})
+    for i in 0 ..< 20: Application.processMessages(60)
+    check lb.topIndex == 0 and lb.itemIndex == 0
+    f.feed(ekMouseUp, rowX, 2)
+    let ti = lb.itemIndex
+    for i in 0 ..< 3: Application.processMessages(60)
+    check lb.itemIndex == ti
+
+  test "virtual: onData setter refreshes, count before onData, clear keeps count":
+    let f = newShown()
+    let lb = mkList(f, 0)
+    lb.count = 1000
+    lb.onData = proc(s: Control, i: int): string = "V" & $i
+    check lb.count == 1000 and lb.contentSize.h == 1000 * 20
+    lb.clear()
+    check lb.count == 1000 and lb.itemText(5) == "V5"
+    lb.items = @["a"]
+    check lb.count == 1000
+    lb.itemIndex = 900
+    lb.count = 10
+    check lb.itemIndex == -1 and lb.contentSize.h == 200
+    lb.onData = nil
+    check lb.count == 0

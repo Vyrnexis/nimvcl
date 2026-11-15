@@ -90,6 +90,15 @@ proc beginModalState*() =
 proc endModalState*() =
   if gGates > 0: dec gGates
 
+proc resetModalState*() =
+  ## Forgets every modal form and gate (application shutdown).
+  for f in gModals:
+    f.fModal = false
+    f.fOwner = nil
+  gModals.setLen 0
+  gGates = 0
+  gActive = nil
+
 func modalOwner*(f: Form): Form = f.fOwner
   ## The form a modal form is owned by (set by `showModal`), else nil.
 
@@ -118,9 +127,10 @@ proc newForm*(owner: Component = nil, width = 640'f32, height = 480'f32): Form =
 
 # --------------------------------------------------------------- properties
 
-proc caption*(f: Form): string = Control(f).caption
-proc `caption=`*(f: Form, v: string) =
-  `caption=`(Control(f), v)
+method `caption=`*(f: Form, v: string) =
+  ## Also sets the window title. (Overrides `Control.caption=`, so it applies
+  ## through a `Control` reference too.)
+  procCall `caption=`(Control(f), v)
   if f.fUi.win != nil: f.fUi.win.setTitle(v)
 
 func position*(f: Form): FormPosition = f.fPosition
@@ -142,7 +152,9 @@ proc `formStyle=`*(f: Form, v: FormStyle) =
 func keyPreview*(f: Form): bool = f.fUi.keyPreview
 proc `keyPreview=`*(f: Form, v: bool) = f.fUi.keyPreview = v
 
-func visible*(f: Form): bool = f.fShown
+# Overrides of `Control.visible`, `visible=` and `bringToFront` (see
+# control.nim): a form shows/hides its window and raises it.
+method visible*(f: Form): bool = f.fShown
 func isModal*(f: Form): bool = f.fModal
 
 func modalResult*(f: Form): ModalResult = f.fModalResult
@@ -239,8 +251,11 @@ proc setForcedScale*(s: float32) =
   ## Forces the render scale (headless testing); 0 restores the real density.
   gForcedScale = s
   for f in gForms:
-    f.fUi.win.forcedScale = s
-    f.syncMetrics()
+    let w = f.fUi.win
+    if w == nil: continue
+    w.forcedScale = s
+    w.setLogicalSize(f.width, f.height)   # keep the logical size: the window follows
+    f.fUi.syncScale()
 
 proc forcedScale*(): float32 = gForcedScale
 
@@ -263,8 +278,11 @@ proc show*(f: Form) =
   f.fUi.hidden = false
   f.fUi.dirty = true
   Control(f).notifyVisibility()
-  if f.onShow != nil: f.onShow(f)
-  discard f.centerOnOwner()      # onShow may have resized the form
+  let h = f.onShow
+  try:
+    if h != nil: h(f)
+  finally:
+    discard f.centerOnOwner()    # onShow may have resized the form
 
 proc hide*(f: Form) =
   if not f.fShown: return
@@ -275,12 +293,13 @@ proc hide*(f: Form) =
   f.fUi.cancelInteraction()
   if f.fUi.win != nil: f.fUi.win.hide()
   if gActive == f: gActive = nil
-  if f.onHide != nil: f.onHide(f)
+  let h = f.onHide
+  if h != nil: h(f)
 
-proc `visible=`*(f: Form, v: bool) =
+method `visible=`*(f: Form, v: bool) =
   if v: f.show() else: f.hide()
 
-proc bringToFront*(f: Form) =
+method bringToFront*(f: Form) =
   if f.fUi.win != nil: f.fUi.win.raiseWindow()
 
 proc close*(f: Form) =
@@ -289,12 +308,14 @@ proc close*(f: Form) =
   f.fClosing = true
   try:
     var can = true
-    if f.onCloseQuery != nil: f.onCloseQuery(f, can)
+    let hq = f.onCloseQuery
+    if hq != nil: hq(f, can)
     if not can:
       if f.fModal: f.fModalResult = mrNone
       return
     var action = caHide
-    if f.onClose != nil: f.onClose(f, action)
+    let hc = f.onClose
+    if hc != nil: hc(f, action)
     if action == caNone:
       if f.fModal: f.fModalResult = mrNone
       return
@@ -322,20 +343,23 @@ proc showModal*(f: Form): ModalResult =
   if closePopupsProc != nil: closePopupsProc(nil)   # menus of the form below
   f.fModal = true
   gModals.add f
-  if parent != nil and parent.fUi.win != nil: f.fUi.win.setModalFor(parent.fUi.win)
-  f.show()
-  if modalLoopProc != nil: modalLoopProc(f)
-  if f.fModalResult == mrNone: f.fModalResult = mrCancel
-  result = f.fModalResult
-  let i = gModals.find(f)
-  if i >= 0: gModals.delete(i)
-  f.fModal = false
-  f.fOwner = nil
-  if f.fUi.win != nil:
-    f.fUi.win.clearModal()
-    if f.fShown: f.hide()
-  f.fModalResult = mrNone
-  if parent != nil and parent.fUi.win != nil: parent.bringToFront()
+  try:
+    if parent != nil and parent.fUi.win != nil: f.fUi.win.setModalFor(parent.fUi.win)
+    f.show()
+    if modalLoopProc != nil: modalLoopProc(f)
+    if f.fModalResult == mrNone: f.fModalResult = mrCancel
+    result = f.fModalResult
+  finally:
+    # always restore the modal state, also when show/onShow/a handler raised
+    let i = gModals.find(f)
+    if i >= 0: gModals.delete(i)
+    f.fModal = false
+    f.fOwner = nil
+    if f.fUi.win != nil:
+      f.fUi.win.clearModal()
+      if f.fShown: f.hide()
+    f.fModalResult = mrNone
+    if parent != nil and parent.fUi.win != nil: parent.bringToFront()
 
 # --------------------------------------------------------- loop integration
 
@@ -344,11 +368,13 @@ proc windowActivated*(f: Form, active: bool) =
   f.fUi.setWindowActive(active)
   if active:
     gActive = f
-    if f.onActivate != nil: f.onActivate(f)
+    let h = f.onActivate
+    if h != nil: h(f)
   else:
     if gActive == f: gActive = nil
     f.fUi.cancelInteraction()
-    if f.onDeactivate != nil: f.onDeactivate(f)
+    let h = f.onDeactivate
+    if h != nil: h(f)
 
 proc paintIfDirty*(f: Form): bool =
   ## Layout + paint + present when needed. Returns true if a frame was drawn.

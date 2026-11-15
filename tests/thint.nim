@@ -165,3 +165,27 @@ suite "hints":
       hideHint()
       flush()
     Application.theme = themeLight()
+
+  test "a disabled control with its own hint shows it":
+    let d = newButton(f, "off", 200, 10, 80, 28)
+    d.hint = "Disabled hint"
+    d.enabled = false
+    f.move(210, 20)
+    check waitUntil(proc(): bool = hintVisible())
+    check hintText() == "Disabled hint"
+    # a disabled control without a hint keeps falling back to its ancestor
+    hideHint()
+    flush()
+    let q = newButton(f, "off2", 200, 60, 80, 28)
+    q.enabled = false
+    f.move(210, 70)
+    settle(300)
+    check not hintVisible()
+
+  test "closing the form releases the hint's form reference":
+    f.move(20, 20)
+    check hintForm() == f
+    check waitUntil(proc(): bool = hintVisible())
+    f.close()
+    settle(40)                                         # the idle hook runs
+    check hintForm() == nil and not hintVisible()

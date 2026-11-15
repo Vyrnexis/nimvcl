@@ -376,3 +376,84 @@ suite "actions":
     let pm2 = newPopupMenu(x.f)
     pm2.images = il
     check pm2.items.images == il
+
+  test "shortcuts: plain printable keys do not fire while typing in an Edit":
+    let x = fixture()
+    let ed = newEdit(x.f, "", 10, 100, 200)
+    var plain, shifted, ctrlK, fkey = 0
+    discard newAction(x.acts, "p", proc(a: Action) = (inc plain), shortcut("A"))
+    discard newAction(x.acts, "s", proc(a: Action) = (inc shifted), shortcut("Shift+B"))
+    discard newAction(x.acts, "c", proc(a: Action) = (inc ctrlK), shortcut("Ctrl+K"))
+    discard newAction(x.acts, "f", proc(a: Action) = (inc fkey), shortcut("F5"))
+    x.f.tap('a')
+    x.f.tap('b', {ssShift})
+    check plain == 1 and shifted == 1              # no Edit focused: they fire
+    ed.setFocus()
+    x.f.tap('a')
+    x.f.tap('b', {ssShift})
+    check plain == 1 and shifted == 1              # typing in the Edit: they do not
+    x.f.tap('k', {ssCtrl})
+    x.f.tap(keyF5)
+    check ctrlK == 1 and fkey == 1                 # Ctrl+key and F-keys still do
+    ed.readOnly = true                             # not a text target any more
+    x.f.tap('a')
+    check plain == 2
+
+  test "a CheckBox linked to a grouped action cannot uncheck it":
+    let x = fixture()
+    let a = newAction(x.acts, "g")
+    a.groupIndex = 1
+    let b = newAction(x.acts, "h")
+    b.groupIndex = 1
+    let cb = newCheckBox(x.f, "x", false, 10, 10)
+    cb.action = a
+    x.f.click(cb)
+    check a.checked and cb.checked
+    x.f.click(cb)                                  # clicking again keeps it checked
+    check a.checked and cb.checked
+    b.checked = true
+    check not a.checked and not cb.checked
+
+  test "executing a grouped action that is not autoCheck checks it":
+    let x = fixture()
+    let a = newAction(x.acts, "a")
+    a.groupIndex = 2
+    let b = newAction(x.acts, "b")
+    b.groupIndex = 2
+    a.checked = true
+    check not a.autoCheck
+    b.execute()
+    check b.checked and not a.checked
+
+  test "an action callback may unlink clients while it notifies":
+    let x = fixture()
+    let a = newAction(x.acts, "a")
+    let b1 = newButton(x.f, "1", 10, 10)
+    let b2 = newButton(x.f, "2", 10, 50)
+    let b3 = newButton(x.f, "3", 10, 90)
+    b1.autoSize = true
+    b1.onResize = proc(s: Control) = b1.action = nil     # unlinks itself mid-notify
+    b1.action = a; b2.action = a; b3.action = a
+    check a.clientCount == 3 or a.clientCount == 2
+    a.caption = "a much longer caption than before"
+    check b2.caption == "a much longer caption than before"
+    check b3.caption == "a much longer caption than before"
+
+  test "a ToolButton upgraded to check reverts when the action stops needing it":
+    let x = fixture()
+    let a = newAction(x.acts, "a")
+    let tb = newToolButton(x.bar, "x")
+    tb.action = a
+    check tb.kind == tbsButton
+    a.autoCheck = true
+    check tb.kind == tbsCheck
+    a.autoCheck = false
+    check tb.kind == tbsButton
+    a.groupIndex = 1
+    check tb.kind == tbsCheck
+    tb.action = nil                                # unlinking reverts too
+    check tb.kind == tbsButton
+    let own = newToolButton(x.bar, "y", tbsCheck)  # an explicit check button stays
+    own.action = a
+    a.groupIndex = 0
+    check own.kind == tbsCheck

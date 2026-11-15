@@ -64,7 +64,25 @@ proc whenElse(cond: NimNode, yes, no: NimNode, src: NimNode): NimNode =
 proc isEventName(s: string): bool =
   s.len > 2 and s.startsWith("on") and s[2] in {'A'..'Z'}
 
+const reservedNames = [
+  # Component / Control / Container / Form fields and common properties: a form
+  # field of the same name would clash with (or shadow) them
+  "name", "tag", "owner", "components", "actionLink", "caption", "parent",
+  "left", "top", "width", "height", "align", "anchors", "margins", "padding",
+  "constraints", "autoSize", "visible", "enabled", "hint", "cursor", "font",
+  "parentFont", "color", "parentColor", "tabStop", "tabOrder", "children",
+  "host", "ui", "win", "menuBar", "popupMenus", "position", "borderStyle",
+  "formStyle", "modalResult", "designRect", "designBase", "designBaseSet",
+  "onClick", "onDblClick", "onMouseEnter", "onMouseLeave", "onEnter", "onExit",
+  "onResize", "onMouseDown", "onMouseUp", "onMouseMove", "onShow", "onHide",
+  "onActivate", "onDeactivate", "onClose", "onCloseQuery"]
+
 proc claim(g: var Gen, name: string, src: NimNode) =
+  if name in reservedNames:
+    error("nimvcl form: `" & name & "` is reserved in `" & g.formName &
+          "`: it is a field or property of Component/Control/Form, so a child " &
+          "or `var` cannot use that name; pick another (e.g. `" & name &
+          "Edit`)", src)
   if g.names.hasKey(name):
     error("nimvcl form: duplicate name `" & name & "` in `" & g.formName &
           "`: child and `var` names must be unique", src)

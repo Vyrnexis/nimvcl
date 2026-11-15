@@ -9,7 +9,9 @@
 ## `text` joins the lines with "\n". `lines` is a view onto the lines:
 ## `memo.lines.add "x"`, `insert`, `delete`, `clear`, `lines[i]`, `lines.count`,
 ## `for s in memo.lines`. An empty memo has ONE empty line (`lines.count == 1`);
-## `lines.add` on such a memo fills that line instead of adding a second one.
+## `lines.add` on a memo that is still pristine (empty text, never edited, no
+## line added yet) fills that line instead of adding a second one; after any
+## edit or add (also `text = ""`, which makes it pristine again) it appends.
 ## The line API and `text=` are programmatic: they work when `readOnly` and
 ## clear the undo history. `selStart`/`selLength` are byte offsets in the
 ## joined `text`; `caretPos` is `(line, column)` with a BYTE column.
@@ -75,6 +77,7 @@ type
     fEol: bool                ## caret drawn at the end of the previous visual line
     fDesiredX: float32        ## pixel column kept by Up/Down; < 0: none
     fPreparing, fChanged, fLastMeasure: bool
+    fPristine: bool           ## empty and untouched: `lines.add` fills line 0
     fLastFont: FontSpec
     fLastRowH: float32
     caretOn: bool
@@ -124,6 +127,7 @@ proc fitCount(e: Memo, seg: string, w: float32): int =
   if seg.len == 0 or w <= 0: return 0
   if e.canMeasure:
     let ctx = e.renderCtx
+    if w * ctx.scale < 1: return 0       # < 1 device px: SDL_ttf would treat it as unlimited
     return snapIndex(seg, ctx.fitPrefix(seg, e.font, w * ctx.scale))
   let per = max(e.font.size * 0.55'f32, 1'f32)
   var n = 0
@@ -486,6 +490,7 @@ proc stopDrag(e: Memo) =
 
 proc modelChanged(e: Memo, first, oldN, newN: int) =
   e.fChanged = true
+  e.fPristine = false
   if oldN != newN:
     e.layouts.spliceSeq(first, oldN, newN)
     if e.fWrap:
@@ -507,6 +512,7 @@ proc initMemo*(e: Memo, owner: Component = nil) =
   e.fRows = @[1'i32]
   e.fTotalRows = 1
   e.fWantReturns = true
+  e.fPristine = true
   e.fScrollBars = msBoth
   e.fDesiredX = -1
   e.tabStop = true
@@ -529,9 +535,11 @@ proc `text=`*(e: Memo, v: string) =
   ## Replaces the text (caret to the start, undo history cleared, scrolled to
   ## the top). Fires `onChange` when the text differs.
   e.fMaxW = 0
-  let same = v == e.model.text
+  let old = e.model.text
   e.model.setText(v)
+  let same = e.model.text == old        # compared after sanitising / maxLength
   if same: e.fChanged = false
+  e.fPristine = e.model.text.len == 0
   e.touched()
 
 proc lineCount*(e: Memo): int = e.model.lineCount
@@ -627,14 +635,24 @@ proc cutToClipboard*(e: Memo) =
   if e.readOnly or not e.model.hasSelection: return
   editClipboardSet(e.model.selectedText)
   discard e.model.deleteSelection()
+  e.fEol = false
+  e.fDesiredX = -1
+  e.touched()
+
+proc flattenBreaks(s: string): string =
+  ## wantReturns = false: every line break (typed, IME or pasted) becomes a space.
+  s.replace("\r\n", " ").replace('\n', ' ').replace('\r', ' ')
 
 proc pasteFromClipboard*(e: Memo) =
   if e.readOnly: return
   let s = editClipboardGet()
   if s.len > 0:
     var t = s
-    if not e.fWantReturns: t = t.replace("\r\n", " ").replace('\n', ' ').replace('\r', ' ')
+    if not e.fWantReturns: t = flattenBreaks(t)
     discard e.model.insert(t)
+    e.fEol = false
+    e.fDesiredX = -1
+    e.touched()
 
 proc topLine*(e: Memo): int =
   ## The first (possibly partial) visible line.
@@ -677,7 +695,7 @@ proc insert*(l: MemoLines, i: int, s: string) =
   l.m.programmatic()
 proc add*(l: MemoLines, s: string) =
   let m = l.m.model
-  if m.lineCount == 1 and m.line(0).len == 0: m.setLine(0, s)
+  if l.m.fPristine and m.lineCount == 1 and m.line(0).len == 0: m.setLine(0, s)
   else: m.insertLine(m.lineCount, s)
   l.m.programmatic()
 proc delete*(l: MemoLines, i: int) =
@@ -907,7 +925,7 @@ method doKeyPress*(e: Memo, text: var string) =
     e.layouts[min(e.compLine, e.layouts.high)].valid = false
   var t = text
   t = t.replace("\t", "")                     # Tab is a key, handled in doKeyDown
-  if not e.fWantReturns: t = t.replace("\r", "").replace("\n", "")
+  if not e.fWantReturns: t = flattenBreaks(t)
   if t.len > 0 and not e.readOnly:
     e.fEol = false
     e.fDesiredX = -1

@@ -36,19 +36,20 @@ proc `position=`*(t: TrackBar, v: int) =
   if nv == t.fPos: return
   t.fPos = nv
   t.invalidate()
-  if t.onChange != nil: t.onChange(t)
+  let h = t.onChange        # copy: the handler may clear or replace itself
+  if h != nil: h(t)
 
 proc `min=`*(t: TrackBar, v: int) =
   t.fMin = v
   if t.fMax < v: t.fMax = v
-  t.fPos = system.max(t.fPos, v)
   t.invalidate()
+  t.position = t.fPos       # re-clamps; fires onChange when it moved
 
 proc `max=`*(t: TrackBar, v: int) =
   t.fMax = v
   if t.fMin > v: t.fMin = v
-  t.fPos = system.min(t.fPos, v)
   t.invalidate()
+  t.position = t.fPos
 
 proc `frequency=`*(t: TrackBar, v: int) =
   t.fFreq = system.max(v, 0)
@@ -158,6 +159,12 @@ method doExit*(t: TrackBar) =
   t.fDragging = false
   t.invalidate()
   procCall doExit(Control(t))
+
+method captureLost*(t: TrackBar) =
+  if t.fDragging:
+    t.fDragging = false
+    t.invalidate()
+  procCall captureLost(Control(t))
 
 method preferredSize*(t: TrackBar): SizeF =
   if t.horiz: sizeF(t.width, 32) else: sizeF(32, t.height)

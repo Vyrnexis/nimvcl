@@ -43,6 +43,7 @@ type
   ToolBar* = ref object of Container
     fFlat: bool
     fImages: ImageList
+    fImagesListener: int       ## id of our listener on `fImages` (0: none)
 
 const
   GlyphSize = 16'f32
@@ -118,7 +119,7 @@ func iconSize(b: ToolButton): SizeF =
   else: sizeF(GlyphSize, GlyphSize)
 
 method preferredSize*(b: ToolButton): SizeF =
-  let h = currentTheme().controlHeight
+  let h = b.theme.controlHeight
   case b.fKind
   of tbsSeparator, tbsDivider: sizeF(SepWidth, h)
   else:
@@ -226,7 +227,16 @@ proc newToolButton*(parent: Container = nil, caption = "",
 
 func images*(t: ToolBar): ImageList = t.fImages
 proc `images=`*(t: ToolBar, v: ImageList) =
+  if t.fImages != nil and t.fImagesListener != 0:
+    t.fImages.removeListener t.fImagesListener
+  t.fImagesListener = 0
   t.fImages = v
+  if v != nil:
+    let bar = t
+    t.fImagesListener = v.addListener(proc() =       # icons changed: repaint/relayout
+      bar.invalidate()
+      bar.requestLayout()
+      for c in bar.children: c.requestLayout())
   t.invalidate()
   t.requestLayout()
   for c in t.children: c.requestLayout()

@@ -53,6 +53,7 @@ type
     onUnhandledKey*: KeyHook     ## the application's own hook; runs before the chain
     fKeyHandlers: seq[tuple[id: string, hook: KeyHook]]
     fAlt: bool                   ## an Alt key is down (mnemonic underlines)
+    keyRepeat*: bool             ## the key event being dispatched is an auto-repeat
     windowInactive*: bool        ## the window lost focus (set by the Form)
     revealOnFocus*: bool         ## focus changes scroll the control into view
                                  ## (default true; off while a mouse press focuses)
@@ -64,6 +65,12 @@ type
     cursorApplied: bool
 
 func altHeld*(ui: UiRoot): bool = ui.fAlt
+
+func keyIsRepeat*(c: Control): bool =
+  ## True while `c` handles a key-down that is an auto-repeat (key held). A
+  ## control that must act once per press (a Button's Enter) checks it.
+  let h = c.host
+  h of UiRoot and UiRoot(h).keyRepeat
 
 proc newUiRoot*(root: Container): UiRoot =
   result = UiRoot(root: root, dirty: true, revealOnFocus: true)
@@ -132,7 +139,10 @@ method controlLost*(ui: UiRoot, c: Control) =
     ui.fHovered = nil
     old.doMouseLeave()
     ui.updateCursor()
-  if inside(c, ui.fCaptured): ui.fCaptured = nil
+  var lostCapture: Control
+  if inside(c, ui.fCaptured):
+    lostCapture = ui.fCaptured
+    ui.fCaptured = nil
   if inside(c, ui.fPressed): ui.fPressed = nil
   if ui.fCaptured == nil and ui.buttons != {}:
     ui.buttons = {}              # nothing left to release
@@ -141,6 +151,7 @@ method controlLost*(ui: UiRoot, c: Control) =
     ui.fFocused = nil
     old.doExit()
     ui.updateTextInput()
+  if lostCapture != nil: lostCapture.captureLost()
 
 # ------------------------------------------------------------------ focus
 
@@ -181,30 +192,57 @@ proc focused*(c: Control): bool =
 
 # --------------------------------------------------------------- tab order
 
-proc collectTabStops(c: Container, acc: var seq[Control]) =
+proc collectTabOrder(c: Container, acc: var seq[Control]) =
+  ## Every visible, enabled descendant in tab order (parents before children).
   var order = newSeq[(int, int)](c.controlCount)   # (tabOrder, child index)
   for i in 0 ..< c.controlCount: order[i] = (c[i].tabOrder, i)
   order.sort()                                     # tuples: tabOrder, then index
   for (_, i) in order:
     let ch = c[i]
     if not ch.visible or not ch.enabled: continue
-    if ch.isTabStop() and ch.canFocus(): acc.add ch
-    if ch of Container: collectTabStops(Container(ch), acc)
+    acc.add ch
+    if ch of Container: collectTabOrder(Container(ch), acc)
+
+proc isStop(c: Control): bool = c.isTabStop() and c.canFocus()
 
 proc tabStops*(root: Container): seq[Control] =
   ## Focusable controls in tab order: within each container by `tabOrder`, then
   ## child index; a container's own stop comes before its children.
-  collectTabStops(root, result)
+  var all: seq[Control]
+  collectTabOrder(root, all)
+  for c in all:
+    if c.isStop: result.add c
 
 proc focusNext*(ui: UiRoot, forward = true) =
-  ## Tab / Shift+Tab: next/previous tab stop, wrapping around.
-  let stops = tabStops(ui.root)
+  ## Tab / Shift+Tab: next/previous tab stop, wrapping around. From a focused
+  ## control that is not a tab stop itself, continues from its place in the tab
+  ## order.
+  var all: seq[Control]
+  collectTabOrder(ui.root, all)
+  var stops: seq[Control]
+  for c in all:
+    if c.isStop: stops.add c
   if stops.len == 0: return
+  var n: int
   let i = stops.find(ui.fFocused)
-  let n =
-    if i < 0: (if forward: 0 else: stops.high)
-    elif forward: (i + 1) mod stops.len
-    else: (i + stops.len - 1) mod stops.len
+  if i >= 0:
+    n = if forward: (i + 1) mod stops.len else: (i + stops.len - 1) mod stops.len
+  else:
+    let pos = all.find(ui.fFocused)
+    if pos < 0:
+      n = if forward: 0 else: stops.high
+    elif forward:
+      n = 0                                  # wraps to the first when none follows
+      for j in pos + 1 .. all.high:
+        if all[j].isStop:
+          n = stops.find(all[j])
+          break
+    else:
+      n = stops.high
+      for j in countdown(pos - 1, 0):
+        if all[j].isStop:
+          n = stops.find(all[j])
+          break
   ui.focusControl(stops[n])
 
 # ----------------------------------------------------------------- mouse
@@ -221,10 +259,12 @@ proc hitAt(ui: UiRoot, p: PointF): Control =
 
 proc cancelInteraction*(ui: UiRoot) =
   ## Drops mouse capture, pressed state and hover (window deactivated/hidden).
+  let cap = ui.fCaptured
   ui.buttons = {}
   ui.fCaptured = nil
   ui.fPressed = nil
   ui.setHover(nil)
+  if cap != nil: cap.captureLost()
 
 proc mouseMove(ui: UiRoot, p: PointF, shift: ShiftState): bool =
   ui.lastPos = p
@@ -263,6 +303,11 @@ proc mouseDown(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState,
   var sh = shift + ui.buttonShift
   let dbl = clicks == 2 and button == mbLeft
   if dbl: sh.incl ssDouble
+  # focusing may have run handlers (onExit/onEnter) that hid, disabled or
+  # removed the target: do not deliver the press to a dead control
+  if target.root != Control(ui.root) or not target.isVisible or
+     not target.isEnabled:
+    return true
   let lp = target.formToClient(p)
   target.doMouseDown(button, sh, lp.x, lp.y)
   if dbl: target.doDblClick()
@@ -328,14 +373,16 @@ proc findMnemonic(c: Control, ch: char): bool =
       if findMnemonic(k, ch): return true
 
 proc runKeyChain(ui: UiRoot, k: var Key, shift: ShiftState) =
-  if ui.onUnhandledKey != nil:
-    ui.onUnhandledKey(k, shift)
+  let un = ui.onUnhandledKey
+  if un != nil:
+    un(k, shift)
     if k == Key(0): return
-  var i = 0
-  while i < ui.fKeyHandlers.len:             # a handler may add handlers
-    ui.fKeyHandlers[i].hook(k, shift)
+  let snapshot = ui.fKeyHandlers       # a handler may add or remove handlers
+  for e in snapshot:
+    if not ui.hasKeyHandler(e.id): continue          # removed meanwhile
+    if ui.keyRepeat and e.id == "dialog": continue   # default/cancel: once per press
+    e.hook(k, shift)
     if k == Key(0): return
-    inc i
   if shift * {ssCtrl, ssAlt, ssSuper} == {ssAlt}:
     let u = uint32(k)
     if u > 0x20 and u < 0x7f:
@@ -349,8 +396,11 @@ proc setAlt*(ui: UiRoot, v: bool) =
   ui.dirty = true
   ui.altChanged()
 
-proc keyDown(ui: UiRoot, key: Key, shift: ShiftState): bool =
+proc keyDown(ui: UiRoot, key: Key, shift: ShiftState, repeat = false): bool =
   if key == keyLAlt or key == keyRAlt: ui.setAlt(true)
+  let wasRepeat = ui.keyRepeat
+  ui.keyRepeat = repeat
+  defer: ui.keyRepeat = wasRepeat
   var k = key
   let target = if ui.fFocused != nil: ui.fFocused else: Control(ui.root)
   if ui.keyPreview and target != Control(ui.root):
@@ -419,7 +469,7 @@ proc handle*(ui: UiRoot, pe: PlatformEvent): bool =
     of ekMouseDown: ui.mouseDown(p, pe.button, pe.shift, pe.clicks)
     of ekMouseUp: ui.mouseUp(p, pe.button, pe.shift)
     else: ui.mouseWheel(p, pe.dx, pe.dy, pe.shift)
-  of ekKeyDown: ui.keyDown(pe.key, pe.shift)
+  of ekKeyDown: ui.keyDown(pe.key, pe.shift, pe.repeat)
   of ekKeyUp: ui.keyUp(pe.key, pe.shift)
   of ekTextInput:
     if ui.fFocused == nil: return false
@@ -461,9 +511,11 @@ proc paintFrame*(ui: UiRoot, clear, present: bool) =
     ui.root.layoutIfNeeded()
   ui.dirty = false
   let cv = beginFrame(ui.ctx)
-  if clear: cv.clear(ui.root.color)
-  ui.root.paintTree(cv)
-  cv.endFrame()
+  try:
+    if clear: cv.clear(ui.root.color)
+    ui.root.paintTree(cv)
+  finally:
+    cv.endFrame()          # restores the renderer state even when a paint raised
   if present and ui.win != nil: ui.win.present()
 
 proc closeContext*(ui: UiRoot) =

@@ -262,3 +262,27 @@ suite "file dialogs":
     let d = newOpenDialog()
     check d.executeModal()
     check lastReq.parent == f.win
+
+  test "a failing platform call resets running and re-raises (review 17)":
+    let d = newOpenDialog()
+    showFileDialogImpl = proc(req: FileDialogRequest, token: int, done: FileDialogDone) =
+      raise newException(IOError, "no portal")
+    var called = false
+    expect IOError:
+      d.execute(proc(ok: bool, files: seq[string]) = called = true)
+    check not d.isRunning
+    expect IOError:
+      discard d.executeModal()
+    check not d.isRunning
+    showFileDialogImpl = fakeImpl                  # usable again
+    check d.executeModal()
+    check not called
+
+  test "messageDlg frees its window when the modal loop raises (review 17)":
+    let before = openForms().len
+    whileModal:
+      raise newException(ValueError, "boom")
+    expect ValueError:
+      showMessage("x")
+    check modalForm() == nil
+    check openForms().len == before

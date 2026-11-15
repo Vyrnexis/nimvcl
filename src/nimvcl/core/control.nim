@@ -337,33 +337,46 @@ proc parentLayouting(c: Control): bool {.inline.} =
 # ------------------------------------------------------------ event methods
 
 method doResize*(c: Control) {.base.} =
-  if c.onResize != nil: c.onResize(c)
+  let h = c.onResize     # copy: a handler may clear or replace itself
+  if h != nil: h(c)
 method doClick*(c: Control) {.base.} =
-  if c.onClick != nil: c.onClick(c)
-  if c.actionLink != nil: c.actionLink.clientClicked()   # linked Action runs
+  let h = c.onClick
+  if h != nil: h(c)
+  let l = c.actionLink
+  if l != nil: l.clientClicked()   # linked Action runs
 method doDblClick*(c: Control) {.base.} =
-  if c.onDblClick != nil: c.onDblClick(c)
+  let h = c.onDblClick
+  if h != nil: h(c)
 method doMouseDown*(c: Control, button: MouseButton, shift: ShiftState,
                     x, y: float32) {.base.} =
-  if c.onMouseDown != nil: c.onMouseDown(c, button, shift, x, y)
+  let h = c.onMouseDown
+  if h != nil: h(c, button, shift, x, y)
 method doMouseUp*(c: Control, button: MouseButton, shift: ShiftState,
                   x, y: float32) {.base.} =
-  if c.onMouseUp != nil: c.onMouseUp(c, button, shift, x, y)
+  let h = c.onMouseUp
+  if h != nil: h(c, button, shift, x, y)
 method doMouseMove*(c: Control, shift: ShiftState, x, y: float32) {.base.} =
-  if c.onMouseMove != nil: c.onMouseMove(c, shift, x, y)
+  let h = c.onMouseMove
+  if h != nil: h(c, shift, x, y)
 method doMouseEnter*(c: Control) {.base.} =
-  if c.onMouseEnter != nil: c.onMouseEnter(c)
+  let h = c.onMouseEnter
+  if h != nil: h(c)
 method doMouseLeave*(c: Control) {.base.} =
-  if c.onMouseLeave != nil: c.onMouseLeave(c)
+  let h = c.onMouseLeave
+  if h != nil: h(c)
 method doMouseWheel*(c: Control, shift: ShiftState, dx, dy: float32,
                      handled: var bool) {.base.} =
-  if c.onMouseWheel != nil: c.onMouseWheel(c, shift, dx, dy, handled)
+  let h = c.onMouseWheel
+  if h != nil: h(c, shift, dx, dy, handled)
 method doKeyDown*(c: Control, key: var Key, shift: ShiftState) {.base.} =
-  if c.onKeyDown != nil: c.onKeyDown(c, key, shift)
+  let h = c.onKeyDown
+  if h != nil: h(c, key, shift)
 method doKeyUp*(c: Control, key: var Key, shift: ShiftState) {.base.} =
-  if c.onKeyUp != nil: c.onKeyUp(c, key, shift)
+  let h = c.onKeyUp
+  if h != nil: h(c, key, shift)
 method doKeyPress*(c: Control, text: var string) {.base.} =
-  if c.onKeyPress != nil: c.onKeyPress(c, text)
+  let h = c.onKeyPress
+  if h != nil: h(c, text)
 method doTextEditing*(c: Control, text: string, cursor, selLen: int) {.base.} =
   ## IME composition (SDL TEXT_EDITING) while focused: `text` is the
   ## uncommitted composition ("" = cancelled/cleared), `cursor` the caret inside
@@ -373,10 +386,19 @@ method doTextEditing*(c: Control, text: string, cursor, selLen: int) {.base.} =
   discard
 method doEnter*(c: Control) {.base.} =
   ## Gained keyboard focus.
-  if c.onEnter != nil: c.onEnter(c)
+  let h = c.onEnter
+  if h != nil: h(c)
 method doExit*(c: Control) {.base.} =
   ## Lost keyboard focus.
-  if c.onExit != nil: c.onExit(c)
+  let h = c.onExit
+  if h != nil: h(c)
+
+method captureLost*(c: Control) {.base.} =
+  ## Mouse capture was taken away without a mouse-up (the window lost focus or
+  ## was hidden, the control was hidden/disabled/removed, or `cancelInteraction`
+  ## ran). Controls that track a drag or an auto-repeat reset it here.
+  ## Base: nothing.
+  discard
 
 # --------------------------------------------------------- hook methods
 
@@ -572,8 +594,11 @@ proc notifyVisibility*(c: Control) =
     for ch in Container(c).fChildren:
       if ch.fVisible: notifyVisibility(ch)
 
-func visible*(c: Control): bool = c.fVisible
-proc `visible=`*(c: Control, v: bool) =
+# `visible`, `visible=`, `caption=` and `bringToFront` are methods: a `Form`
+# overrides them (window shown, title, raise), so they behave the same when
+# reached through a `Control` reference.
+method visible*(c: Control): bool {.base.} = c.fVisible
+method `visible=`*(c: Control, v: bool) {.base.} =
   if v == c.fVisible: return
   let h = c.host
   c.fVisible = v
@@ -594,7 +619,7 @@ proc `enabled=`*(c: Control, v: bool) =
   c.invalidate()
 
 func caption*(c: Control): string = c.fCaption
-proc `caption=`*(c: Control, v: string) =
+method `caption=`*(c: Control, v: string) {.base.} =
   if v == c.fCaption: return
   c.fCaption = v
   c.invalidate()
@@ -615,9 +640,9 @@ proc `cursor=`*(c: Control, v: Cursor) =
 
 func tabStop*(c: Control): bool = c.fTabStop
 proc `tabStop=`*(c: Control, v: bool) = c.fTabStop = v
+# Tab order among siblings; equal values fall back to child order.
 func tabOrder*(c: Control): int = c.fTabOrder
 proc `tabOrder=`*(c: Control, v: int) = c.fTabOrder = v
-  ## Tab order among siblings; equal values fall back to child order.
 
 # ------------------------------------------------------------- theme/font/color
 
@@ -636,9 +661,14 @@ proc font*(c: Control): FontSpec =
 func parentFont*(c: Control): bool = c.fParentFont
 
 proc fontChanged(c: Control) =
+  ## The effective font of `c` changed: repaint, re-measure it when auto-sized,
+  ## and do the same for every descendant that inherits the font.
   c.invalidate()
   if c.fAutoSize: c.requestLayout()
-  if c of Container: markLayout(Container(c))
+  if c of Container:
+    markLayout(Container(c))
+    for ch in Container(c).fChildren:
+      if ch.fParentFont: ch.fontChanged()
 
 proc `font=`*(c: Control, v: FontSpec) =
   ## Sets an own font (and clears `parentFont`, like VCL).
@@ -718,9 +748,9 @@ proc `parent=`*(c: Control, p: Container) =
   if p == nil: c.fParent.removeControl(c)
   else: p.insertControl(c)
 
-proc bringToFront*(c: Control) =
+method bringToFront*(c: Control) {.base.} =
   ## Moves `c` to the end of its parent's children (topmost; also last in
-  ## layout order).
+  ## layout order). A `Form` raises its window instead.
   let p = c.fParent
   if p == nil or p.fChildren[^1] == c: return
   p.fChildren.delete(p.fChildren.find(c))

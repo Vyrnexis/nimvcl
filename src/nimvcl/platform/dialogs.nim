@@ -34,9 +34,15 @@ type
   CallbackBox = object
     token: int
     done: FileDialogDone
-    names, patterns: seq[cstring]       # kept alive for the dialog's duration
     strings: seq[string]
     filters: seq[DialogFileFilter]
+
+proc deliver*(done: FileDialogDone, token: int, ok: bool, files: seq[string]) =
+  ## Calls `done`; nothing it raises may escape into SDL's C code.
+  try:
+    done(token, ok, files)
+  except Exception:
+    discard
 
 proc sdlCallback(userdata: pointer, filelist: cstringArray, filter: cint)
                 {.cdecl.} =
@@ -53,7 +59,7 @@ proc sdlCallback(userdata: pointer, filelist: cstringArray, filter: cint)
   let done = box.done
   `=destroy`(box[])
   dealloc box
-  done(token, ok, files)
+  deliver(done, token, ok, files)
 
 proc realShow(req: FileDialogRequest, token: int, done: FileDialogDone) =
   let box = cast[ptr CallbackBox](alloc0(sizeof(CallbackBox)))

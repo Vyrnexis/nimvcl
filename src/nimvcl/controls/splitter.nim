@@ -65,7 +65,8 @@ proc resizeTo*(s: Splitter, size: float32) =
   let target = clamp(round(size), s.fMinSize, s.maxAllowed(n))
   let before = sizeOf(n, s)
   if s.vertical: n.height = target else: n.width = target
-  if sizeOf(n, s) != before and s.onMoved != nil: s.onMoved(s)
+  let h = s.onMoved         # copy: the handler may clear or replace itself
+  if sizeOf(n, s) != before and h != nil: h(s)
 
 method doMouseEnter*(s: Splitter) =
   s.fHot = true
@@ -107,6 +108,12 @@ method doMouseUp*(s: Splitter, button: MouseButton, shift: ShiftState,
     s.fDrag = false
     s.invalidate()
   procCall doMouseUp(Control(s), button, shift, x, y)
+
+method captureLost*(s: Splitter) =
+  if s.fDrag:
+    s.fDrag = false
+    s.invalidate()
+  procCall captureLost(Control(s))
 
 method paint*(s: Splitter, c: Canvas) =
   let t = s.theme

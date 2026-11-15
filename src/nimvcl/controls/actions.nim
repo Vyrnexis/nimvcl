@@ -78,13 +78,16 @@ type
     action: Action
     item: MenuItem
     ctl: Control
+    origKind: ToolButtonKind   # a ToolButton's style before the action upgraded it
+    upgraded: bool
 
 # ------------------------------------------------------------------ links
 
 proc apply(l: ActionLink)
 
 proc notify(a: Action) =
-  for l in a.fLinks: l.apply()
+  let links = a.fLinks   # callbacks may link/unlink while we iterate
+  for l in links: l.apply()
 
 proc images(a: Action): ImageList =
   if a.fList != nil: a.fList.fImages else: nil
@@ -113,7 +116,15 @@ proc apply(l: ActionLink) =
     if c of ToolButton:
       let b = ToolButton(c)
       b.caption = parseMnemonic(a.fCaption).text
-      if b.kind == tbsButton and (a.fAutoCheck or a.fGroup > 0): b.kind = tbsCheck
+      let wantsCheck = a.fAutoCheck or a.fGroup > 0
+      if wantsCheck and b.kind == tbsButton:
+        l.origKind = b.kind
+        l.upgraded = true
+        b.kind = tbsCheck
+      elif not wantsCheck and l.upgraded:
+        b.down = false
+        b.kind = l.origKind
+        l.upgraded = false
       if b.kind == tbsCheck:
         b.groupIndex = a.fGroup
         b.down = a.fChecked
@@ -188,7 +199,8 @@ proc `checked=`*(a: Action, v: bool) =
   if v == a.fChecked: return
   a.fChecked = v
   if v and a.fGroup > 0 and a.fList != nil:
-    for o in a.fList.fActions:
+    let others = a.fList.fActions
+    for o in others:
       if o != a and o.fGroup == a.fGroup and o.fChecked:
         o.fChecked = false
         o.notify()
@@ -208,10 +220,11 @@ proc run(a: Action): bool =
 
 proc execute*(a: Action): bool {.discardable.} =
   ## Runs the action: ignored (false) while disabled; an `autoCheck` action
-  ## toggles `checked` (a grouped one becomes checked) first. True when a
+  ## toggles `checked` first; a grouped one (autoCheck or not) becomes checked. True when a
   ## handler ran.
   if a.fDisabled: return false
-  if a.fAutoCheck: a.checked = if a.fGroup > 0: true else: not a.fChecked
+  if a.fAutoCheck or a.fGroup > 0:
+    a.checked = if a.fGroup > 0: true else: not a.fChecked
   a.run()
 
 proc update*(a: Action) =
@@ -232,12 +245,13 @@ method clientClicked(l: ActionLink) =
     state = l.item.checked
   elif l.ctl of CheckBox:
     checkable = true
-    state = CheckBox(l.ctl).checked
+    state = CheckBox(l.ctl).checked or a.fGroup > 0   # a group member never unchecks itself
   elif l.ctl of ToolButton and ToolButton(l.ctl).kind == tbsCheck:
     checkable = true
     state = ToolButton(l.ctl).down
   if checkable:          # the client toggled itself: the action follows
     a.checked = state
+    l.apply()            # resync a client that toggled against the action's state
     discard a.run()
   else:
     discard a.execute()
@@ -262,6 +276,10 @@ proc releaseClient(c: Component) =
   let old = c.actionLink
   if old != nil and old of ActionLink:
     let l = ActionLink(old)
+    if l.upgraded and l.ctl != nil and l.ctl of ToolButton:
+      ToolButton(l.ctl).down = false
+      ToolButton(l.ctl).kind = l.origKind
+      l.upgraded = false
     l.detach()
     if l.action != nil: l.action.unlink(l)
     l.action = nil
@@ -340,6 +358,10 @@ proc ensureHook(l: ActionList) =
     if key == Key(0): return
     let mods = shift * {ssShift, ssCtrl, ssAlt}
     let k = normalizeKey(key)
+    let ac = f.activeControl
+    if mods * {ssCtrl, ssAlt} == {} and uint32(k) >= 0x20 and uint32(k) <= 0x7e and
+       ac != nil and ac.wantsTextInput():
+      return   # plain typing in an Edit/Memo is never a shortcut
     if mods == {} and (uint32(k) < 0x20 or uint32(k) > 0x7e) and k notin [
         keyF1, keyF2, keyF3, keyF4, keyF5, keyF6, keyF7, keyF8, keyF9, keyF10,
         keyF11, keyF12, keyDelete, keyInsert, keyHome, keyEnd, keyPageUp,

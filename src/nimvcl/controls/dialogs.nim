@@ -187,8 +187,10 @@ proc runMessageDlg(text: string, kind: MsgDlgType, showIcon: bool,
   let d = newMsgDlgForm()
   d.caption = if title.len > 0: title else: defaultCaption(kind)
   d.setup(text, kind, showIcon, bs, default)
-  result = d.showModal()
-  d.freeWindow()
+  try:
+    result = d.showModal()
+  finally:
+    d.freeWindow()
   if result == mrCancel: result = dlgResult(escapeButton(bs))
 
 proc messageDlg*(text: string, dlgType = mtInformation, buttons: MsgDlgButtons = {mbOK},
@@ -319,7 +321,13 @@ proc start(d: FileDialogBase, kind: FileDialogKind, onDone: FileDialogDoneProc) 
     d.running = false
     if ok: d.files = files
     if onDone != nil: onDone(ok, files)
-  showFileDialog(d.request(kind), token, platformDone)
+  try:
+    showFileDialog(d.request(kind), token, platformDone)
+  except Exception:
+    # the platform never took the request: no callback will come
+    pending.del token
+    d.running = false
+    raise
 
 method kind(d: FileDialogBase): FileDialogKind {.base.} = fdkOpen
 method kind(d: OpenDialog): FileDialogKind = fdkOpen

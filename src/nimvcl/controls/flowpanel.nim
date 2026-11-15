@@ -22,7 +22,8 @@
 ## Children fill their cell (minus margins). `setCell(ctrl, row, col, rowSpan,
 ## colSpan)` puts one explicitly; the others take the free cells in row-major
 ## order (those beyond the last cell are not placed). `cellRect` gives a cell's
-## rectangle.
+## rectangle. Children of both panels keep their `autoSize` sizing (computed
+## before the panel arranges them; a grid then stretches them to their cell).
 
 import std/[tables, hashes]
 import ./[common, panel]
@@ -46,7 +47,6 @@ type
   GridPanel* = ref object of Panel
     fCols, fRows: seq[GridSize]
     fCells: Table[Control, GridCell]
-    fArea: RectF
 
 proc hash(c: Control): Hash = hash(cast[pointer](c))
 
@@ -136,6 +136,11 @@ proc clearCell*(g: GridPanel, c: Control) =
   g.fCells.del c
   g.relayout()
 
+method childBoundsChanged*(g: GridPanel, child: Control) =
+  ## A removed child (it has no parent now, or another one) loses its explicit cell.
+  if child.parent != Container(g): g.fCells.del child
+  procCall childBoundsChanged(Container(g), child)
+
 func trackCount(tracks: seq[GridSize]): int = max(tracks.len, 1)
 
 proc placements(g: GridPanel): seq[(Control, GridCell)] =
@@ -224,7 +229,6 @@ proc cellRect*(g: GridPanel, row, col: int, rowSpan = 1, colSpan = 1): RectF =
   rectF(cx[c0], cy[r0], cx[c1] - cx[c0], cy[r1] - cy[r0])
 
 method arrangeChildren*(g: GridPanel, avail: RectF): bool =
-  g.fArea = avail
   let (cx, cy, cells) = g.layoutCells(avail)
   for (c, cell) in cells:
     let m = c.margins

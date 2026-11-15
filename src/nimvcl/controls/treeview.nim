@@ -121,10 +121,15 @@ type
     fVer: int
     fUpdating: int
     fRowsDirty: bool
+    fPruneSel: bool              # a collapse was deferred: drop hidden selection
+    fPendingChange: bool         # onChange due at the end of the update
+    fExtentStale: bool           # recompute the horizontal extent at paint
+    fSkipPress: bool             # doKeyDown already handled the + - * text
     fMulti, fExtended, fShowLines, fShowRoot, fShowButtons: bool
     fRowSelect, fHideSel, fReadOnly, fCheckboxes, fPropagate, fMouseIn: bool
     fIndent, fItemHeight, fLastIh, fExtent, fMouseY: float32
     fImages: ImageList
+    fImgListener: int
     fEdit: Edit
     fSlowTimer: Timer
     fTypeBuf: string
@@ -264,6 +269,9 @@ proc touch(tv: TreeView) = inc tv.fVer
 proc notifyChange(tv: TreeView, ver: int) =
   if tv.fVer != ver:
     tv.invalidate()
+    if tv.fUpdating > 0:                 # one onChange at endUpdate
+      tv.fPendingChange = true
+      return
     if tv.onChange != nil: tv.onChange(tv, tv.fFocus)
 
 # ------------------------------------------------------ the visible row list
@@ -329,9 +337,6 @@ method contentScrolled*(tv: TreeView) =
   tv.hotUpdate()
   tv.layoutEdit()
 
-proc topRow*(tv: TreeView): int =
-  int(floor(float64(tv.scrollPos.y) / float64(tv.itemHeight)))
-
 proc firstFullRow(tv: TreeView): int =
   int(ceil(float64(tv.scrollPos.y) / float64(tv.itemHeight)))
 proc lastFullRow(tv: TreeView): int =
@@ -356,7 +361,6 @@ proc geom(tv: TreeView, n: TreeNode, y: float32, ih: float32): NodeGeom =
   if tv.fCheckboxes:
     result.check = rectF(x, y + floor((ih - CheckSize) / 2), CheckSize, CheckSize)
     x += CheckSize + 4
-  result.selX = x
   if tv.fImages != nil:
     result.icon = rectF(x, y + floor((ih - tv.fImages.height) / 2),
                         tv.fImages.width, tv.fImages.height)
@@ -513,6 +517,7 @@ proc `selected=`*(tv: TreeView, n: TreeNode) =
   ## Selects exactly `n` (nil clears the selection and the focus), expands its
   ## ancestors and scrolls it into view.
   if n == nil:
+    if tv.fFocus == nil and tv.fAnchor == nil and tv.fSel.len == 0: return
     let v = tv.fVer
     tv.fSel.clear()
     tv.fFocus = nil
@@ -557,8 +562,16 @@ proc `extendedSelect=`*(tv: TreeView, v: bool) = tv.fExtended = v
 # --------------------------------------------------------------- expand etc.
 
 proc fixFocusAfterHide(tv: TreeView, owner: TreeNode, hiddenFocus: bool) =
-  ## The focus was inside a subtree that just got hidden: it moves to `owner`.
-  if hiddenFocus: tv.selectNode(owner, shReplace)
+  ## The focus was inside a subtree that just got hidden: it moves to `owner`
+  ## (no `onChanging`: the move is forced), which joins the selection; the
+  ## other still-visible selected nodes stay selected.
+  if not hiddenFocus: return
+  let ver = tv.fVer
+  tv.fFocus = owner
+  tv.fSel.incl owner
+  tv.touch()
+  tv.makeRowVisible(owner.fRow)
+  tv.notifyChange(ver)
 
 proc doCollapse(tv: TreeView, n: TreeNode): bool {.discardable.} =
   if not n.fExpanded: return false
@@ -567,6 +580,7 @@ proc doCollapse(tv: TreeView, n: TreeNode): bool {.discardable.} =
     tv.onCollapsing(tv, n, allow)
     if not allow: return false
   n.fExpanded = false
+  tv.fExtentStale = true
   if n.fRow >= 0 and tv.fUpdating == 0:
     let cnt = tv.visibleBelow(n)
     var hiddenFocus = false
@@ -584,6 +598,7 @@ proc doCollapse(tv: TreeView, n: TreeNode): bool {.discardable.} =
     tv.scrollBy(0, 0)
   elif tv.fUpdating > 0:
     tv.fRowsDirty = true
+    tv.fPruneSel = true                  # pruned at endUpdate
   if tv.onCollapsed != nil: tv.onCollapsed(tv, n)
   true
 
@@ -619,13 +634,27 @@ proc endUpdate*(tv: TreeView) =
   dec tv.fUpdating
   if tv.fUpdating == 0:
     if tv.fRowsDirty: tv.rebuildRows()
+    if tv.fPruneSel:                     # collapses deferred by the update
+      tv.fPruneSel = false
+      var gone: seq[TreeNode]
+      for m in tv.fSel:
+        if m.fRow < 0: gone.add m
+      for m in gone: tv.fSel.excl m
+      if gone.len > 0: tv.touch()
+      if tv.fHot != nil and tv.fHot.fRow < 0: tv.fHot = nil
     # a node can have been hidden or deleted meanwhile
     if tv.fFocus != nil and tv.fFocus.fRow < 0 and tv.fFocus.fTree == tv:
       var p = tv.fFocus.fParent
       while p != nil and p != tv.fRoot and p.fRow < 0: p = p.fParent
-      if p != nil and p != tv.fRoot: tv.selectNode(p, shReplace)
+      if p != nil and p != tv.fRoot:
+        tv.fixFocusAfterHide(p, true)
+        if tv.fAnchor != nil and tv.fAnchor.fRow < 0: tv.fAnchor = p
     tv.refresh()
     tv.scrollBy(0, 0)
+    if tv.fPendingChange:
+      tv.fPendingChange = false
+      tv.invalidate()
+      if tv.onChange != nil: tv.onChange(tv, tv.fFocus)
 
 proc expand*(n: TreeNode, recursive = false) =
   ## Expands `n` (and with `recursive` everything below it).
@@ -649,14 +678,18 @@ proc collapse*(n: TreeNode, recursive = false) =
   if not recursive:
     tv.doCollapse(n)
     return
-  # innermost first would be more events; collapse top-down, silently below
+  # Collapses every expanded node below `n`, innermost first (so each
+  # onCollapsed sees its subtree already closed); the visible rows are
+  # rebuilt once at endUpdate instead of cut once per node.
   var stack = @[n]
   var all: seq[TreeNode]
   while stack.len > 0:
     let m = stack.pop()
     if m.fExpanded: all.add m
     for k in m.fKids: stack.add k
+  tv.beginUpdate()
   for i in countdown(all.high, 0): tv.doCollapse(all[i])
+  tv.endUpdate()
 
 proc `expanded=`*(n: TreeNode, v: bool) =
   if v: n.expand() else: n.collapse()
@@ -769,6 +802,7 @@ proc detach(tv: TreeView, n: TreeNode) =
   p.fKids.delete(n.fIdx)
   for j in n.fIdx ..< p.fKids.len: p.fKids[j].fIdx = j
   n.fParent = nil
+  tv.fExtentStale = true
   if p != tv.fRoot and p.fKids.len == 0 and not p.fLazy:
     p.fExpanded = false
   if tv.fEditNode != nil and tv.fEditNode.fTree == nil:
@@ -801,8 +835,36 @@ proc clear*(n: TreeNode) =
   ## Removes all children of `n`.
   let tv = n.fTree
   if tv == nil: return
+  if n.fKids.len == 0: return
   tv.beginUpdate()
+  let ver = tv.fVer
+  # Drop focus / anchor / selection once, up front (not per removed node);
+  # onChange then fires once at endUpdate.
+  if n == tv.fRoot:
+    if tv.fFocus != nil or tv.fAnchor != nil or tv.fSel.len > 0:
+      tv.fFocus = nil
+      tv.fAnchor = nil
+      tv.fSel.clear()
+      tv.touch()
+  else:
+    var changed = false
+    if tv.fFocus != nil and n.isAncestorOf(tv.fFocus):
+      tv.fFocus = n
+      changed = true
+    if tv.fAnchor != nil and n.isAncestorOf(tv.fAnchor):
+      tv.fAnchor = n
+    if tv.fSel.len > 0:
+      var gone: seq[TreeNode]
+      for m in tv.fSel:
+        if n.isAncestorOf(m): gone.add m
+      for m in gone: tv.fSel.excl m
+      if gone.len > 0: changed = true
+    if changed:
+      if tv.fFocus == n and (not tv.fMulti or tv.fSel.len == 0): tv.fSel.incl n
+      tv.touch()
+  tv.fHot = nil
   while n.fKids.len > 0: tv.detach(n.fKids[^1])
+  tv.notifyChange(ver)
   tv.endUpdate()
 
 proc `[]`*(it: TreeItems, i: int): TreeNode = it.tv.fRoot.child(i)
@@ -835,6 +897,7 @@ proc clear*(it: TreeItems) =
   let tv = it.tv
   tv.fRoot.clear()
   tv.fExtent = 0
+  tv.fExtentStale = false
   tv.refresh()
   tv.scrollTo(0, 0)
 
@@ -957,7 +1020,14 @@ proc `readOnly=`*(tv: TreeView, v: bool) =
 # ---------------------------------------------------------- property setters
 
 proc `images=`*(tv: TreeView, v: ImageList) =
+  if tv.fImages != nil and tv.fImgListener != 0:
+    tv.fImages.removeListener(tv.fImgListener)
+  tv.fImgListener = 0
   tv.fImages = v
+  if v != nil:                           # repaint / re-measure on list changes
+    tv.fImgListener = v.addListener(proc() =
+      tv.refresh()
+      tv.invalidate())
   tv.refresh()
 proc `indent=`*(tv: TreeView, v: float32) =
   tv.fIndent = max(v, 8)
@@ -1081,6 +1151,7 @@ proc focusRow(tv: TreeView): int =
 
 method doKeyDown*(tv: TreeView, key: var Key, shift: ShiftState) =
   procCall doKeyDown(Control(tv), key, shift)
+  tv.fSkipPress = false
   if key == Key(0) or not tv.isEnabled or tv.fEditNode != nil: return
   tv.cancelSlow()
   if shift * {ssAlt} != {}: return
@@ -1113,12 +1184,15 @@ method doKeyDown*(tv: TreeView, key: var Key, shift: ShiftState) =
     elif f.fExpanded and f.fKids.len > 0: tv.moveFocus(f.fKids[0], {})
   elif (key == '*'.key or key == KeyKpMultiply) and f != nil:
     key = Key(0)
+    tv.fSkipPress = true               # the text event of this key is not repeated
     f.expand(recursive = true)
   elif (key == '+'.key or key == KeyKpPlus) and f != nil:
     key = Key(0)
+    tv.fSkipPress = true
     tv.doExpand(f)
   elif (key == '-'.key or key == KeyKpMinus) and f != nil:
     key = Key(0)
+    tv.fSkipPress = true
     tv.doCollapse(f)
   elif key == keyF2 and f != nil:
     key = Key(0)
@@ -1134,8 +1208,7 @@ method doKeyDown*(tv: TreeView, key: var Key, shift: ShiftState) =
   else:
     let ch = typeAheadChar(key, shift)
     if ch != '\0' and (ch != ' ' or tv.fTypeBuf.len > 0 and
-                       nowMs() - tv.fTypeTime <= tv.typeAheadTimeout) and
-       (ssShift notin shift or ch in {'a' .. 'z'}):
+                       nowMs() - tv.fTypeTime <= tv.typeAheadTimeout):
       key = Key(0)
       tv.typeAhead(ch)
 
@@ -1143,6 +1216,9 @@ method doKeyPress*(tv: TreeView, text: var string) =
   procCall doKeyPress(Control(tv), text)
   # '*', '+' (typed with Shift on most layouts) arrive as text only
   let f = tv.fFocus
+  if tv.fSkipPress:                      # already handled by doKeyDown
+    tv.fSkipPress = false
+    if text.len == 1 and text[0] in {'*', '+', '-'}: return
   if f == nil or tv.fEditNode != nil or text.len != 1: return
   case text[0]
   of '*': f.expand(recursive = true)
@@ -1247,7 +1323,12 @@ method paint*(tv: TreeView, c: Canvas) =
   c.strokeRoundRect(r, t.radius, if ring: t.focusRing else: t.borderStrong,
                     if ring: t.focusRingWidth else: t.borderWidth)
   procCall paint(Control(tv), c)
-  if maxRight > tv.fExtent + 0.5:
+  if tv.fExtentStale:                    # rows were removed / hidden: shrink
+    tv.fExtentStale = false
+    if abs(maxRight - tv.fExtent) > 0.5:
+      tv.fExtent = maxRight
+      tv.refresh()
+  elif maxRight > tv.fExtent + 0.5:
     tv.fExtent = maxRight
     tv.refresh()
 

@@ -79,8 +79,12 @@ proc logicalSize*(w: PlatformWindow): SizeF =
   sizeF(float32(a) / w.coordScale, float32(b) / w.coordScale)
 
 proc scale*(w: PlatformWindow): float32 =
-  ## Device pixels per logical pixel.
+  ## Device pixels per logical pixel: SDL's window pixel density (a float that
+  ## does not wobble with the integer window size), else the pixel/point ratio.
   if w.forcedScale > 0: return w.forcedScale
+  if w.window != nil:
+    let d = getWindowPixelDensity(w.window)
+    if d > 0: return float32(d)
   let (pw, _) = w.pixelSize
   let (lw, _) = w.pointSize
   if lw > 0 and pw > 0: float32(pw) / float32(lw) else: 1'f32

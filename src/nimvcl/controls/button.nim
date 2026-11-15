@@ -158,7 +158,7 @@ method doKeyDown*(b: Button, key: var Key, shift: ShiftState) =
       b.invalidate()
   elif key == keyEnter:
     key = Key(0)
-    b.click()
+    if not b.keyIsRepeat: b.click()      # once per press, not per auto-repeat
 
 method doKeyUp*(b: Button, key: var Key, shift: ShiftState) =
   procCall doKeyUp(Control(b), key, shift)

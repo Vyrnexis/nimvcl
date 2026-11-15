@@ -11,7 +11,8 @@
 ## Virtual mode: assign `onData(sender, index): string` and set `count`. Items
 ## are then never stored; the text of an item is fetched only when it is painted
 ## or searched, so only the visible rows are touched (1,000,000 rows are fine).
-## `add`/`insert`/`delete`/`items` and `sorted` do nothing in virtual mode;
+## `add`/`insert`/`delete`/`clear`/`items` and `sorted` do nothing in virtual mode
+## (`count` may be set before or after `onData`);
 ## selection works as usual (a selection of N rows costs N set entries).
 ## Pixel positions are float32: beyond ~700,000 rows the scroll position is
 ## quantised to 2 px, which is invisible for row navigation.
@@ -29,7 +30,8 @@
 ## Assigning `itemIndex` selects exactly that row (dropping any other
 ## selection) and scrolls it into view. `setSelection(indices, focus = -1)`
 ## replaces the whole selection in one step with one `onChange`.
-## Deleting the focused row sets `itemIndex` to -1.
+## Deleting the focused row sets `itemIndex` to -1. Turning `multiSelect` off
+## keeps only the focused row selected (the first selected one if none is focused).
 ## `onChange` fires when `itemIndex` or the selection changes (user or code);
 ## `onClick`, `onDblClick` are the usual mouse events.
 ##
@@ -53,6 +55,7 @@
 
 import std/[sets, monotimes, algorithm, sequtils, strutils]
 import ../graphics/context
+import ../core/timer
 import ./common, ./scrolling
 export scrolling
 
@@ -79,24 +82,28 @@ type
     fTypeBuf: string
     fTypeTime: int64
     typeAheadTimeout*: int       ## ms
+    fDragTimer: Timer
     onChange*: NotifyEvent
-    onData*: DataEvent
+    fOnData: DataEvent
     onDrawItem*: DrawItemEvent
 
   ItemList* = object
     ## `lb.items`: add/insert/delete/clear/[]/len on a ListBox's strings.
     lb: ListBox
 
-const ItemPadding = 8'f32
+const
+  ItemPadding = 8'f32
+  DragScrollMs = 45
 
 proc nowMs(): int64 = getMonoTime().ticks div 1_000_000
 
 # ----------------------------------------------------------------- basics
 
-func isVirtual*(lb: ListBox): bool = lb.onData != nil
+func onData*(lb: ListBox): DataEvent = lb.fOnData
+func isVirtual*(lb: ListBox): bool = lb.fOnData != nil
 
 func count*(lb: ListBox): int =
-  if lb.onData != nil: lb.fCount else: lb.fItems.len
+  if lb.fOnData != nil: lb.fCount else: lb.fItems.len
 
 func itemIndex*(lb: ListBox): int = lb.fIndex
 func multiSelect*(lb: ListBox): bool = lb.fMulti
@@ -115,7 +122,7 @@ proc `showFocusRect=`*(lb: ListBox, v: bool) =
 proc itemText*(lb: ListBox, i: int): string =
   ## Text of item `i` ("" when out of range).
   if i < 0 or i >= lb.count: return ""
-  if lb.onData != nil: lb.onData(lb, i) else: lb.fItems[i]
+  if lb.fOnData != nil: lb.fOnData(lb, i) else: lb.fItems[i]
 
 proc itemHeight*(lb: ListBox): float32 =
   ## Row height in logical pixels (the automatic one when not set).
@@ -164,6 +171,7 @@ proc touch(lb: ListBox) = inc lb.fVer
 
 proc selectOnly(lb: ListBox, i: int) =
   if lb.fSel.len == 1 and i in lb.fSel: return
+  if i < 0 and lb.fSel.len == 0: return
   lb.fSel.clear()
   if i >= 0: lb.fSel.incl i
   lb.touch()
@@ -300,9 +308,16 @@ proc selectAll*(lb: ListBox) =
 
 proc `multiSelect=`*(lb: ListBox, v: bool) =
   if v == lb.fMulti: return
+  let ver = lb.fVer
   lb.fMulti = v
-  if not v and lb.fSel.len > 1: lb.selectOnly(lb.fIndex)
+  if not v:
+    # single mode: the focused row is the selection (else the first selected)
+    if lb.fIndex < 0 and lb.fSel.len > 0:
+      lb.setFocusRow(lb.selectedIndices[0])
+      lb.fAnchor = lb.fIndex
+    if lb.fIndex >= 0: lb.selectOnly(lb.fIndex) else: lb.selectOnly(-1)
   lb.invalidate()
+  lb.notify(ver)
 
 proc `extendedSelect=`*(lb: ListBox, v: bool) = lb.fExtended = v
 
@@ -349,21 +364,24 @@ proc delete*(lb: ListBox, i: int) =
   if lb.isVirtual or i < 0 or i >= lb.fItems.len: return
   let v = lb.fVer
   let wasSel = i in lb.fSel
+  let wasFocus = lb.fIndex == i
   lb.fSel.excl i
-  lb.shiftIndices(i + 1, -1)
-  if lb.fIndex == i: lb.fIndex = -1
+  if wasFocus: lb.fIndex = -1
   if lb.fAnchor == i: lb.fAnchor = -1
+  lb.shiftIndices(i + 1, -1)
   lb.fItems.delete(i)
-  if wasSel or lb.fIndex == -1: lb.touch()
+  if wasSel or wasFocus: lb.touch()
   lb.refresh()
   lb.scrollBy(0, 0)         # re-clamp
   lb.notify(v)
 
 proc clear*(lb: ListBox) =
+  ## Removes all items. Does nothing in virtual mode (the count belongs to
+  ## the data source: set `count`).
+  if lb.isVirtual: return
   let v = lb.fVer
   let had = lb.fSel.len > 0 or lb.fIndex >= 0
   lb.fItems.setLen(0)
-  lb.fCount = 0
   lb.fSel.clear()
   lb.fIndex = -1
   lb.fAnchor = -1
@@ -373,24 +391,34 @@ proc clear*(lb: ListBox) =
   lb.scrollTo(0, 0)
   lb.notify(v)
 
-proc `count=`*(lb: ListBox, n: int) =
-  ## Virtual mode: the number of items (set `onData` too).
-  lb.fCount = max(n, 0)
-  if lb.onData != nil:
-    let v = lb.fVer
-    var changed = false
-    for j in toSeq(lb.fSel):
-      if j >= lb.fCount:
-        lb.fSel.excl j
-        changed = true
-    if lb.fIndex >= lb.fCount:
-      lb.fIndex = -1
+proc clampToCount(lb: ListBox) =
+  ## Drops selection / focus / anchor beyond the item count.
+  let v = lb.fVer
+  var changed = false
+  for j in toSeq(lb.fSel):
+    if j >= lb.count:
+      lb.fSel.excl j
       changed = true
-    if lb.fAnchor >= lb.fCount: lb.fAnchor = -1
-    if changed: lb.touch()
-    lb.refresh()
-    lb.scrollBy(0, 0)
-    lb.notify(v)
+  if lb.fIndex >= lb.count:
+    lb.fIndex = -1
+    changed = true
+  if lb.fAnchor >= lb.count: lb.fAnchor = -1
+  if lb.fHot >= lb.count: lb.fHot = -1
+  if changed: lb.touch()
+  lb.refresh()
+  lb.scrollBy(0, 0)
+  lb.notify(v)
+
+proc `count=`*(lb: ListBox, n: int) =
+  ## Virtual mode: the number of items. May be set before or after `onData`.
+  lb.fCount = max(n, 0)
+  if lb.fOnData != nil: lb.clampToCount()
+
+proc `onData=`*(lb: ListBox, v: DataEvent) =
+  ## Switches to virtual mode (non-nil; `count` is the item count) or back to
+  ## the stored items (nil).
+  lb.fOnData = v
+  lb.clampToCount()
 
 proc `sorted=`*(lb: ListBox, v: bool) =
   if v == lb.fSorted: return
@@ -434,9 +462,9 @@ iterator items*(l: ItemList): string =
   for i in 0 ..< l.lb.count: yield l.lb.itemText(i)
 
 proc `items=`*(lb: ListBox, v: openArray[string]) =
-  ## Replaces all items.
-  lb.clear()
+  ## Replaces all items (does nothing in virtual mode).
   if lb.isVirtual: return
+  lb.clear()
   if lb.fSorted:
     for s in v: lb.add s
   else:
@@ -487,36 +515,59 @@ method doMouseDown*(lb: ListBox, button: MouseButton, shift: ShiftState,
     if i >= 0:
       let v = lb.fVer
       lb.applyClick(i, shift)
-      lb.fDragging = not lb.fMulti or lb.fExtended
+      lb.fDragging = (not lb.fMulti or lb.fExtended) and ssCtrl notin shift
       lb.makeVisible(i)
       lb.notify(v)
   procCall doMouseDown(Control(lb), button, shift, x, y)
+
+proc dragSelect(lb: ListBox) =
+  ## Extends the drag selection to the row under (or nearest to) the pointer.
+  if lb.count == 0: return
+  let vp = lb.viewport
+  let cy = min(max(lb.fMouseY, vp.y), vp.bottom - 1)
+  var i = int(floor((float64(cy - vp.y) + float64(lb.scrollPos.y)) /
+                    float64(lb.itemHeight)))
+  i = min(max(i, 0), lb.count - 1)
+  if i != lb.fIndex:
+    let v = lb.fVer
+    if lb.fMulti: lb.selectRange(max(lb.fAnchor, 0), i)
+    else: lb.selectOnly(i)
+    lb.setFocusRow(i)
+    lb.makeVisible(i)
+    lb.notify(v)
+
+proc stopDrag(lb: ListBox) =
+  lb.fDragging = false
+  if lb.fDragTimer != nil: lb.fDragTimer.enabled = false
 
 method doMouseMove*(lb: ListBox, shift: ShiftState, x, y: float32) =
   lb.fMouseIn = true
   lb.fMouseY = y
   if lb.fDragging and ssLeft in shift and lb.count > 0:
     let vp = lb.viewport
-    let cy = min(max(y, vp.y), vp.bottom - 1)
-    var i = int(floor((float64(cy - vp.y) + float64(lb.scrollPos.y)) /
-                      float64(lb.itemHeight)))
-    i = min(max(i, 0), lb.count - 1)
-    if y < vp.y: i = max(lb.topIndex, 0)
-    if i != lb.fIndex:
-      let v = lb.fVer
-      if lb.fMulti: lb.selectRange(max(lb.fAnchor, 0), i)
-      else: lb.selectOnly(i)
-      lb.setFocusRow(i)
-      lb.makeVisible(i)
-      lb.notify(v)
+    lb.dragSelect()
+    if y < vp.y or y >= vp.bottom:
+      if lb.fDragTimer == nil:
+        lb.fDragTimer = newTimer(nil, DragScrollMs)
+        lb.fDragTimer.onTimer = proc(t: Timer) =
+          if not lb.fDragging:
+            t.enabled = false
+            return
+          let vp = lb.viewport
+          if lb.fMouseY < vp.y: lb.scrollBy(0, -lb.itemHeight)
+          elif lb.fMouseY >= vp.bottom: lb.scrollBy(0, lb.itemHeight)
+          lb.dragSelect()
+      lb.fDragTimer.enabled = true
+    elif lb.fDragTimer != nil:
+      lb.fDragTimer.enabled = false
   elif lb.fDragging and ssLeft notin shift:
-    lb.fDragging = false
+    lb.stopDrag()
   lb.updateHot()
   procCall doMouseMove(Control(lb), shift, x, y)
 
 method doMouseUp*(lb: ListBox, button: MouseButton, shift: ShiftState,
                   x, y: float32) =
-  if button == mbLeft: lb.fDragging = false
+  if button == mbLeft: lb.stopDrag()
   procCall doMouseUp(Control(lb), button, shift, x, y)
 
 proc moveFocus(lb: ListBox, target: int, shift: ShiftState) =
@@ -586,12 +637,12 @@ method doKeyDown*(lb: ListBox, key: var Key, shift: ShiftState) =
     key = Key(0)
     if n > 0: lb.moveFocus(min(max(target, 0), n - 1), shift)
     return
-  if lb.fMulti and key == keySpace and lb.fIndex >= 0 and
-     (not lb.fExtended or ssCtrl in shift):
+  if lb.fMulti and key == keySpace:
     key = Key(0)
-    let v = lb.fVer
-    lb.applyClick(lb.fIndex, if lb.fExtended: {ssCtrl} else: {})
-    lb.notify(v)
+    if lb.fIndex >= 0:
+      let v = lb.fVer
+      lb.applyClick(lb.fIndex, if lb.fExtended: {ssCtrl} else: {})
+      lb.notify(v)
   elif lb.fMulti and lb.fExtended and ssCtrl in shift and key == 'a'.key:
     key = Key(0)
     lb.selectAll()
@@ -602,7 +653,7 @@ method doKeyDown*(lb: ListBox, key: var Key, shift: ShiftState) =
       if lb.typeAhead(char(v)): key = Key(0)
 
 method doExit*(lb: ListBox) =
-  lb.fDragging = false
+  lb.stopDrag()
   lb.invalidate()
   procCall doExit(Control(lb))
 

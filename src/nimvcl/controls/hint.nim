@@ -61,7 +61,20 @@ proc hintFor*(c: Control): string =
     if x.hint.len > 0: return x.hint
     x = Control(x.parent)
 
+proc hintTarget(f: Form, p: PointF): Control =
+  ## The control a hint belongs to: the hovered one, except that a DISABLED
+  ## control under the mouse (which never gets hover) wins when it has its own
+  ## hint.
+  result = f.ui.hovered
+  let d = f.ui.root.controlAtPoint(p, includeDisabled = true)
+  if d != nil and d != result and not d.isEnabled and d.hint.len > 0: result = d
+
 proc hintVisible*(): bool = gPopup != nil and gPopup.isOpen
+proc hintForm*(): Form =
+  ## The form of the pending or visible hint (nil when there is none; cleared on
+  ## hide and when the form closes, so a closed form is never kept alive).
+  gForm
+
 proc hintText*(): string =
   ## Text of the visible hint ("" when none).
   if hintVisible(): HintPanel(gPopup.content).text else: ""
@@ -73,6 +86,7 @@ proc hideHint*() =
   ## Hides the hint and cancels a pending one.
   stopTimer()
   gCtrl = nil
+  gForm = nil          # never keep a (possibly closed) form alive
   if gPopup != nil:
     let p = gPopup
     gPopup = nil
@@ -135,7 +149,7 @@ proc startTimer(ms: int) =
     gTimer = newTimer(nil, ms)
     gTimer.onTimer = proc(t: Timer) =
       t.enabled = false
-      if gForm != nil and gCtrl != nil and gForm.ui.hovered == gCtrl: showNow()
+      if gForm != nil and gCtrl != nil and hintTarget(gForm, gMouse) == gCtrl: showNow()
   gTimer.enabled = false
   gTimer.interval = max(ms, 1)
   gTimer.enabled = true
@@ -151,7 +165,7 @@ proc hintObserver(f: Form, pe: PlatformEvent) =
       hideHint()
       return
     let p = pointF(f.win.toLogical(pe.x), f.win.toLogical(pe.y))
-    let c = f.ui.hovered
+    let c = hintTarget(f, p)
     let text = if c == nil: "" else: hintFor(c)
     if not gShowHint or text.len == 0 or topPopup(f) != nil:
       hideHint()
@@ -178,3 +192,8 @@ proc hintObserver(f: Form, pe: PlatformEvent) =
   else: discard
 
 Application.addEventObserver(hintObserver)
+
+# Form.close()/freeWindow() called from code send no platform event: drop the
+# hint (and with it the reference to the form) once its form is gone.
+Application.addIdleHook("hint", proc() =
+  if gForm != nil and not (gForm.visible and gForm.hasWindow): hideHint())

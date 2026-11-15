@@ -87,8 +87,8 @@ suite "memo":
     m.wantReturns = false
     f.key(keyEnter)
     check clicks == 1 and m.lines.count == 2
-    f.typeText("a\nb")                  # newlines in text input dropped too
-    check m.text == "\nab"
+    f.typeText("a\nb")                  # line breaks in text input become spaces
+    check m.text == "\na b"
 
   test "Tab: moves focus unless wantTabs":
     let f = newShown()
@@ -399,6 +399,69 @@ suite "memo":
     o.setFocus()
     check not m.isComposing and not m.caretVisible
     settle(f)
+
+  test "cut and paste fire onChange, repaint and follow the caret (review 5)":
+    let f = newShown()
+    let m = f.mkMemo(h = 60)
+    var ch = 0
+    m.onChange = proc(s: Control) = inc ch
+    clip = "1\n2\n3\n4\n5\n6\n7\n8\n9"
+    m.pasteFromClipboard()
+    check ch == 1 and m.lineCount == 9
+    settle f
+    check m.scrollPos.y > 0                  # the caret line (last) is visible
+    m.selectAll()
+    ch = 0
+    m.cutToClipboard()
+    check ch == 1 and m.text == "" and clip.len > 0
+    check m.scrollPos.y == 0
+
+  test "lines.add fills only a pristine empty memo (review 20)":
+    let f = newShown()
+    let m = f.mkMemo()
+    m.lines.add ""                           # first add into the pristine memo
+    m.lines.add "b"
+    check m.text == "\nb" and m.lines.count == 2
+    let m2 = f.mkMemo()
+    m2.text = "x"
+    m2.lines[0] = ""
+    m2.lines.add "y"                         # edited: appends
+    check m2.text == "\ny"
+    let m3 = f.mkMemo()
+    m3.text = ""
+    m3.lines.add "first"
+    check m3.text == "first"
+    m3.lines.clear()
+    m3.lines.add "again"
+    check m3.text == "again"
+
+  test "text= compares the sanitised value (review 21)":
+    let f = newShown()
+    let m = f.mkMemo("ab")
+    var ch = 0
+    m.onChange = proc(s: Control) = inc ch
+    m.text = "a\x01b"                        # sanitises to "ab"
+    check ch == 0
+    m.text = "a\r\nb"
+    check ch == 1 and m.text == "a\nb"
+    m.text = "a\rb"
+    check ch == 1
+    m.maxLength = 2
+    m.text = "ab"
+    check ch == 2 and m.text == "ab"
+    m.text = "abcdef"                         # cut to "ab": same
+    check ch == 2
+
+  test "wantReturns = false: pasted, typed and IME breaks become spaces (review 25)":
+    let f = newShown()
+    let m = f.mkMemo()
+    m.wantReturns = false
+    m.setFocus()
+    f.typeText("a\nb")
+    check m.text == "a b"
+    clip = "c\r\nd\ne"
+    m.pasteFromClipboard()
+    check m.text == "a bc d e" and m.lineCount == 1
 
 suite "memo large":
   setup:

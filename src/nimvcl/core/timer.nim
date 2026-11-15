@@ -21,6 +21,8 @@ type
 var
   registry: Table[int, Timer]
   nextId = 1
+  startTimerImpl*: proc(intervalMs: uint32, tag: int): uint32 = startPlatformTimer
+    ## Test seam: replaces `startPlatformTimer`.
 
 proc stop(t: Timer) =
   if t.fHandle != 0:
@@ -35,7 +37,7 @@ proc start(t: Timer) =
   initPlatform()
   t.fId = nextId
   inc nextId
-  t.fHandle = startPlatformTimer(uint32(max(t.fInterval, 1)), t.fId)
+  t.fHandle = startTimerImpl(uint32(max(t.fInterval, 1)), t.fId)
   if t.fHandle == 0:
     t.fId = 0
     raise newException(IOError, "SDL_AddTimer failed")
@@ -50,13 +52,21 @@ func interval*(t: Timer): int = t.fInterval
 proc `interval=`*(t: Timer, ms: int) =
   if ms == t.fInterval: return
   t.fInterval = ms
-  if t.fEnabled: t.start()
+  if t.fEnabled:
+    try: t.start()
+    except CatchableError:
+      t.fEnabled = false
+      raise
 
 func enabled*(t: Timer): bool = t.fEnabled
 proc `enabled=`*(t: Timer, v: bool) =
   if v == t.fEnabled: return
-  t.fEnabled = v
-  if v: t.start() else: t.stop()
+  if v:
+    t.start()              # raises when SDL fails: the timer stays disabled
+    t.fEnabled = true
+  else:
+    t.fEnabled = false
+    t.stop()
 
 proc free*(t: Timer) =
   ## Disables the timer and drops it from the registry.
@@ -67,7 +77,8 @@ proc dispatchTimer*(id: int): bool =
   ## (already disabled).
   let t = registry.getOrDefault(id)
   if t == nil: return false
-  if t.onTimer != nil: t.onTimer(t)
+  let h = t.onTimer       # copy: the handler may clear or replace itself
+  if h != nil: h(t)
   true
 
 proc stopAllTimers*() =

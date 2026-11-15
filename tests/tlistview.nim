@@ -743,3 +743,154 @@ suite "listview":
          build.formatFloat(ffDecimal, 1), " ms, scroll+paint ",
          sPaint.formatFloat(ffDecimal, 2), " ms, sortByColumn ",
          sortMs.formatFloat(ffDecimal, 1), " ms"
+
+suite "listview (review fixes)":
+  setup:
+    Application.init()
+    Application.forceScale = 0
+  teardown:
+    for f in openForms(): f.freeWindow()
+
+  test "deleting item i keeps focus / anchor that sat on i+1":
+    let f = newShown()
+    let lv = mkList(f, n = 10)
+    lv.itemIndex = 5
+    lv.items.delete(4)
+    check lv.itemIndex == 4
+    lv.itemIndex = 4
+    lv.items.delete(4)                       # the focused item itself
+    check lv.itemIndex == -1
+    lv.itemIndex = 5
+    lv.items.insert(0, "new")
+    check lv.itemIndex == 6
+
+  test "deleting / clearing ends an in-progress edit; inserts shift it":
+    let f = newShown()
+    let lv = mkList(f, n = 10)
+    lv.setFocus()
+    lv.itemIndex = 5
+    check lv.beginEdit(5)
+    lv.items.delete(5)
+    check not lv.isEditing and not lv.editControl.visible
+    lv.itemIndex = 5
+    check lv.beginEdit(5)
+    lv.items.insert(0, "new")
+    check lv.isEditing and lv.editingIndex == 6
+    lv.items.delete(0)                       # any delete ends the edit
+    check not lv.isEditing
+    check lv.beginEdit(3)
+    lv.items.clear()
+    check not lv.isEditing and not lv.editControl.visible
+
+  test "virtual shrink and clear never ask onData for stale indices":
+    let f = newShown()
+    let lv = mkList(f)
+    lv.multiSelect = true
+    lv.ownerData = true
+    var model = newSeq[string](100)
+    var bad = 0
+    var told: seq[int]
+    lv.onData = proc(s: Control, it: ListItem) =
+      if it.index >= model.len: inc bad
+      else: it.caption = model[it.index]
+    lv.onSelectItem = proc(s: Control, it: ListItem, sel: bool) =
+      if not sel: told.add it.index
+    lv.itemsCount = 100
+    lv.setSelection(@[90, 95])
+    model.setLen(10)
+    lv.itemsCount = 10
+    check bad == 0 and told == @[90, 95] and lv.selCount == 0
+    lv.itemsCount = 100
+    model.setLen(100)
+    lv.setSelection(@[3, 4])
+    told.setLen(0)
+    model.setLen(0)
+    lv.items.clear()
+    check bad == 0 and told == @[3, 4]
+
+  test "icon captions of every length paint without IndexDefect":
+    let f = newShown()
+    let lv = mkList(f, style = vsIcon)
+    for n in 1 .. 70:
+      lv.items.clear()
+      lv.items.add("W".repeat(n))
+      lv.items.add("abcdefghij".repeat(n div 10 + 1)[0 ..< n])
+      lv.items.add("é".repeat(n))
+      lv.invalidate()
+      discard f.paintIfDirty()
+
+  test "Ctrl / Shift-click do not start a drag selection":
+    let f = newShown()
+    let lv = mkList(f, n = 10)
+    lv.multiSelect = true
+    f.clickItem(lv, 2, {ssCtrl})
+    var p = lv.fpos(ctr(lv.captionRect(5)))
+    f.feed(ekMouseMove, p.x, p.y, shift = {ssLeft})
+    check lv.selCount == 1 and lv.selected(2)
+    f.feed(ekMouseUp, p.x, p.y)
+    f.clickItem(lv, 1, {ssShift})
+    p = lv.fpos(ctr(lv.captionRect(7)))
+    f.feed(ekMouseMove, p.x, p.y, shift = {ssLeft})
+    check lv.selected(2) and not lv.selected(7)
+    f.feed(ekMouseUp, p.x, p.y)
+    p = lv.fpos(ctr(lv.captionRect(1)))      # a plain press still drags
+    f.feed(ekMouseDown, p.x, p.y)
+    p = lv.fpos(ctr(lv.captionRect(4)))
+    f.feed(ekMouseMove, p.x, p.y, shift = {ssLeft})
+    check lv.selCount == 4
+
+  test "multiSelect without extendedSelect: plain Space toggles":
+    let f = newShown()
+    let lv = mkList(f, n = 5)
+    lv.multiSelect = true
+    lv.extendedSelect = false
+    lv.setFocus()
+    lv.itemIndex = 1
+    f.tap keySpace
+    check not lv.selected(1)
+    f.tap keySpace
+    check lv.selected(1)
+
+  test "setSelection without focus scrolls to the first index":
+    let f = newShown()
+    let lv = mkList(f, n = 100)
+    lv.multiSelect = true
+    lv.setSelection(@[80, 90])
+    check lv.itemIndex == 80 and lv.scrollPos.y > 0
+    let r = lv.captionRect(80)
+    check r.bottom <= lv.viewport.bottom + 1 and r.y >= lv.viewport.y - 1
+
+  test "type-ahead: shifted symbols ignored, shifted letters accepted":
+    let f = newShown()
+    let lv = mkList(f)
+    lv.items.add("Apple")
+    lv.items.add("Banana")
+    lv.items.add("1st")
+    lv.setFocus()
+    lv.itemIndex = 0
+    f.tap 'b'.key, {ssShift}
+    check lv.itemIndex == 1
+    f.tap '1'.key, {ssShift}
+    check lv.itemIndex == 1
+
+  test "ImageList changes notify the view":
+    let f = newShown()
+    let lv = mkList(f, style = vsIcon, n = 2)
+    let il = newImageList(32, 32)
+    lv.largeImages = il
+    f.settle()
+    discard f.paintIfDirty()
+    let v0 = il.version
+    il.add(icon(rgb(255, 0, 0)))
+    check il.version == v0 + 1 and f.paintIfDirty()
+    var calls = 0
+    let id = il.addListener(proc() = inc calls)
+    il[0] = icon(rgb(0, 255, 0))
+    il.width = 20
+    il.removeListener(id)
+    il.delete(0)
+    check calls == 2
+    lv.largeImages = nil
+    discard f.paintIfDirty()
+    il.add(icon(rgb(0, 0, 1)))
+    check not f.paintIfDirty()

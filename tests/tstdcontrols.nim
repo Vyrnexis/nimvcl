@@ -2,7 +2,7 @@
 ## StatusBar, ToolBar, PageControl/TabControl, FlowPanel, GridPanel).
 ## Headless (offscreen SDL): events go through Application.dispatch.
 
-import std/[unittest, monotimes, times]
+import std/[unittest, monotimes, times, unicode]
 import nimvcl/core/[types, control, form, application, input, layout]
 import nimvcl/platform/[events, window]
 import nimvcl/controls/[common, button, edit, panel, progressbar, trackbar,
@@ -526,6 +526,97 @@ suite "standard controls":
     check tc.tabIndex == 3
     Application.processMessages()
 
+  test "tabcontrol: strip scroll resets once the tabs fit again (review 2)":
+    let f = newShown(300, 200)
+    let t = newTabControl(f, @["Alpha tab", "Beta tab", "Gamma tab", "Delta tab",
+                               "Epsilon", "Zeta tab", "Eta tab", "Theta tab"],
+                          0, 0, 250, 150)
+    t.tabIndex = 7
+    check t.overflowing and t.firstVisibleTab > 0
+    t.width = 2000
+    check not t.overflowing
+    check t.tabRect(0).w > 0
+    check t.firstVisibleTab == 0
+    let r = t.tabRect(2)
+    check t.tabAt(r.x + 3, r.y + 3) == 2
+    t.width = 250
+    t.tabIndex = 7
+    t.width = 2000
+    f.click(t.fx(t.tabRect(1).x + 5), t.fy(10))      # stale scroll must not misplace clicks
+    check t.tabIndex == 1
+
+  test "pagecontrol: removing a sheet before the active one keeps the active sheet (review 8)":
+    let f = newShown()
+    let pc = newPageControl(f, 0, 0, 300, 200)
+    let a = newTabSheet(pc, "A")
+    let b = newTabSheet(pc, "B")
+    let c = newTabSheet(pc, "C")
+    pc.tabIndex = 1
+    var changes = 0
+    pc.onChange = proc(s: Control) = inc changes
+    pc.removeControl a
+    check pc.activePage == b and pc.activePageIndex == 0 and changes == 0
+    check b.visible and not c.visible
+    # inserting a sheet before it also keeps B active
+    let d = newTabSheet(pc, "D")
+    pc.insertControl d, 0
+    check pc.activePage == b and pc.activePageIndex == 1 and changes == 0
+    check b.visible and not d.visible
+    # removing the active sheet activates its neighbour and fires onChange
+    pc.removeControl b
+    check changes == 1 and pc.activePage != nil and pc.activePage.visible
+    check pc.activePage == d or pc.activePage == c
+    check pc.activePage.visible and pc.pageCount == 2
+    pc.removeControl c
+    pc.removeControl d
+    check pc.activePage == nil and pc.activePageIndex == -1
+
+  test "pagecontrol: disabled and tab-hidden sheets are not selectable (review 24)":
+    let f = newShown()
+    let pc = newPageControl(f, 0, 0, 400, 200)
+    let a = newTabSheet(pc, "A")
+    let b = newTabSheet(pc, "B")
+    let c = newTabSheet(pc, "C")
+    let d = newTabSheet(pc, "D")
+    b.enabled = false
+    c.tabVisible = false
+    lay f
+    check not c.tabVisible
+    check pc.tabRect(2).w == 0                          # no tab drawn
+    check pc.tabRect(3).x == pc.tabRect(0).right + pc.tabRect(1).w
+    pc.setFocus()
+    f.tap(keyRight)
+    check pc.activePage == d                            # skipped B (disabled) and C (hidden)
+    f.tap(keyLeft)
+    check pc.activePage == a
+    f.tap(keyEnd);  check pc.activePage == d
+    f.tap(keyHome); check pc.activePage == a
+    f.tap(keyTab, {ssCtrl})
+    check pc.activePage == d
+    f.tap(keyTab, {ssCtrl})
+    check pc.activePage == a
+    f.tap(keyTab, {ssCtrl, ssShift})
+    check pc.activePage == d
+    # click on the disabled tab does nothing
+    pc.activePage = a
+    let r = pc.tabRect(1)
+    f.click(pc.fx(r.x + 4), pc.fy(r.y + 4))
+    check pc.activePage == a
+    # a click where the hidden tab would be hits D, not C
+    let rd = pc.tabRect(3)
+    f.click(pc.fx(rd.x + 4), pc.fy(rd.y + 4))
+    check pc.activePage == d
+    # code can still select a disabled sheet
+    pc.activePage = b
+    check pc.activePage == b
+    # hiding the active sheet's tab moves the selection
+    pc.activePage = a
+    a.tabVisible = false
+    check pc.activePage == d
+    a.tabVisible = true
+    c.tabVisible = true
+    check pc.tabRect(2).w > 0
+
   # -------------------------------------------------------------- FlowPanel
   test "flowpanel: wraps left to right":
     let f = newShown()
@@ -663,3 +754,85 @@ suite "standard controls":
     f.activeControl = sp
     check f.ui.needsPaint
 
+
+  test "progressbar: min=/max= clamp through position= (onChange, repaint)":
+    let p = newProgressBar()
+    p.max = 100
+    p.position = 80
+    var seen = 0
+    p.onChange = proc(s: Control) = inc seen
+    p.max = 50
+    check p.position == 50 and seen == 1
+    p.min = 60
+    check p.position == 60 and p.max == 60 and seen == 2
+    p.min = 0
+    check seen == 2                                # position unchanged: no event
+
+  test "statusbar: panelRect out of range is empty; width/alignment repaint":
+    let f = newShown()
+    let sb = newStatusBar(f)
+    let p = sb.addPanel("a", 80)
+    sb.addPanel("b", 80)
+    check sb.panelRect(-1) == rectF(0, 0, 0, 0)
+    check sb.panelRect(2) == rectF(0, 0, 0, 0)
+    check sb.panelRect(0).w == 80
+    discard f.paintIfDirty()
+    check not f.ui.needsPaint
+    p.width = 120
+    check p.width == 120 and f.ui.needsPaint and sb.panelRect(1).x == 120
+    discard f.paintIfDirty()
+    p.alignment = taRight
+    check p.alignment == taRight and f.ui.needsPaint
+
+  test "toolbar button preferred size uses its own theme":
+    let f = newShown()
+    let bar = newToolBar(f)
+    let tb = newToolButton(bar, "x")
+    check tb.preferredSize.h == tb.theme.controlHeight
+
+  test "mnemonics: non-ASCII characters, case-insensitive":
+    check parseMnemonic("&Éclair").ch == '\xE9'
+    check parseMnemonic("&éclair").ch == '\xE9'
+    check parseMnemonic("&Save").ch == 's'
+    check parseMnemonic("&Éclair").text == "Éclair" and parseMnemonic("a&éb").index == 1
+    check mnemonicOf("&Ωmega") == '\0'           # beyond Latin-1: no char value
+    check mnemonicRune("&Ωmega", 1) == "ω".runeAt(0)
+    let f = newShown()
+    let b = newButton(f, "&éclair", 10, 10, 80, 28)
+    var hit = 0
+    b.onClick = proc(s: Control) = inc hit
+    check b.activateMnemonic('\xE9')
+    check hit == 1
+
+  test "button: Enter activates once per press, not per auto-repeat":
+    let f = newShown()
+    let b = newButton(f, "ok", 10, 10, 80, 28)
+    var n = 0
+    b.onClick = proc(s: Control) = inc n
+    b.setFocus()
+    f.tap(keyEnter)
+    check n == 1
+    Application.dispatch(PlatformEvent(kind: ekKeyDown, windowId: f.win.id,
+                                       key: keyEnter, repeat: true))
+    check n == 1
+
+  test "toolbar repaints when its ImageList changes; listener is released":
+    let f = newShown()
+    let bar = newToolBar(f)
+    let il = newImageList(16, 16)
+    bar.images = il
+    discard f.paintIfDirty()
+    check not f.ui.needsPaint
+    let v = il.version
+    il.add newImage(16, 16, rgb(255, 0, 0))
+    check il.version > v and f.ui.needsPaint
+    discard f.paintIfDirty()
+    let il2 = newImageList(16, 16)
+    bar.images = il2                               # old list no longer notifies
+    discard f.paintIfDirty()
+    il.add newImage(16, 16, rgb(0, 255, 0))
+    check not f.ui.needsPaint
+    bar.images = nil
+    discard f.paintIfDirty()
+    il2.add newImage(16, 16, rgb(0, 0, 255))
+    check not f.ui.needsPaint

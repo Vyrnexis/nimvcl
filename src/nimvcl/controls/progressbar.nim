@@ -42,14 +42,14 @@ proc `position=`*(p: ProgressBar, v: int) =
 proc `min=`*(p: ProgressBar, v: int) =
   p.fMin = v
   if p.fMax < v: p.fMax = v
-  p.fPos = system.max(p.fPos, v)
   p.invalidate()
+  p.position = p.fPos      # clamps into the new range and fires onChange
 
 proc `max=`*(p: ProgressBar, v: int) =
   p.fMax = v
   if p.fMin > v: p.fMin = v
-  p.fPos = system.min(p.fPos, v)
   p.invalidate()
+  p.position = p.fPos      # clamps into the new range and fires onChange
 
 proc `step=`*(p: ProgressBar, v: int) = p.fStep = v
 

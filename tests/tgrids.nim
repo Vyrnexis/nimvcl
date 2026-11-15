@@ -793,3 +793,198 @@ suite "grids":
     echo "  [grid perf] cellAt: ", us.formatFloat(ffDecimal, 2), " us/call"
     check acc > 0
     check us < 200
+
+# ------------------------------------------------------ review regressions
+
+suite "axis sizes (incremental)":
+  test "interleaved sets, resets, counts and queries match a naive model":
+    randomize(11)
+    var a = initAxis(300, 20)
+    var sizes = newSeq[float32](300)
+    var follows = newSeq[bool](300)        # slot without an own override
+    for i in 0 ..< 300:
+      sizes[i] = 20
+      follows[i] = true
+    var def = 20'f32
+    for k in 0 ..< 600:
+      case rand(9)
+      of 0:                                   # reset one slot to the default
+        let i = rand(299)
+        a.setSize(i, def)
+        sizes[i] = def
+        follows[i] = true
+      of 1:                                   # new default: overrides keep sizes
+        let newDef = float32(10 + rand(20))
+        for i in 0 ..< 300:
+          if follows[i]: sizes[i] = newDef
+        a.setDefaultSize(newDef)
+        def = newDef
+      else:
+        let i = rand(299)
+        let s = float32(rand(50))
+        a.setSize(i, s)
+        sizes[i] = s
+        follows[i] = s == def
+      if k mod 7 == 0:                        # queries between the changes
+        var acc = 0.0
+        for i in 0 ..< 300:
+          check abs(a.offset(i) - acc) < 1e-3
+          acc += float64(sizes[i])
+        check abs(a.total - acc) < 1e-3
+    # shrinking drops the overrides beyond the new count and keeps the sums
+    a.setCount(100)
+    var acc = 0.0
+    for i in 0 ..< 100: acc += float64(sizes[i])
+    check abs(a.total - acc) < 1e-3 and abs(a.offset(100) - acc) < 1e-3
+    a.resetSizes()
+    check a.total == 100.0 * float64(def)
+
+suite "grids (review fixes)":
+  setup:
+    Application.init()
+    Application.forceScale = 0
+    clip = ""
+  teardown:
+    Application.theme = themeLight()
+    for f in openForms(): f.freeWindow()
+
+  test "20,000 rowHeights[r]= in a loop stay fast":
+    let f = newShown()
+    let g = newDrawGrid(f, GX, GY, 400, 130)
+    g.colCount = 3
+    g.rowCount = 30000
+    let t0 = getMonoTime()
+    for r in 1 ..< 20000: g.rowHeights[r] = 20 + float32(r mod 7)
+    let ms = float((getMonoTime() - t0).inNanoseconds) / 1e6
+    echo "  [grid perf] 20k rowHeights[r]=: ", ms.formatFloat(ffDecimal, 1), " ms"
+    check ms < (when defined(release): 500.0 else: 4000.0)
+    var expect = 24.0 + 0.0                      # row 0 keeps the default
+    for r in 1 ..< 20000: expect += float64(20 + float32(r mod 7))
+    expect += 10000.0 * 24.0
+    check abs(g.contentSize.h.float64 - expect) < 1.0
+    f.settle()
+    check g.rowHeight(5) == 25 and g.rowY(1) == g.viewport.y + 24
+
+  test "colCount= / rowCount= keep the requested fixed counts":
+    let f = newShown()
+    let g = newStringGrid(f, GX, GY, 400, 130)
+    g.colCount = 5
+    g.rowCount = 10
+    g.fixedCols = 2
+    g.colCount = 0
+    g.rowCount = 0
+    check g.fixedCols == 0 and g.fixedRows == 0
+    g.colCount = 5
+    g.rowCount = 10
+    check g.fixedCols == 2 and g.fixedRows == 1
+    g.colCount = 1                               # clamped at use, not forgotten
+    check g.fixedCols == 1
+    g.colCount = 4
+    check g.fixedCols == 2
+    g.fixedCols = 1                              # an explicit request replaces it
+    g.colCount = 0
+    g.colCount = 4
+    check g.fixedCols == 1
+
+  test "Tab in the editor at the first / last cell commits and leaves the grid":
+    let f = newShown()
+    let g = mkString(f, cols = 4, rows = 4)
+    let other = newEdit(f, "x", 10, 250, 100)
+    f.settle()
+    f.activeControl = g
+    g.selectCell(3, 3)
+    check g.startEdit()
+    g.editor.text = "LAST"
+    f.tap(keyTab)
+    check not g.editing and g.cells[3, 3] == "LAST"
+    check (g.col, g.row) == (3, 3) and f.activeControl == other
+    f.activeControl = g
+    g.selectCell(1, 1)
+    check g.startEdit()
+    f.tap(keyTab, {ssShift})
+    check not g.editing and (g.col, g.row) == (1, 1) and f.activeControl == other
+    # inside the grid it still moves on
+    f.activeControl = g
+    g.selectCell(1, 1)
+    check g.startEdit()
+    f.tap(keyTab)
+    check (g.col, g.row) == (2, 1) and g.editing == false
+
+  test "setSelection and a paste fire onSelectionChanged once":
+    let f = newShown()
+    let g = mkString(f)
+    var cnt = 0
+    g.onSelectionChanged = proc(s: Control) = inc cnt
+    g.setSelection(1, 1, 3, 3)
+    check cnt == 1 and g.selection == (1, 1, 3, 3)
+    g.setSelection(2, 2, 4, 4)
+    check cnt == 2
+    g.setSelection(2, 2, 4, 4)                   # nothing changed
+    check cnt == 2
+    g.onSelectCell = proc(s: Control, c, r: int, ok: var bool) = ok = false
+    g.setSelection(1, 1, 2, 2)                   # vetoed
+    check cnt == 2
+    g.onSelectCell = nil
+    g.setSelection(1, 1, 1, 1)
+    cnt = 0
+    clip = "a\tb\nc\td"
+    g.pasteFromClipboard()
+    check cnt == 1 and g.selection == (1, 1, 2, 2)
+
+  test "a double click on a header does not sort twice":
+    let f = newShown()
+    let g = mkString(f, cols = 3, rows = 6)
+    for r in 1 ..< 6: g.cells[1, r] = $((r * 7) mod 5)
+    var clicked = 0
+    g.onHeaderClick = proc(s: Control, c: int) = inc clicked
+    g.sortOnHeaderClick = true
+    f.clickCell(g, 1, 0)
+    check g.sortAscending and clicked == 1
+    f.clickCell(g, 1, 0, shift = {ssDouble}, clicks = 2)
+    check g.sortAscending and clicked == 1 and g.sortColumn == 1
+
+  test "Delete on a million-row selection only visits stored cells":
+    let f = newShown()
+    let g = newStringGrid(f, GX, GY, 400, 130)
+    g.colCount = 50
+    g.rowCount = 1_000_000
+    g.cells[2, 5] = "keep?"
+    g.cells[49, 999_999] = "far"
+    f.settle()
+    f.activeControl = g
+    var sets = 0
+    g.onSetEditText = proc(s: Control, c, r: int, v: string) = inc sets
+    let t0 = getMonoTime()
+    f.tap('a'.key, {ssCtrl})
+    f.tap(keyDelete)
+    let ms = float((getMonoTime() - t0).inNanoseconds) / 1e6
+    check g.cells[2, 5] == "" and g.cells[49, 999_999] == "" and sets == 2
+    check ms < (when defined(release): 300.0 else: 2000.0)
+
+  test "compareCells: nan / inf are text, not numbers":
+    check compareCells("nan", "5") > 0 and compareCells("5", "nan") < 0
+    check compareCells("inf", "5") > 0 and compareCells("-inf", "5") > 0
+    check compareCells("2", "10") < 0
+    check compareCells("nan", "apple") > 0      # compared as text (n > a)
+    check compareCells("Infinity", "9") > 0
+
+  test "cells[]= outside the grid does not repaint; insert / delete row shift the cursor":
+    let f = newShown()
+    let g = mkString(f, cols = 3, rows = 6)
+    f.settle()
+    discard f.paintIfDirty()
+    g.cells[9, 9] = "x"
+    check not f.paintIfDirty()
+    g.sortByColumn(1)
+    g.selectCell(2, 4)
+    g.insertRow(2)                               # above the current row
+    check g.row == 5 and g.sortColumn == -1
+    g.sortByColumn(1)
+    g.deleteRow(2)
+    check g.row == 4 and g.sortColumn == 1        # order of the rest is kept
+    g.selectCell(2, 3)
+    g.deleteRow(3)                               # the current row itself
+    check g.row == 3
+    g.selectCell(2, 1)
+    g.insertRow(4)                               # below: unchanged
+    check g.row == 1

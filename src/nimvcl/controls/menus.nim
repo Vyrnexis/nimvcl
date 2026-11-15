@@ -65,6 +65,8 @@ type
   PopupMenu* = ref object of Component
     fRoot: MenuItem
     fTargets: seq[Control]
+    fShown: PopupWindow           # the last popup window this menu opened
+    fImgListener: int             # id in the image list (0: none)
     onPopup*: proc(sender: PopupMenu)
 
   MenuPanel = ref object of Container
@@ -88,6 +90,7 @@ type
     fRoot: MenuItem
     fOpen, fHot: int
     fDrop: PopupWindow
+    fImgListener: int
 
 var
   menuOpening*: proc()   ## called just before a dropdown/popup menu is built (actions refresh here)
@@ -589,7 +592,15 @@ proc newPopupMenu*(owner: Component = nil): PopupMenu =
 func items*(m: PopupMenu): MenuItem = m.fRoot
   ## The root item; its sub-items are the menu's entries.
 func images*(m: PopupMenu): ImageList = m.fRoot.fImages
-proc `images=`*(m: PopupMenu, v: ImageList) = m.fRoot.fImages = v
+proc `images=`*(m: PopupMenu, v: ImageList) =
+  ## Icons of the menu; the open popup repaints when the list changes.
+  let old = m.fRoot.fImages
+  if old != nil and m.fImgListener != 0: old.removeListener m.fImgListener
+  m.fImgListener = 0
+  m.fRoot.fImages = v
+  if v != nil:
+    m.fImgListener = v.addListener(proc() =
+      if m.fShown != nil and m.fShown.isOpen: m.fShown.content.invalidate())
 proc add*(m: PopupMenu, item: MenuItem): MenuItem {.discardable.} = m.fRoot.add item
 proc addItem*(m: PopupMenu, caption: string, onClick: MenuItemEvent = nil,
               shortcut = noShortcut): MenuItem {.discardable.} =
@@ -597,10 +608,12 @@ proc addItem*(m: PopupMenu, caption: string, onClick: MenuItemEvent = nil,
 proc addSeparator*(m: PopupMenu): MenuItem {.discardable.} = m.fRoot.addSeparator()
 
 proc close*(m: PopupMenu) =
-  ## Closes the menu if it is open (any menu chain of the forms it is used in).
-  for c in m.fTargets:
-    let f = c.menuForm
-    if f != nil and menuChain(f).len > 0: closePopup(menuChain(f)[0])
+  ## Closes the menu (and its open submenus) if it is open. Other menus, such
+  ## as an open main-menu dropdown, are left alone.
+  if m.fShown != nil:
+    let p = m.fShown
+    m.fShown = nil
+    if p.isOpen: closePopup(p)
 
 proc popup*(m: PopupMenu, form: Form, x, y: float32,
             selectFirst = false): PopupWindow {.discardable.} =
@@ -608,14 +621,15 @@ proc popup*(m: PopupMenu, form: Form, x, y: float32,
   ## coordinates (it flips/slides to stay on screen). Returns nil when the
   ## form is not shown or the menu has no visible items.
   if form == nil or not form.visible or not form.hasWindow: return nil
+  if m.onPopup != nil: m.onPopup(m)       # may add / show / hide items
   var any = false
   for it in m.fRoot:
     if not it.fHidden: any = true
   if not any: return nil
-  if m.onPopup != nil: m.onPopup(m)
   if RootRef(m) notin form.popupMenus: form.popupMenus.add m
   registerForm(form)
-  showPanel(form, m.fRoot, rectF(x, y, 0, 0), plBelow, nil, selectFirst)
+  result = showPanel(form, m.fRoot, rectF(x, y, 0, 0), plBelow, nil, selectFirst)
+  m.fShown = result
 
 proc popupAt*(m: PopupMenu, c: Control, selectFirst = false): PopupWindow {.discardable.} =
   ## Shows the menu below the control (aligned to its left edge).
@@ -624,27 +638,49 @@ proc popupAt*(m: PopupMenu, c: Control, selectFirst = false): PopupWindow {.disc
   let p = c.clientToForm(pointF(0, c.height))
   m.popup(f, p.x, p.y, selectFirst)
 
+proc resolveMenu(m: PopupMenu, c: Control) =
+  ## Registers `m` (its shortcuts, context-menu keys) in the form `c` is in;
+  ## a no-op while `c` is not in a form.
+  let f = c.menuForm
+  if f != nil:
+    if RootRef(m) notin f.popupMenus: f.popupMenus.add m
+    registerForm(f)
+
 proc attachPopupMenu*(c: Control, m: PopupMenu) =
   ## Makes `m` the context menu of `c`: right click (on release, after the
   ## control's own `onMouseUp`), Shift+F10 and the Menu key while `c` or a
   ## control inside it has the focus. Also registers the menu's shortcuts in
   ## the form. A control can have several menus; the last attached wins.
+  ## `c` need not be in a form yet: the menu registers itself with the form the
+  ## first time `c` is entered, clicked or gets a key (and right away when `c`
+  ## is already in a form).
   m.fTargets.add c
-  let f = c.menuForm
-  if f != nil:
-    if RootRef(m) notin f.popupMenus: f.popupMenus.add m
-    registerForm(f)
-  let old = c.onMouseUp
+  m.resolveMenu c
   let mm = m
+  let oldEnter = c.onEnter
+  c.onEnter = proc(sender: Control) =
+    mm.resolveMenu sender
+    if oldEnter != nil: oldEnter(sender)
+  let oldDown = c.onMouseDown
+  c.onMouseDown = proc(sender: Control, button: MouseButton, shift: ShiftState,
+                       x, y: float32) =
+    mm.resolveMenu sender
+    if oldDown != nil: oldDown(sender, button, shift, x, y)
+  let oldKey = c.onKeyDown
+  c.onKeyDown = proc(sender: Control, key: var Key, shift: ShiftState) =
+    mm.resolveMenu sender
+    if oldKey != nil: oldKey(sender, key, shift)
+  let old = c.onMouseUp
   c.onMouseUp = proc(sender: Control, button: MouseButton, shift: ShiftState,
                      x, y: float32) =
     if old != nil: old(sender, button, shift, x, y)
-    if button == mbRight and mm.fTargets.find(sender) >= 0 and
-       mm == popupMenuOfControl(sender.menuForm, sender):
-      let fm = sender.menuForm
-      if fm != nil:
-        let p = sender.clientToForm(pointF(x, y))
-        mm.popup(fm, p.x, p.y)
+    if button == mbRight and mm.fTargets.find(sender) >= 0:
+      mm.resolveMenu sender
+      if mm == popupMenuOfControl(sender.menuForm, sender):
+        let fm = sender.menuForm
+        if fm != nil:
+          let p = sender.clientToForm(pointF(x, y))
+          mm.popup(fm, p.x, p.y)
 
 proc popupMenuOfControl(f: Form, c: Control): PopupMenu =
   ## The (last attached) popup menu of `c` or its nearest ancestor with one.
@@ -683,7 +719,17 @@ proc initMainMenu*(m: MainMenu, owner: Component = nil) =
 
 func items*(m: MainMenu): MenuItem = m.fRoot
 func images*(m: MainMenu): ImageList = m.fRoot.fImages
-proc `images=`*(m: MainMenu, v: ImageList) = m.fRoot.fImages = v
+proc `images=`*(m: MainMenu, v: ImageList) =
+  ## Icons of the menu; the bar and an open dropdown repaint when the list
+  ## changes.
+  let old = m.fRoot.fImages
+  if old != nil and m.fImgListener != 0: old.removeListener m.fImgListener
+  m.fImgListener = 0
+  m.fRoot.fImages = v
+  if v != nil:
+    m.fImgListener = v.addListener(proc() =
+      m.invalidate()
+      if m.fDrop != nil and m.fDrop.isOpen: m.fDrop.content.invalidate())
 proc add*(m: MainMenu, item: MenuItem): MenuItem {.discardable.} = m.fRoot.add item
 proc addItem*(m: MainMenu, caption: string, onClick: MenuItemEvent = nil,
               shortcut = noShortcut): MenuItem {.discardable.} =
@@ -826,6 +872,7 @@ proc handleMenuKey(f: Form, key: var Key, shift: ShiftState) =
       pm.popupAt(target, true)
       key = Key(0)
       return
+  if ssSuper in shift: return            # Super+key is never a menu shortcut
   if mods == {} and (uint32(k) < 0x20 or uint32(k) > 0x7e) and k notin [
       keyF1, keyF2, keyF3, keyF4, keyF5, keyF6, keyF7, keyF8, keyF9, keyF10, keyF11,
       keyF12, keyDelete, keyInsert, keyHome, keyEnd, keyPageUp, keyPageDown]:

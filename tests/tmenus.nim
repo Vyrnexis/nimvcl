@@ -429,3 +429,94 @@ suite "main menu":
       closeAllPopups(x.f)
     Application.theme = themeLight()
     check x.f.paintIfDirty() or true
+
+  test "popup(): onPopup runs before the visible-items check (review 3)":
+    let x = build()
+    let pm = newPopupMenu(x.f)
+    pm.onPopup = proc(m: PopupMenu) =
+      if m.items.count == 0: m.addItem("dynamic")
+    let p = pm.popup(x.f, 10, 100)
+    check p != nil and pm.items.count == 1
+    pm.close()
+    let pm2 = newPopupMenu(x.f)
+    let only = pm2.addItem("only")
+    pm2.onPopup = proc(m: PopupMenu) = only.visible = false
+    check pm2.popup(x.f, 10, 100) == nil and chainLen(x.f) == 0
+    pm2.onPopup = proc(m: PopupMenu) = only.visible = true
+    check pm2.popup(x.f, 10, 100) != nil
+    pm2.close()
+
+  test "attachPopupMenu before the control is in a form (review 4)":
+    let x = build()
+    let pm = newPopupMenu(x.f)
+    pm.addItem("&Paste", mk("ppaste"), shortcut("Ctrl+K"))
+    let panel = newPanel(nil, "ctx", 20, 80, 200, 150)
+    attachPopupMenu(panel, pm)
+    x.f.insertControl panel
+    let b = newButton(panel, "b", 10, 10, 80, 28)
+    x.f.activeControl = b                           # entering the panel's button
+    x.f.win.click(60, 120, mbRight)
+    check popupMenuOf(panel) == pm
+    check chainLen(x.f) == 1
+    closeAllPopups(x.f)
+    # Shift+F10 / Menu key on a control attached before insertion
+    let pm2 = newPopupMenu(x.f)
+    pm2.addItem("&Q", mk("q"))
+    let pnl2 = newPanel(nil, "c2", 240, 80, 100, 100)
+    pnl2.tabStop = true
+    attachPopupMenu(pnl2, pm2)
+    x.f.insertControl pnl2
+    x.f.activeControl = pnl2
+    x.f.tap(keyApplication)
+    check chainLen(x.f) == 1
+    closeAllPopups(x.f)
+
+  test "PopupMenu.close closes only its own popup (review 11)":
+    let x = build()
+    let pm = newPopupMenu(x.f)                      # not attached to any control
+    pm.addItem("Y")
+    check pm.popup(x.f, 10, 100) != nil and chainLen(x.f) == 1
+    pm.close()
+    check chainLen(x.f) == 0
+    # an unrelated main-menu dropdown stays open
+    x.mm.openDropdown(0, true)
+    check chainLen(x.f) == 1
+    pm.close()
+    check chainLen(x.f) == 1
+    closeAllPopups(x.f)
+    # a popup shown, closed by the user, then close() again: harmless
+    let p = pm.popup(x.f, 10, 100)
+    closePopup(p)
+    x.mm.openDropdown(1, true)
+    pm.close()
+    check chainLen(x.f) == 1
+    closeAllPopups(x.f)
+
+  test "Super+key never fires a menu shortcut (review 22)":
+    let x = build()
+    x.f.tap('o', {ssCtrl, ssSuper})
+    check log.len == 0
+    x.f.tap('o', {ssCtrl})
+    check log == @["open"]
+
+  test "images= subscribes to the image list and unsubscribes on replace":
+    let x = build()
+    let il = newImageList(16, 16)
+    x.mm.images = il
+    discard x.f.paintIfDirty()
+    il.width = 20                                   # list changed: bar repaints
+    check x.f.paintIfDirty()
+    x.mm.images = nil
+    discard x.f.paintIfDirty()
+    il.width = 24
+    check not x.f.paintIfDirty()
+    let pm = newPopupMenu(x.f)
+    pm.addItem("a")
+    pm.images = il
+    let p = pm.popup(x.f, 10, 100)
+    check p != nil
+    discard x.f.paintIfDirty()
+    Application.paintForms()
+    il.width = 18
+    pm.images = nil
+    closeAllPopups(x.f)

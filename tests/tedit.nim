@@ -1,11 +1,12 @@
 ## Edit tests, headless (offscreen SDL): events go through Application.dispatch
 ## like the loop does.
 
-import std/[unittest, unicode, monotimes, times]
-import nimvcl/core/[types, control, form, application, input]
+import std/[unittest, unicode, monotimes, times, importutils]
+import nimvcl/core/[types, control, form, application, input, timer]
 import nimvcl/platform/[events, window]
 import nimvcl/graphics/context
 import nimvcl/controls/[edit, editmodel]
+privateAccess(Edit)
 
 var
   clip = ""
@@ -363,7 +364,7 @@ suite "edit":
     f.ctrl('a'); f.typeText("short")
     check e.scrollOffset == 0
 
-  test "focus by Tab with autoSelect, click places a caret instead":
+  test "focus by Tab with autoSelect, a click that focuses keeps the select-all":
     let f = newShown()
     let a = f.mkEdit("first")
     let b = f.mkEdit("second one", y = 50)
@@ -379,7 +380,10 @@ suite "edit":
     check a.focused
     f.mouse(ekMouseDown, f.xAfter(b, "sec") + 1, 64)
     f.mouse(ekMouseUp, f.xAfter(b, "sec") + 1, 64)
-    check b.focused and b.selLength == 0 and b.caretPos == 3
+    check b.focused and b.selText == "second one"     # the press that focused keeps it
+    f.mouse(ekMouseDown, f.xAfter(b, "sec") + 1, 64)  # b already focused: a caret
+    f.mouse(ekMouseUp, f.xAfter(b, "sec") + 1, 64)
+    check b.selLength == 0 and b.caretPos == 3
 
   test "Tab and Enter are not swallowed":
     let f = newShown()
@@ -485,3 +489,63 @@ suite "edit":
     check e.text.len > 0 and validateUtf8(e.text) == -1
     check n >= 5
 
+
+  test "Shift+Backspace deletes like Backspace":
+    let f = newShown()
+    let e = f.mkEdit("Hello")
+    e.setFocus()
+    f.key(keyBackspace, {ssShift})
+    check e.text == "Hell"
+    f.key(keyBackspace, {ssShift, ssCtrl})
+    check e.text == ""
+
+  test "autoSelect: the press that focuses keeps select-all; a drag still selects":
+    let f = newShown()
+    let a = f.mkEdit("first")
+    let b = f.mkEdit("second one", y = 50)
+    b.autoSelect = true
+    a.setFocus()
+    f.settle()
+    let x0 = f.xAfter(b, "sec")
+    f.mouse(ekMouseDown, x0, 64)
+    f.mouse(ekMouseUp, x0, 64)
+    check b.focused and b.selText == "second one"
+    # now drag from another edit into b: focus press, then a real drag
+    a.setFocus()
+    f.mouse(ekMouseDown, x0, 64)
+    f.mouse(ekMouseMove, x0 + 1, 64)                  # within the click slop
+    check b.selText == "second one"
+    f.mouse(ekMouseMove, f.xAfter(b, "second"), 64)
+    f.mouse(ekMouseUp, f.xAfter(b, "second"), 64)
+    check b.selText == "ond"
+
+  test "replaceRange restores the selection when the filter rejects the insert":
+    let f = newShown()
+    let e = f.mkEdit("12345")
+    e.numbersOnly = true
+    e.select(3, 2)
+    check not e.replaceRange(1, 2, "ab")
+    check e.text == "12345" and e.selStart == 3 and e.selLength == 2
+    e.caretPos = 2
+    check not e.replaceRange(0, 1, "x")
+    check e.caretPos == 2 and e.selLength == 0
+
+  test "paste maps tabs and line breaks to spaces":
+    let f = newShown()
+    let e = f.mkEdit("")
+    clip = "a\tb\r\nc\nd"
+    e.pasteFromClipboard()
+    check e.text == "a b c d"
+
+  test "blink timer stops while the form is hidden":
+    let f = newShown()
+    let e = f.mkEdit("x")
+    e.setFocus()
+    check e.blink != nil and e.blink.enabled
+    f.hide()
+    Application.processMessages(10)
+    check not e.isShowing
+    e.blink.onTimer(e.blink)                          # a tick on a hidden form
+    check not e.blink.enabled
+    f.show()
+    check e.isShowing and e.blink.enabled

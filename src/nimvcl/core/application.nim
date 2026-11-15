@@ -47,7 +47,6 @@ export popup
 type
   TApplication* = ref object
     terminated: bool
-    initialised: bool
     onIdle*: proc()                       ## after each batch of events, before blocking
     onException*: proc(e: ref Exception)  ## handler errors; default re-raises
     idleHooks: seq[tuple[id: string, hook: proc()]]
@@ -66,6 +65,7 @@ type
     plain: proc() {.nimcall.}
     run: proc(box, handler: pointer) {.nimcall.}
     box, handler: pointer
+    drop: proc(box: pointer) {.nimcall.}   ## frees `box` without running the handler
 
 var
   Application* = TApplication()           ## the singleton
@@ -80,7 +80,6 @@ proc init*(a: TApplication) =
   ## `terminate` (idempotent otherwise; `Form` and `Timer` also initialise SDL
   ## on demand).
   initPlatform()
-  a.initialised = true
   a.terminated = false
 
 proc forms*(a: TApplication): seq[Form] = openForms()
@@ -107,7 +106,8 @@ proc `theme=`*(a: TApplication, t: Theme) =
 proc forceScale*(a: TApplication): float32 = forcedScale()
 proc `forceScale=`*(a: TApplication, s: float32) =
   ## Forces the display scale (headless testing; 0 = real density). Affects
-  ## windows created afterwards and re-syncs open ones.
+  ## windows created afterwards; open windows are re-synced (their logical size
+  ## is kept, the window and the render scale follow).
   setForcedScale(s)
 
 proc clipboard*(a: TApplication): string = getClipboard()
@@ -139,13 +139,19 @@ proc trampoline[T](box, handler: pointer) {.nimcall.} =
   deallocShared(box)
   h(data)
 
+proc dropBox[T](box: pointer) {.nimcall.} =
+  let b = cast[ptr T](box)
+  `=destroy`(b[])
+  deallocShared(box)
+
 proc queue*[T](a: TApplication, data: sink T, handler: proc(data: T) {.nimcall.}) =
   ## Moves `data` to the UI thread and calls `handler(data)` there. Thread-safe.
   ## `data` must own what it references (see the module comment); `handler`
   ## cannot capture anything, so nothing else is shared between the threads.
   let box = cast[ptr T](allocShared0(sizeof(T)))
   box[] = move data
-  push Job(run: trampoline[T], box: box, handler: cast[pointer](handler))
+  push Job(run: trampoline[T], box: box, handler: cast[pointer](handler),
+           drop: dropBox[T])
 
 proc queue*[T](a: TApplication, data: sink Isolated[T],
                handler: proc(data: T) {.nimcall.}) =
@@ -162,22 +168,48 @@ proc runOnUi*[T](data: sink T, handler: proc(data: T) {.nimcall.}) {.gcsafe.} =
   ## without `{.cast(gcsafe).}`.
   let box = cast[ptr T](allocShared0(sizeof(T)))
   box[] = move data
-  push Job(run: trampoline[T], box: box, handler: cast[pointer](handler))
+  push Job(run: trampoline[T], box: box, handler: cast[pointer](handler),
+           drop: dropBox[T])
 
 proc handleError(a: TApplication, e: ref Exception) =
-  if a.onException != nil: a.onException(e) else: raise e
+  let h = a.onException
+  if h != nil: h(e) else: raise e
 
 proc runQueued(a: TApplication) =
+  ## Runs the queued jobs. A job that raises goes to `handleError` and the
+  ## others still run; when `handleError` re-raises (the default), the jobs not
+  ## run yet are put back at the front of the queue for the next round.
+  var batch: seq[Job]
+  {.cast(gcsafe).}:
+    withLock queueLock:
+      swap(batch, queued)
+  var i = 0
+  try:
+    while i < batch.len:
+      var j = move batch[i]
+      inc i
+      try:
+        if j.run != nil: j.run(j.box, j.handler)
+        elif j.plain != nil: j.plain()
+        elif j.closure != nil: j.closure()
+      except CatchableError as e: a.handleError(e)
+  finally:
+    if i < batch.len:
+      {.cast(gcsafe).}:
+        withLock queueLock:
+          var rest = batch[i .. ^1]
+          rest.add queued          # keep the order: leftovers first
+          queued = move rest
+      pushWake()
+
+proc dropQueued() =
+  ## Discards the queued jobs, freeing the data boxed for the UI thread.
   var batch: seq[Job]
   {.cast(gcsafe).}:
     withLock queueLock:
       swap(batch, queued)
   for j in batch:
-    try:
-      if j.run != nil: j.run(j.box, j.handler)
-      elif j.plain != nil: j.plain()
-      elif j.closure != nil: j.closure()
-    except CatchableError as e: a.handleError(e)
+    if j.box != nil and j.drop != nil: j.drop(j.box)
 
 # ---------------------------------------------------------------- dispatch
 
@@ -228,9 +260,16 @@ proc dispatchEvent*(a: TApplication, ev: var Event) =
   ## Translates and dispatches a raw SDL event; the same path the loop uses.
   a.dispatch(translate(ev))
 
+proc popupPaintFailed(e: ref CatchableError) =
+  Application.handleError(e)
+
 proc paintForms*(a: TApplication) =
-  for f in openForms(): discard f.paintIfDirty()
-  paintPopups()
+  ## Paints the dirty forms and popups. A failure in layout or paint goes to
+  ## `onException` like an event handler error (re-raised by default).
+  for f in openForms():
+    try: discard f.paintIfDirty()
+    except CatchableError as e: a.handleError(e)
+  paintPopups(popupPaintFailed)
 
 proc safeDispatch(a: TApplication, pe: PlatformEvent) =
   try: a.dispatch(pe)
@@ -260,10 +299,12 @@ proc pump(a: TApplication, timeoutMs: int) =
     a.safeDispatch(pe)
     while pollPlatformEvent(pe): a.safeDispatch(pe)
   a.runQueued()
-  if a.onIdle != nil:
-    try: a.onIdle()
+  let idle = a.onIdle           # copies: a hook may change `onIdle` or the hook list
+  if idle != nil:
+    try: idle()
     except CatchableError as e: a.handleError(e)
-  for h in a.idleHooks:
+  let hooks = a.idleHooks
+  for h in hooks:
     try: h.hook()
     except CatchableError as e: a.handleError(e)
 
@@ -283,22 +324,28 @@ proc shutdown*(a: TApplication) =
   for f in openForms(): f.freeWindow()
   freeCursors()
   setMainForm(nil)
+  resetModalState()
+  dropQueued()
   quitPlatform()
-  a.initialised = false
 
 proc run*(a: TApplication, mainForm: Form = nil) =
   ## Shows `mainForm` (if given) and runs the loop until `terminate` or the
   ## main form closes; then shuts down.
   a.init()
   a.terminated = false
-  if mainForm != nil:
-    setMainForm(mainForm)
-    mainForm.show()
-  for h in a.idleHooks: h.hook()      # initial action state before the first frame
-  while not a.terminated and openForms().len > 0:
-    a.paintForms()
-    a.pump(-1)
-  a.shutdown()
+  try:
+    if mainForm != nil:
+      setMainForm(mainForm)
+      mainForm.show()
+    let hooks = a.idleHooks
+    for h in hooks:                   # initial action state before the first frame
+      try: h.hook()
+      except CatchableError as e: a.handleError(e)
+    while not a.terminated and openForms().len > 0:
+      a.paintForms()
+      a.pump(-1)
+  finally:
+    a.shutdown()
 
 proc modalLoop(f: Form) =
   let a = Application

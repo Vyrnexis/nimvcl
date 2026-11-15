@@ -618,3 +618,184 @@ suite "treeview":
          " ms, collapseAll ", collapseAllMs.formatFloat(ffDecimal, 1),
          " ms, delete subtree ", delMs.formatFloat(ffDecimal, 2), " ms"
     check toggle < 50 and insertFront < 100
+
+suite "treeview (review fixes)":
+  setup:
+    Application.init()
+    Application.forceScale = 0
+  teardown:
+    for f in openForms(): f.freeWindow()
+
+  test "collapse(recursive) rebuilds the rows once (fast)":
+    let f = newShown()
+    let tv = mkTree(f)
+    tv.beginUpdate()
+    let root = tv.items.addChild(nil, "root")
+    for i in 0 ..< 3000:
+      let d = root.addChild("d" & $i)
+      for j in 0 ..< 10: d.addChild("x")
+    tv.endUpdate()
+    root.expand(recursive = true)
+    check tv.rowCount == 1 + 3000 + 30000
+    let t0 = getMonoTime()
+    root.collapse(recursive = true)
+    let ms = float((getMonoTime() - t0).inNanoseconds) / 1e6
+    echo "  [treeview perf] collapse(recursive) 33k rows: ", ms, " ms"
+    check tv.rowCount == 1 and not root.expanded
+    check ms < (when defined(release): 500.0 else: 3000.0)
+
+  test "clear drops focus once and fires onChange once":
+    let f = newShown()
+    let tv = mkTree(f)
+    for i in 0 ..< 1000: tv.items.addChild(nil, "n" & $i)
+    var cnt = 0
+    tv.onChange = proc(s: Control, n: TreeNode) = inc cnt
+    tv.selected = tv.items.top(999)
+    cnt = 0
+    tv.items.clear()
+    check cnt == 1 and tv.selected == nil and tv.selCount == 0
+    cnt = 0
+    tv.items.clear()                                # nothing left: silent
+    check cnt == 0
+    # node.clear with the focus inside: one change, focus on the node
+    let a = tv.items.addChild(nil, "A")
+    for i in 0 ..< 50: a.addChild("k" & $i)
+    a.expand()
+    tv.selected = a.child(30)
+    cnt = 0
+    a.clear()
+    check cnt == 1 and tv.selected == a and tv.isSelected(a) and a.childCount == 0
+
+  test "collapse moves a hidden focus to the owner without onChanging, keeps others":
+    let f = newShown()
+    let tv = mkTree(f)
+    tv.multiSelect = true
+    let a = tv.items.addChild(nil, "A")
+    let b = tv.items.addChild(nil, "B")
+    let b1 = b.addChild("b1")
+    b.expand()
+    tv.selected = b1
+    tv.setSelected(a, true)
+    var changing = 0
+    tv.onChanging = proc(s: Control, n: TreeNode, allow: var bool) =
+      inc changing
+      allow = false
+    b.collapse()
+    check changing == 0
+    check tv.selected == b and a.selected and b.selected and not b1.selected
+    check tv.selCount == 2
+
+  test "selected = nil with nothing selected fires nothing":
+    let f = newShown()
+    let tv = mkTree(f)
+    var cnt = 0
+    tv.onChange = proc(s: Control, n: TreeNode) = inc cnt
+    tv.selected = nil
+    check cnt == 0
+    let n = tv.items.addChild(nil, "n")
+    tv.selected = n
+    cnt = 0
+    tv.selected = nil
+    check cnt == 1
+
+  test "the horizontal extent shrinks after the wide node goes":
+    let f = newShown()
+    let tv = mkTree(f)
+    tv.items.addChild(nil, "short")
+    let wide = tv.items.addChild(nil, "W".repeat(120))
+    f.settle()
+    discard f.paintIfDirty()
+    let w0 = tv.contentSize.w
+    check w0 > tv.viewport.w
+    wide.delete()
+    discard f.paintIfDirty()
+    check tv.contentSize.w < w0 and tv.contentSize.w <= tv.viewport.w + 1
+    # collapse of a wide subtree shrinks it too
+    let p = tv.items.addChild(nil, "P")
+    p.addChild("V".repeat(120))
+    p.expand()
+    discard f.paintIfDirty()
+    let w1 = tv.contentSize.w
+    check w1 > tv.viewport.w
+    p.collapse()
+    discard f.paintIfDirty()
+    check tv.contentSize.w < w1
+
+  test "collapse during beginUpdate prunes hidden selection at endUpdate":
+    let f = newShown()
+    let tv = mkTree(f)
+    tv.multiSelect = true
+    let s = sample(tv)
+    s.alpha.expand()
+    tv.selected = s.a1
+    tv.setSelected(s.a3, true)
+    tv.setSelected(s.gamma, true)
+    var cnt = 0
+    tv.onChange = proc(s: Control, n: TreeNode) = inc cnt
+    tv.beginUpdate()
+    s.alpha.collapse()
+    check cnt == 0
+    tv.endUpdate()
+    check not s.a1.selected and not s.a3.selected and s.gamma.selected
+    check tv.selected == s.alpha and s.alpha.selected
+    check cnt == 1
+    check tv.rowTexts == "Alpha,Beta,Gamma"
+
+  test "keypad + - * handled on key down are not repeated by the text event":
+    let f = newShown()
+    let tv = mkTree(f)
+    let n = tv.items.addChild(nil, "lazy")
+    n.hasChildren = true
+    var asked = 0
+    tv.onExpanding = proc(s: Control, x: TreeNode, allow: var bool) =
+      inc asked
+      allow = false
+    tv.selected = n
+    tv.setFocus()
+    f.tap Key(0x40000057)                           # keypad +
+    Application.dispatch(PlatformEvent(kind: ekTextInput, windowId: f.win.id,
+                                       text: "+"))
+    check asked == 1
+    f.tap Key(0x40000055)                           # keypad *
+    Application.dispatch(PlatformEvent(kind: ekTextInput, windowId: f.win.id,
+                                       text: "*"))
+    check asked == 2
+    # text alone still works
+    Application.dispatch(PlatformEvent(kind: ekTextInput, windowId: f.win.id,
+                                       text: "+"))
+    check asked == 3
+
+  test "type-ahead ignores shifted symbols but accepts shifted letters":
+    let f = newShown()
+    let tv = mkTree(f)
+    let a = tv.items.addChild(nil, "Apple")
+    let b = tv.items.addChild(nil, "Banana")
+    let c = tv.items.addChild(nil, "1st")
+    tv.selected = a
+    tv.setFocus()
+    f.tap 'b'.key, {ssShift}
+    check tv.selected == b
+    f.tap '1'.key, {ssShift}
+    check tv.selected == b
+
+  test "ImageList changes repaint / re-measure the view":
+    let f = newShown()
+    let tv = mkTree(f)
+    let il = newImageList(16, 16)
+    tv.images = il
+    tv.itemHeight = 0
+    tv.items.addChild(nil, "x")
+    f.settle()
+    discard f.paintIfDirty()
+    let h0 = tv.contentSize.h
+    il.height = 40
+    check f.paintIfDirty()
+    f.settle()
+    check tv.contentSize.h > h0
+    let v0 = il.version
+    il.add(newImage(16, 16, rgb(1, 2, 3)))
+    check il.version == v0 + 1
+    tv.images = nil
+    discard f.paintIfDirty()
+    il.add(newImage(16, 16, rgb(1, 2, 3)))          # no longer listened to
+    check not f.paintIfDirty()

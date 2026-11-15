@@ -47,7 +47,8 @@ method doMouseDown*(b: SpinButtons, button: MouseButton, shift: ShiftState,
     b.pressedDir = b.halfAt(y)
     b.hotDir = b.pressedDir
     b.invalidate()
-    if b.onPress != nil: b.onPress(b.pressedDir)
+    let h = b.onPress       # copy: the handler may clear or replace itself
+    if h != nil: h(b.pressedDir)
   procCall doMouseDown(Control(b), button, shift, x, y)
 
 method doMouseUp*(b: SpinButtons, button: MouseButton, shift: ShiftState,
@@ -55,8 +56,18 @@ method doMouseUp*(b: SpinButtons, button: MouseButton, shift: ShiftState,
   if button == mbLeft and b.pressedDir != 0:
     b.pressedDir = 0
     b.invalidate()
-    if b.onRelease != nil: b.onRelease()
+    let h = b.onRelease
+    if h != nil: h()
   procCall doMouseUp(Control(b), button, shift, x, y)
+
+method captureLost*(b: SpinButtons) =
+  ## The press ended without a mouse-up: the auto-repeat must stop.
+  if b.pressedDir != 0:
+    b.pressedDir = 0
+    b.invalidate()
+    let h = b.onRelease
+    if h != nil: h()
+  procCall captureLost(Control(b))
 
 method doMouseMove*(b: SpinButtons, shift: ShiftState, x, y: float32) =
   let h = if y >= 0 and y < b.height and x >= 0 and x < b.width: b.halfAt(y) else: 0
@@ -109,6 +120,10 @@ func maxValue*(s: SpinEdit): int = s.fMax
 func value*(s: SpinEdit): int = s.fValue
 func increment*(s: SpinEdit): int = s.fInc
 
+proc stopRepeat(s: SpinEdit) =
+  s.repeatDir = 0
+  s.repeat.enabled = false
+
 proc syncText(s: SpinEdit) =
   let txt = $s.fValue
   if s.edit.text != txt: s.edit.text = txt
@@ -120,7 +135,8 @@ proc `value=`*(s: SpinEdit, v: int) =
     return
   s.fValue = nv
   s.syncText()
-  if s.onChange != nil: s.onChange(s)
+  let h = s.onChange        # copy: the handler may clear or replace itself
+  if h != nil: h(s)
 
 proc `minValue=`*(s: SpinEdit, v: int) =
   s.fMin = v
@@ -149,14 +165,14 @@ proc stepBy*(s: SpinEdit, dir: int, count = 1) =
   s.value = s.fValue + dir * count * s.fInc
 
 proc repeatTick*(s: SpinEdit) =
-  ## One auto-repeat step (the timer's handler); no-op when no button is held.
+  ## One auto-repeat step (the timer's handler); no-op, and the repeat stops,
+  ## when no button is held.
   if s.repeatDir == 0: return
+  if s.buttons.pressedDir == 0:
+    s.stopRepeat()
+    return
   s.stepBy(s.repeatDir)
   if s.repeat.interval != RepeatRateMs: s.repeat.interval = RepeatRateMs
-
-proc stopRepeat(s: SpinEdit) =
-  s.repeatDir = 0
-  s.repeat.enabled = false
 
 method doMouseWheel*(s: SpinEdit, shift: ShiftState, dx, dy: float32,
                      handled: var bool) =
@@ -206,6 +222,7 @@ proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
     key = Key(0)
   e.onEnter = proc(sender: Control) = s.invalidate()      # the focus ring is the spin's
   e.onExit = proc(sender: Control) =
+    s.stopRepeat()
     s.commit()
     s.invalidate()
   let b = SpinButtons()

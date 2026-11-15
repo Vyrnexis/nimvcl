@@ -275,3 +275,48 @@ suite "memomodel editing":
     check m.line(50_000).startsWith("linetyping")
     check m.undo()
     check m.line(50_000) == "line number 50000"
+
+  test "onChanged fires after caret and anchor are final (review 18)":
+    let m = mk("abc\ndef")
+    var seen: seq[(MemoPos, MemoPos)]
+    m.onChanged = proc(f, o, n: int) = seen.add (m.anchor, m.caret)
+    m.setCaret((1, 3))
+    discard m.insert("XY")
+    check seen[^1] == ((1, 5), (1, 5))
+    discard m.deleteBackward()
+    check seen[^1] == ((1, 4), (1, 4))
+    discard m.insert("\nQ")                 # multi-line: caret on a new line
+    check seen[^1] == (m.anchor, m.caret) and m.caret == (2, 1)
+    seen.setLen 0
+    check m.undo()
+    check seen.len == 1 and seen[0] == ((1, 4), (1, 4))
+    seen.setLen 0
+    check m.redo()
+    check seen.len == 1 and seen[0][1] == (2, 1)
+    # line API: handler sees a snapped caret
+    m.setCaret((1, 4))
+    seen.setLen 0
+    m.setLine(1, "z")
+    check seen[0][1] == (1, 1)
+
+  test "setLine / insertLine: bounds and maxLength (review 19)":
+    let m = mk("ab\ncd")
+    expect IndexDefect: m.setLine(2, "x")
+    expect IndexDefect: m.setLine(-1, "x")
+    expect IndexDefect: m.insertLine(3, "x")
+    expect IndexDefect: m.insertLine(-1, "x")
+    try:
+      m.setLine(7, "x")
+    except IndexDefect as e:
+      check "7" in e.msg and "setLine" in e.msg
+    check m.text == "ab\ncd"
+    m.maxLength = 7                         # "ab\ncd" is 5 runes
+    m.setLine(0, "abcdefgh")                # room: 7 - (5 - 2) = 4
+    check m.line(0) == "abcd" and m.runeLen == 7
+    m.setLine(0, "x")
+    m.insertLine(2, "123456")               # 7 - 4 runes - 1 break = 2 left
+    check m.text == "x\ncd\n12" and m.runeLen == 7
+    m.insertLine(0, "no")                   # no room even for the break
+    check m.text == "x\ncd\n12"
+    m.insertLine(3, "")
+    check m.text == "x\ncd\n12"

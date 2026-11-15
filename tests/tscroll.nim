@@ -332,3 +332,18 @@ suite "ScrollBox":
     f.wheel(50, 20, -1)
     check seen == 1
     check outer.scrollPos.y == 60
+
+  test "content size follows a child whose align changes":
+    let f = newShown()
+    let sb = newScrollBox(f, 10, 10, 200, 100)
+    let c = newControl(); c.setBounds(10, 10, 300, 400)
+    sb.insertControl c
+    settle f
+    check sb.contentSize == sizeF(310, 410)
+    c.align = alClient                              # no longer free-floating
+    settle f
+    check sb.contentSize == sizeF(0, 0)
+    c.align = alNone
+    c.setBounds(10, 10, 300, 400)
+    settle f
+    check sb.contentSize == sizeF(310, 410)

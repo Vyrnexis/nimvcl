@@ -13,8 +13,8 @@ import ./common
 type
   StatusPanel* = ref object
     fText: string
-    width*: float32
-    alignment*: HAlign
+    fWidth: float32
+    fAlignment: HAlign
     bar: StatusBar
 
   StatusBar* = ref object of Control
@@ -28,6 +28,18 @@ func text*(p: StatusPanel): string = p.fText
 proc `text=`*(p: StatusPanel, v: string) =
   if v == p.fText: return
   p.fText = v
+  if p.bar != nil: p.bar.invalidate()
+
+func width*(p: StatusPanel): float32 = p.fWidth
+proc `width=`*(p: StatusPanel, v: float32) =
+  if v == p.fWidth: return
+  p.fWidth = v
+  if p.bar != nil: p.bar.invalidate()
+
+func alignment*(p: StatusPanel): HAlign = p.fAlignment
+proc `alignment=`*(p: StatusPanel, v: HAlign) =
+  if v == p.fAlignment: return
+  p.fAlignment = v
   if p.bar != nil: p.bar.invalidate()
 
 func panels*(b: StatusBar): seq[StatusPanel] = b.fPanels
@@ -49,7 +61,7 @@ proc `sizeGrip=`*(b: StatusBar, v: bool) =
 
 proc addPanel*(b: StatusBar, text = "", width = 100'f32,
                alignment = taLeft): StatusPanel {.discardable.} =
-  result = StatusPanel(fText: text, width: width, alignment: alignment, bar: b)
+  result = StatusPanel(fText: text, fWidth: width, fAlignment: alignment, bar: b)
   b.fPanels.add result
   b.invalidate()
 
@@ -58,7 +70,8 @@ proc clearPanels*(b: StatusBar) =
   b.invalidate()
 
 proc panelRect*(b: StatusBar, i: int): RectF =
-  ## Client rectangle of panel `i`.
+  ## Client rectangle of panel `i` (empty when `i` is out of range).
+  if i < 0 or i > b.fPanels.high: return rectF(0, 0, 0, 0)
   let grip = if b.fSizeGrip: GripSize else: 0'f32
   var x = 0'f32
   for k in 0 ..< i: x += b.fPanels[k].width

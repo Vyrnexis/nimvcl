@@ -6,6 +6,8 @@
 ## with `parentColor` inherit that colour. `borderStyle` pbNone (flat), pbSingle (rounded card, `border`),
 ## pbRaised (rounded card, `borderStrong`). A non-empty `caption` is drawn
 ## inside, aligned by `alignment` (centred by default) behind the children.
+## `&` markers are stripped but a Panel caption has no mnemonic (not underlined,
+## Alt+letter does nothing; GroupBox is the one that focuses its first child).
 ## `padding` defaults to 0 and only affects aligned children.
 ##
 ## GroupBox: a transparent container with a rounded border whose top line has
@@ -55,8 +57,8 @@ method paint*(p: Panel, c: Canvas) =
                       t.borderWidth)
   if p.caption.len > 0:
     let col = if p.isEnabled: t.text else: t.textDisabled
-    c.drawMnemonic(p.caption, p.font, r.inflate(-t.spacing), col, p.altHeld,
-                   p.fAlignment, vaCenter)
+    c.drawMnemonic(p.caption, p.font, r.inflate(-t.spacing), col, false,
+                   p.fAlignment, vaCenter)   # no mnemonic: a Panel never activates it
   procCall paint(Control(p), c)
 
 proc initPanel*(p: Panel, owner: Component = nil) =

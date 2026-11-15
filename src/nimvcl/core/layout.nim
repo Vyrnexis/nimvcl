@@ -32,7 +32,9 @@
 ##    {akLeft, akTop} are never touched. autoSize children keep their size.
 ## 5. alCustom children are handed to `customAlign` with the remaining rect.
 ## 6. A container whose `arrangeChildren(area)` returns true positioned its
-##    children itself: steps 2-5 are skipped (children keep their `align`).
+##    children itself: steps 3-5 are skipped (children keep their `align`).
+##    Step 2 (`autoSize` sizing) still runs first, so the container sees the
+##    preferred sizes of its auto-sized children.
 ## 7. Child containers whose size changed (or that are flagged) are laid out
 ##    recursively.
 ##
@@ -83,96 +85,117 @@ proc applyAnchors(ch: Control, base: SizeF, cw, chh: float32) =
   elif akTop notin a: t += dh / 2
   ch.place(l, t, w, h)
 
+proc needsPass(cc: Container): bool =
+  cc.needsLayout or cc.childNeedsLayout or not cc.layoutInitialized or
+    cc.width != cc.lastLayoutSize.w or cc.height != cc.lastLayoutSize.h
+
 proc layout*(c: Container) =
   ## Aligns the children of `c` (see the module docs), then recurses into child
-  ## containers that need it. Clears `needsLayout`/`childNeedsLayout`.
+  ## containers that need it. Clears `needsLayout`/`childNeedsLayout` (a child
+  ## that was flagged while this pass ran keeps `childNeedsLayout` set when the
+  ## bounded re-run could not settle it). If a child raises, `layouting` is
+  ## reset and the flags stay set, so the next layout retries.
   if c.layouting: return
   c.beforeLayout()
   c.layouting = true
-  if not c.designSet:            # never explicitly sized: first layout is the design
-    c.designSize = sizeF(c.width, c.height)
-    c.designSet = true
-  let kids = c.children          # copy: handlers may touch the tree
-  let pad = c.padding
-  var r = rectF(pad.left, pad.top, max(c.width - pad.horizontal, 0),
-                max(c.height - pad.vertical, 0))
+  try:
+    if not c.designSet:            # never explicitly sized: first layout is the design
+      c.designSize = sizeF(c.width, c.height)
+      c.designSet = true
+    let kids = c.children          # copy: handlers may touch the tree
+    let pad = c.padding
+    var r = rectF(pad.left, pad.top, max(c.width - pad.horizontal, 0),
+                  max(c.height - pad.vertical, 0))
 
-  let owned = c.arrangeChildren(r)   # layout owner: skips the align passes
+    # autoSize first (sizes only; positions come from the passes below). Also
+    # for the children of a layout owner (FlowPanel, GridPanel).
+    for ch in kids:
+      if not ch.visible or not ch.autoSize: continue
+      let ps = ch.preferredSize()
+      case ch.align
+      of alNone, alCustom:
+        ch.place(ch.left, ch.top, ps.w, ps.h)
+        ch.designRect.w = ch.width
+        ch.designRect.h = ch.height
+      of alTop, alBottom: ch.place(ch.left, ch.top, ch.width, ps.h)
+      of alLeft, alRight: ch.place(ch.left, ch.top, ps.w, ch.height)
+      of alClient: discard
 
-  # autoSize first (sizes only; positions come from the passes below)
-  for ch in kids:
-    if owned: break
-    if not ch.visible or not ch.autoSize: continue
-    let ps = ch.preferredSize()
-    case ch.align
-    of alNone, alCustom:
-      ch.place(ch.left, ch.top, ps.w, ps.h)
-      ch.designRect.w = ch.width
-      ch.designRect.h = ch.height
-    of alTop, alBottom: ch.place(ch.left, ch.top, ch.width, ps.h)
-    of alLeft, alRight: ch.place(ch.left, ch.top, ps.w, ch.height)
-    of alClient: discard
+    let owned = c.arrangeChildren(r)   # layout owner: skips the align passes
 
-  for pass in [alTop, alBottom, alLeft, alRight]:
+    for pass in [alTop, alBottom, alLeft, alRight]:
+      for ch in kids:
+        if owned: break
+        if not ch.visible or ch.align != pass: continue
+        let m = ch.margins
+        let k = ch.constraints
+        case pass
+        of alTop:
+          ch.place(r.x + m.left, r.y + m.top, max(r.w - m.horizontal, 0),
+                   k.clampHeight(snap(ch.height)))
+          let used = ch.top + ch.height + m.bottom - r.y
+          r.y += used
+          r.h = max(r.h - used, 0)
+        of alBottom:
+          let h = k.clampHeight(snap(ch.height))
+          ch.place(r.x + m.left, r.bottom - m.bottom - h,
+                   max(r.w - m.horizontal, 0), h)
+          r.h = max(ch.top - m.top - r.y, 0)
+        of alLeft:
+          ch.place(r.x + m.left, r.y + m.top, k.clampWidth(snap(ch.width)),
+                   max(r.h - m.vertical, 0))
+          let used = ch.left + ch.width + m.right - r.x
+          r.x += used
+          r.w = max(r.w - used, 0)
+        of alRight:
+          let w = k.clampWidth(snap(ch.width))
+          ch.place(r.right - m.right - w, r.y + m.top, w,
+                   max(r.h - m.vertical, 0))
+          r.w = max(ch.left - m.left - r.x, 0)
+        else: discard
+
     for ch in kids:
       if owned: break
-      if not ch.visible or ch.align != pass: continue
+      if not ch.visible: continue
       let m = ch.margins
-      let k = ch.constraints
-      case pass
-      of alTop:
+      case ch.align
+      of alClient:
         ch.place(r.x + m.left, r.y + m.top, max(r.w - m.horizontal, 0),
-                 k.clampHeight(snap(ch.height)))
-        let used = ch.top + ch.height + m.bottom - r.y
-        r.y += used
-        r.h = max(r.h - used, 0)
-      of alBottom:
-        let h = k.clampHeight(snap(ch.height))
-        ch.place(r.x + m.left, r.bottom - m.bottom - h,
-                 max(r.w - m.horizontal, 0), h)
-        r.h = max(ch.top - m.top - r.y, 0)
-      of alLeft:
-        ch.place(r.x + m.left, r.y + m.top, k.clampWidth(snap(ch.width)),
                  max(r.h - m.vertical, 0))
-        let used = ch.left + ch.width + m.right - r.x
-        r.x += used
-        r.w = max(r.w - used, 0)
-      of alRight:
-        let w = k.clampWidth(snap(ch.width))
-        ch.place(r.right - m.right - w, r.y + m.top, w,
-                 max(r.h - m.vertical, 0))
-        r.w = max(ch.left - m.left - r.x, 0)
+      of alNone:
+        if ch.anchors != DefaultAnchors:   # left+top never moves
+          let base = if ch.designBaseSet: ch.designBase else: c.designSize
+          ch.applyAnchors(base, c.width, c.height)
+      of alCustom:
+        c.customAlign(ch, r)
       else: discard
 
-  for ch in kids:
-    if owned: break
-    if not ch.visible: continue
-    let m = ch.margins
-    case ch.align
-    of alClient:
-      ch.place(r.x + m.left, r.y + m.top, max(r.w - m.horizontal, 0),
-               max(r.h - m.vertical, 0))
-    of alNone:
-      if ch.anchors != DefaultAnchors:   # left+top never moves
-        let base = if ch.designBaseSet: ch.designBase else: c.designSize
-        ch.applyAnchors(base, c.width, c.height)
-    of alCustom:
-      c.customAlign(ch, r)
-    else: discard
+    c.lastLayoutSize = sizeF(c.width, c.height)
+    c.layoutInitialized = true
 
-  c.lastLayoutSize = sizeF(c.width, c.height)
-  c.layoutInitialized = true
-
-  for ch in kids:
-    if not ch.visible or not (ch of Container): continue
-    let cc = Container(ch)
-    if cc.needsLayout or cc.childNeedsLayout or not cc.layoutInitialized or
-       cc.width != cc.lastLayoutSize.w or cc.height != cc.lastLayoutSize.h:
-      layout(cc)
-
-  c.needsLayout = false
-  c.childNeedsLayout = false
-  c.layouting = false
+    # Child containers. A child (or one of its descendants) can be flagged while
+    # this pass runs, after it was visited: go over the children again, a
+    # bounded number of times, so the flag is not lost.
+    var stillFlagged = false
+    for round in 0 ..< 4:
+      var did = false
+      for ch in kids:
+        if not ch.visible or not (ch of Container): continue
+        let cc = Container(ch)
+        if cc.needsPass:
+          layout(cc)
+          did = true
+      if not did: break
+      stillFlagged = round == 3
+    c.needsLayout = false
+    c.childNeedsLayout = false
+    if stillFlagged:
+      for ch in kids:
+        if ch.visible and ch of Container and
+           (Container(ch).needsLayout or Container(ch).childNeedsLayout):
+          c.childNeedsLayout = true
+  finally:
+    c.layouting = false
   c.invalidate()
   c.afterLayout()
 

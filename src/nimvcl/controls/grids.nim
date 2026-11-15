@@ -72,7 +72,7 @@
 ## toggle the direction, with an arrow indicator; `onHeaderClick(sender, col)`
 ## fires first.
 
-import std/[algorithm, parseutils, strutils]
+import std/[algorithm, parseutils, strutils, math]
 import ./common, ./scrolling, ./edit, ./gridmodel
 export scrolling, gridmodel.AxisSizes
 
@@ -101,7 +101,9 @@ type
 
   DrawGrid* = ref object of ScrollingControl
     fCols, fRows: AxisSizes
-    fFixedCols, fFixedRows: int
+    fFixedCols, fFixedRows: int        # effective (clamped to the counts)
+    fReqFixedCols, fReqFixedRows: int  # as requested; survive count shrinking
+    fSelQuiet: int                     # >0: selectionChanged only records
     fOptions: GridOptions
     fCol, fRow, fAnchorCol, fAnchorRow: int
     fHLines, fVLines, fHotTrack: bool
@@ -376,6 +378,7 @@ proc clampCurrent(g: DrawGrid) =
 
 proc selectionChanged(g: DrawGrid) =
   g.invalidate()
+  if g.fSelQuiet > 0: return
   if g.onSelectionChanged != nil: g.onSelectionChanged(g)
 
 # ------------------------------------------------------------------ editing
@@ -422,13 +425,18 @@ proc editorKey(g: DrawGrid, key: var Key, shift: ShiftState) =
     else:
       dc = 1
   else: return
-  key = Key(0)
-  g.endEdit(true)
   var nc = c + dc
   var nr = r + dr
   if dc != 0:
     if nc >= g.fCols.count: nc = g.fFixedCols; nr = r + 1
     elif nc < g.fFixedCols: nc = g.fCols.count - 1; nr = r - 1
+    if nr >= g.fRows.count or nr < g.fFixedRows:
+      # Tab at the very first / last cell (like moveTab): commit and leave the
+      # grid; the key stays unhandled so focus moves on.
+      g.endEdit(true)
+      return
+  key = Key(0)
+  g.endEdit(true)
   g.moveCurrent(nc, nr)
 
 proc ensureEditor(g: DrawGrid) =
@@ -510,10 +518,15 @@ proc setSelection*(g: DrawGrid, left, top, right, bottom: int) =
   ## Programmatic range: the anchor is (left, top), the current cell (right,
   ## bottom). Without goRangeSelect only the current cell is selected.
   if g.fCols.count <= g.fFixedCols or g.fRows.count <= g.fFixedRows: return
-  if not g.moveCurrent(right, bottom): return
+  let (c0, r0, ac0, ar0) = (g.fCol, g.fRow, g.fAnchorCol, g.fAnchorRow)
+  inc g.fSelQuiet                      # one notification for the whole change
+  let ok = g.moveCurrent(right, bottom)
+  dec g.fSelQuiet
+  if not ok: return
   g.fAnchorCol = min(max(left, g.fFixedCols), g.fCols.count - 1)
   g.fAnchorRow = min(max(top, g.fFixedRows), g.fRows.count - 1)
-  g.selectionChanged()
+  if (g.fCol, g.fRow, g.fAnchorCol, g.fAnchorRow) != (c0, r0, ac0, ar0):
+    g.selectionChanged()
 
 proc selectAll*(g: DrawGrid) =
   if goRangeSelect notin g.fOptions: return
@@ -526,7 +539,7 @@ proc selectAll*(g: DrawGrid) =
 proc `colCount=`*(g: DrawGrid, n: int) =
   if g.fEditing: g.endEdit(false)
   g.fCols.setCount(n)
-  g.fFixedCols = min(g.fFixedCols, g.fCols.count)
+  g.fFixedCols = min(g.fReqFixedCols, g.fCols.count)
   g.clampCurrent()
   g.sizeChanged()
   g.refreshContent()
@@ -534,18 +547,20 @@ proc `colCount=`*(g: DrawGrid, n: int) =
 proc `rowCount=`*(g: DrawGrid, n: int) =
   if g.fEditing: g.endEdit(false)
   g.fRows.setCount(n)
-  g.fFixedRows = min(g.fFixedRows, g.fRows.count)
+  g.fFixedRows = min(g.fReqFixedRows, g.fRows.count)
   g.clampCurrent()
   g.sizeChanged()
   g.refreshContent()
 
 proc `fixedCols=`*(g: DrawGrid, n: int) =
-  g.fFixedCols = min(max(n, 0), g.fCols.count)
+  g.fReqFixedCols = max(n, 0)
+  g.fFixedCols = min(g.fReqFixedCols, g.fCols.count)
   g.clampCurrent()
   g.refreshContent()
 
 proc `fixedRows=`*(g: DrawGrid, n: int) =
-  g.fFixedRows = min(max(n, 0), g.fRows.count)
+  g.fReqFixedRows = max(n, 0)
+  g.fFixedRows = min(g.fReqFixedRows, g.fRows.count)
   g.clampCurrent()
   g.refreshContent()
 
@@ -690,7 +705,7 @@ proc pasteText*(g: DrawGrid, text: string): bool {.discardable.} =
 proc pasteFromClipboard*(g: DrawGrid) =
   discard g.pasteText(editClipboardGet())
 
-proc clearSelectedCells*(g: DrawGrid) =
+method clearSelectedCells*(g: DrawGrid) {.base.} =
   let s = g.selection
   for r in s.top .. s.bottom:
     for c in s.left .. s.right:
@@ -756,7 +771,8 @@ method doMouseDown*(g: DrawGrid, button: MouseButton, shift: ShiftState,
       let cell = g.cellAt(p)
       if cell.col >= 0:
         if cell.col < g.fFixedCols or cell.row < g.fFixedRows:
-          g.fixedCellClicked(cell.col, cell.row)
+          # the second press of a double click does not click the header again
+          if ssDouble notin shift: g.fixedCellClicked(cell.col, cell.row)
         else:
           g.fDrag = dmSelect
           g.moveCurrent(cell.col, cell.row, extend = ssShift in shift)
@@ -965,6 +981,8 @@ proc initDrawGrid*(g: DrawGrid, owner: Component = nil) =
   g.fRows = initAxis(5, 24)
   g.fFixedCols = 1
   g.fFixedRows = 1
+  g.fReqFixedCols = 1
+  g.fReqFixedRows = 1
   g.fOptions = {goThumbTracking, goColSizing}
   g.fHLines = true
   g.fVLines = true
@@ -1031,7 +1049,8 @@ proc `[]`*(p: CellsProxy, col, row: int): string = p.g.cellOf(col, row)
 proc `[]=`*(p: CellsProxy, col, row: int, v: string) =
   if p.g.cellOf(col, row) == v: return
   p.g.putCell(col, row, v)
-  p.g.invalidate(p.g.cellRect(col, row))
+  let r = p.g.cellRect(col, row)
+  if not r.isEmpty: p.g.invalidate(r)
 
 func cols*(g: StringGrid): LinesProxy = LinesProxy(g: g, byCol: true)
 func rows*(g: StringGrid): LinesProxy = LinesProxy(g: g, byCol: false)
@@ -1076,23 +1095,32 @@ proc insertRow*(g: StringGrid, at: int) =
   ## Inserts an empty row at `at` (clamped to the scrolling rows).
   let i = min(max(at, g.fixedRows), g.rowCount)
   g.endEdit(false)
+  let hadCurrent = g.rowCount > g.fFixedRows
   if i < g.fData.len: g.fData.insert(newSeq[string](), i)
   g.rowCount = g.rowCount + 1
+  if hadCurrent:                          # the current cell / selection move down
+    if g.fRow >= i: inc g.fRow
+    if g.fAnchorRow >= i: inc g.fAnchorRow
+    g.clampCurrent()
+  g.fSortCol = -1                         # the new empty row breaks the order
   g.invalidate()
 
 proc deleteRow*(g: StringGrid, at: int) =
   if at < g.fixedRows or at >= g.rowCount: return
   g.endEdit(false)
   if at < g.fData.len: g.fData.delete(at)
-  g.rowCount = g.rowCount - 1
+  if g.fRow > at: dec g.fRow             # keep the same cell current
+  if g.fAnchorRow > at: dec g.fAnchorRow
+  g.rowCount = g.rowCount - 1             # (the sort order of the rest stays)
   g.invalidate()
 
 proc compareCells*(a, b: string): int =
   ## Default sort order: numbers before text, numbers by value, text without
   ## regard to case.
   var fa, fb: float
-  let na = a.len > 0 and parseFloat(a, fa) == a.len
-  let nb = b.len > 0 and parseFloat(b, fb) == b.len
+  func finite(x: float): bool = classify(x) notin {fcNan, fcInf, fcNegInf}
+  let na = a.len > 0 and parseFloat(a, fa) == a.len and finite(fa)
+  let nb = b.len > 0 and parseFloat(b, fb) == b.len and finite(fb)
   if na and nb: cmp(fa, fb)
   elif na: -1
   elif nb: 1
@@ -1130,7 +1158,21 @@ method setCellText*(g: StringGrid, col, row: int, text: string) =
   g.cells[col, row] = text
   procCall setCellText(DrawGrid(g), col, row, text)
 
+method clearSelectedCells*(g: StringGrid) =
+  ## Only stored cells are visited, so selecting a million rows stays cheap.
+  if g.onGetEditText != nil:
+    procCall clearSelectedCells(DrawGrid(g))
+    return
+  let s = g.selection
+  for r in max(s.top, 0) .. min(s.bottom, g.fData.len - 1):
+    for c in max(s.left, 0) .. min(s.right, g.fData[r].len - 1):
+      if g.fData[r][c].len > 0 and g.canEditCell(c, r): g.setCellText(c, r, "")
+  g.invalidate()
+
 method measureColumn*(g: StringGrid, col: int): float32 =
+  ## Width of the widest text among the header rows and the (at most) 400 rows
+  ## below the first visible one; longer content further down is not sampled
+  ## (use `onMeasureColumn` for exact auto-fit of huge grids).
   if g.onMeasureColumn != nil: return g.onMeasureColumn(g, col)
   var w = 0'f32
   let top = g.topRow

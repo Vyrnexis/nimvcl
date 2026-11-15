@@ -68,13 +68,18 @@ proc `=destroy`(c: RenderContextObj) =
 
 proc `=copy`(a: var RenderContextObj, b: RenderContextObj) {.error.}
 
+func quantiseScale(s: float32): float32 =
+  ## Scales are kept in steps of 1/64 (the font cache key resolution), so tiny
+  ## differences (from rounding window sizes) never flush the caches.
+  max(round(s * 64) / 64, 1'f32 / 64)
+
 proc newRenderContext*(renderer: Renderer, scale: float32 = 1): RenderContext =
   ## Creates a context for `renderer` (borrowed, not owned). Needs SDL_ttf
   ## initialised. Raises `IOError` if the text engine cannot be created.
   let eng = createRendererTextEngine(renderer)
   if eng == nil:
     raise newException(IOError, "createRendererTextEngine: " & $getError())
-  RenderContext(renderer: renderer, engine: eng, scale: max(scale, 0.01'f32),
+  RenderContext(renderer: renderer, engine: eng, scale: quantiseScale(scale),
                 maxIdleFrames: DefaultMaxIdleFrames,
                 textCacheCap: DefaultTextCacheCap, epoch: fontRegistryEpoch())
 
@@ -116,9 +121,10 @@ proc flushFontCaches(ctx: RenderContext) =
 
 proc setScale*(ctx: RenderContext, s: float32) =
   ## Changes the display scale. Fonts are rasterised at `size * scale`, so on a
-  ## change the font and text caches are destroyed (textures are kept).
-  let s = max(s, 0.01'f32)
-  if abs(s - ctx.scale) > 1e-4:
+  ## change the font and text caches are destroyed (textures are kept). The
+  ## scale is quantised to 1/64 before it is compared.
+  let s = quantiseScale(s)
+  if s != ctx.scale:
     ctx.scale = s
     ctx.flushFontCaches()
 
@@ -138,14 +144,16 @@ proc destroy*(ctx: RenderContext) = ctx.close()
 
 proc checkOpen(ctx: RenderContext) =
   doAssert not ctx.closed, "RenderContext used after close()"
-  let e = fontRegistryEpoch()
-  if e != ctx.epoch:           # families or fallbacks changed
-    ctx.epoch = e
-    ctx.flushFontCaches()
 
 proc beginFrameTick*(ctx: RenderContext) =
-  ## Advances the frame counter (called by `beginFrame`).
+  ## Advances the frame counter (called by `beginFrame`). This is the only place
+  ## where the caches are flushed after the font registry changed (families or
+  ## fallbacks): never mid-frame, where text pointers are still in use.
   ctx.checkOpen()
+  let e = fontRegistryEpoch()
+  if e != ctx.epoch:
+    ctx.epoch = e
+    ctx.flushFontCaches()
   inc ctx.frame
 
 # ------------------------------------------------------------------- fonts
@@ -229,6 +237,7 @@ proc fitPrefix*(ctx: RenderContext, str: string, spec: FontSpec,
                 maxPx: float32): int =
   ## Number of leading bytes of `str` that fit in `maxPx` device pixels.
   ctx.checkOpen()
+  if maxPx < 1: return 0        # SDL_ttf treats a width of 0 as unlimited
   let f = ctx.fontFor(ctx.fontKey(spec))
   var mw: cint
   var ml: csize_t
