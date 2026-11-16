@@ -11,7 +11,7 @@
 import ./common
 
 type
-  StatusPanel* = ref object
+  StatusPanel* = ref object of RootObj
     fText: string
     fWidth: float32
     fAlignment: HAlign

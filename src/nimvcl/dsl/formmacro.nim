@@ -88,9 +88,25 @@ proc claim(g: var Gen, name: string, src: NimNode) =
           "`: child and `var` names must be unique", src)
   g.names[name] = true
 
+template nfmSetSub*(target, prop, sub, value: untyped) =
+  ## `target.prop.sub = value` for a composite property that is read and written
+  ## as a whole (`font`, `margins`, `padding`, `constraints`): the form macros
+  ## use it for `font.size = 12`.
+  block:
+    var part = target.prop
+    part.sub = value
+    target.prop = part
+
 proc propStmt(target: NimNode, tname: string, st: NimNode): NimNode =
   ## `prop = value` on `target`, with a readable error for unknown properties.
   let lhs = st[0]
+  if lhs.kind == nnkDotExpr and lhs[0].kind == nnkIdent and lhs[1].kind == nnkIdent:
+    # `font.size = 12`: a part of a composite property
+    let call = nn(nnkCall, st, idn("nfmSetSub", st), target, lhs[0], lhs[1], st[1])
+    return whenElse(nn(nnkCall, st, idn("compiles", st), call), call,
+                    errorStmt("nimvcl form: `" & tname & "` has no property `" &
+                              lhs[0].strVal & "` with a part `" & lhs[1].strVal &
+                              "`, or the value does not fit it", st), st)
   if lhs.kind != nnkIdent:
     error("nimvcl form: expected `property = value`", st)
   let access = dot(target, lhs.strVal, lhs)

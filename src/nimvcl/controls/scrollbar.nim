@@ -300,6 +300,13 @@ proc initScrollBar*(s: ScrollBar, owner: Component = nil,
   if kind == sbVertical: s.setBounds(0, 0, DefaultScrollBarSize, 100)
   else: s.setBounds(0, 0, 100, DefaultScrollBarSize)
 
+proc `kind=`*(s: ScrollBar, v: ScrollBarKind) =
+  ## Changes the orientation; width and height swap places.
+  if v == s.fKind: return
+  s.fKind = v
+  s.setBounds(s.left, s.top, s.height, s.width)
+  s.invalidate()
+
 proc newScrollBar*(parent: Container = nil, kind = sbVertical,
                    left = 0'f32, top = 0'f32,
                    width = -1'f32, height = -1'f32): ScrollBar {.discardable.} =

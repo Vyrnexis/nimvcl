@@ -12,6 +12,9 @@ type
     owner*: Component            ## read-only by convention; use `insertComponent`
     components*: seq[Component]  ## owned components; mutate via insert/remove
     actionLink*: ActionLinkBase  ## set by `client.action = a` (controls/actions.nim)
+    handlerNames*: seq[(string, string)]
+      ## (event name, handler name) pairs recorded when a form file binds an
+      ## event by name (dsl/props.nim); lets a form be saved again.
 
 method clientClicked*(l: ActionLinkBase) {.base.} =
   ## The linked client was clicked (after its own state change and `onClick`).

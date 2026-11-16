@@ -22,6 +22,15 @@ proc newBadge*(parent: Container = nil): Badge =
 
 # ------------------------------------------------------------------ the forms
 
+form Composite:
+  margins.left = 5
+  Label big:
+    font.size = 22
+    font.style = {fsBold}
+    margins.top = 3
+    constraints.minWidth = 40
+
+
 frame AddressFrame:
   width = 200; height = 60
   var edits: int
@@ -239,3 +248,11 @@ suite "form macro":
     check f.first.parent == Container(f.one) and f.second.parent == Container(f.two)
     check f.pages.tabIndex == 0 and f.one.visible and not f.two.visible
 
+  test "parts of composite properties: font.size = 12":
+    let f = newComposite()
+    check f.big.font.size == 22
+    check f.big.font.style == {fsBold}
+    check not f.big.parentFont
+    check f.big.margins.top == 3 and f.big.margins.left == 0
+    check f.big.constraints.minWidth == 40
+    check f.margins.left == 5

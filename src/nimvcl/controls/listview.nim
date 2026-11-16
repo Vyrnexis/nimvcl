@@ -104,7 +104,7 @@ type
   SortOrder* = enum soNone, soAscending, soDescending
   ListHit* = enum lhNone, lhItem, lhCheck, lhIcon, lhLabel
 
-  ListColumn* = ref object
+  ListColumn* = ref object of RootObj
     fView: ListView
     fCaption: string
     fWidth: float32

@@ -1,0 +1,3 @@
+object Bad: Form
+  caption = 'x
+end

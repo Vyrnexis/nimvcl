@@ -94,6 +94,9 @@ type
     designSet*: bool            ## `designSize` valid (explicit size or first layout)
     hostSized*: bool            ## host/window is resizing this root (not a design size)
     fScrollX, fScrollY: float32 ## scroll offset applied to alNone children
+    onPaintOver*: PaintEvent    ## painted after the children (still clipped to
+                                ## the client rect); used by the form designer
+                                ## for its selection handles
 
   NotifyEvent* = proc(sender: Control)
   MouseEvent* = proc(sender: Control, button: MouseButton, shift: ShiftState,
@@ -884,6 +887,8 @@ proc paintTree*(c: Control, canvas: Canvas) =
   if c of Container:
     for ch in Container(c).fChildren:
       ch.paintTree(canvas)
+    let over = Container(c).onPaintOver
+    if over != nil: over(c, canvas)
   canvas.popClip()
   canvas.popTranslate()
   if clipVp: canvas.popClip()

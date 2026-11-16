@@ -1,0 +1,5 @@
+object Bad: Form
+  object ok: Button
+    onClick = okClick
+  end
+end

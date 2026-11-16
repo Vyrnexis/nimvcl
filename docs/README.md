@@ -24,9 +24,11 @@ properties, events and methods.
 | [Getting started](getting-started.md) | Install, a first window, building and running tests |
 | [Application and forms](guide/application-and-forms.md) | `Application.run`, forms, modal forms, host mode |
 | [Forms and frames](forms.md) | The `form` and `frame` macros (a typed `.dfm`) |
+| [Form files](guide/form-files.md) | `.nfm` text forms, `loadForm`, `loadNfm`, the property registry |
 | [Layout](guide/layout.md) | `align`, `anchors`, margins, padding, constraints, autoSize |
 | [Events and input](guide/events-and-input.md) | Event types, keyboard, focus, mnemonics, shortcuts |
 | [Docking](guide/docking.md) | Dock panels, floating windows, saving the layout |
+| [Design mode](guide/designer.md) | `FormDesigner`: select, move, resize, create and undo on a form |
 | [Actions](guide/actions.md) | One command shared by menus, toolbars, buttons and keys |
 | [Threads and timers](guide/threads-and-timers.md) | `Timer`, `runOnUi`, `Application.queue` |
 | [Painting and custom controls](guide/painting.md) | `Canvas`, `PaintBox`, subclassing `Control` |
@@ -79,6 +81,7 @@ properties, events and methods.
 | [ProgressBar](components/progressbar.md) | Progress and busy indicator |
 | [StatusBar](components/statusbar.md) | Text panels at the bottom |
 | [Hint](components/hint.md) | Tooltips |
+| [ObjectInspector](components/inspector.md) | Property grid for any registered object |
 
 ### Lists, trees and tables
 
@@ -105,7 +108,6 @@ properties, events and methods.
 | [Popups, menus and hints](popups-menus.md) | Popup windows, key-handler chain, modal details |
 | [Form macro syntax](forms.md) | Every statement the `form` / `frame` macros accept |
 | [Binding audit](dev/binding-audit.md) | Developer notes on the SDL3 binding |
-| [PLAN.md](../PLAN.md) | Architecture and roadmap |
 | `src/nimvcl/**/*.nim` | The module comments are the most detailed reference |
 
 ## Delphi to nimvcl cheat sheet

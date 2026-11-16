@@ -1,6 +1,6 @@
 ## `RenderContext`: everything that is bound to one renderer.
 ##
-## Ownership rules (PLAN section 2.7):
+## Ownership rules:
 ##  * User-visible values (`FontSpec`, `Image`, `Color`) hold no renderer-bound
 ##    SDL handles.
 ##  * The context borrows the `Renderer` and owns the TTF text engine plus

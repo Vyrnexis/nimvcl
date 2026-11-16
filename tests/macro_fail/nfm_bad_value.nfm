@@ -1,0 +1,5 @@
+object Bad: Form
+  object ok: Button
+    width = 'wide'
+  end
+end

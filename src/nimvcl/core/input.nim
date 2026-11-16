@@ -36,7 +36,8 @@
 import std/[algorithm, os, math]
 import ../graphics/[geometry, context, canvas]
 import ../platform/[window, events, cursors]
-import ./types, ./control, ./layout
+import ./types, ./control, ./layout, ./design
+export design
 
 type
   KeyHook* = proc(key: var Key, shift: ShiftState)
@@ -65,7 +66,10 @@ type
     windowInactive*: bool        ## the window lost focus (set by the Form)
     revealOnFocus*: bool         ## focus changes scroll the control into view
                                  ## (default true; off while a mouse press focuses)
+    designers*: seq[DesignHook] ## attached design hooks (see core/design.nim)
     fHovered, fCaptured, fFocused, fPressed: Control
+    fDesignCap, fKeyDesigner: DesignHook
+    fDesignCursor: bool
     buttons: set[MouseButton]
     lastPos: PointF
     mouseInside: bool
@@ -206,6 +210,11 @@ method controlLost*(ui: UiRoot, c: Control) =
     ui.fHovered = nil
     old.doMouseLeave()
     ui.updateCursor()
+  if ui.fDesignCap != nil and inside(c, ui.fDesignCap.scope):
+    let d = ui.fDesignCap
+    ui.fDesignCap = nil
+    ui.buttons = {}
+    d.designCancel()
   var lostCapture: Control
   if inside(c, ui.fCaptured):
     lostCapture = ui.fCaptured
@@ -324,9 +333,48 @@ proc hitAt(ui: UiRoot, p: PointF): Control =
   if result == nil and ui.rootGetsMouse and ui.root.clientRect.contains(p):
     result = ui.root
 
+proc designFor(ui: UiRoot, p: PointF): DesignHook =
+  ## The design hook that owns the pointer at `p` (nil: normal routing).
+  if ui.fDesignCap != nil: return ui.fDesignCap
+  if ui.fCaptured != nil: return nil
+  let h = ui.hitAt(p)
+  for d in ui.designers:
+    if d.scope == nil: continue
+    if h != nil:
+      if inside(d.scope, h): return d
+    elif d.scope.isVisible and d.scope.clientToForm(d.scope.clientRect).contains(p):
+      return d
+
+proc hoverAt(ui: UiRoot, p: PointF): Control =
+  ## The control to hover at `p`: none inside a designed container.
+  if ui.designers.len > 0 and ui.designFor(p) != nil: return nil
+  ui.hitAt(p)
+
+proc addDesigner*(ui: UiRoot, d: DesignHook) =
+  ## Attaches a design hook (see core/design.nim). The first one gets the keys.
+  if d == nil or d in ui.designers: return
+  ui.designers.add d
+  if ui.fKeyDesigner == nil: ui.fKeyDesigner = d
+  ui.hoverStale = true
+
+proc removeDesigner*(ui: UiRoot, d: DesignHook) =
+  let i = ui.designers.find(d)
+  if i < 0: return
+  if ui.fDesignCap == d:
+    ui.fDesignCap = nil
+    ui.buttons = {}
+    d.designCancel()
+  ui.designers.delete i
+  if ui.fKeyDesigner == d:
+    ui.fKeyDesigner = if ui.designers.len > 0: ui.designers[0] else: nil
+  ui.hoverStale = true
+
 proc cancelInteraction*(ui: UiRoot) =
   ## Drops mouse capture, pressed state and hover (window deactivated/hidden).
   let cap = ui.fCaptured
+  let dcap = ui.fDesignCap
+  ui.fDesignCap = nil
+  if dcap != nil: dcap.designCancel()
   ui.buttons = {}
   ui.fCaptured = nil
   ui.fPressed = nil
@@ -338,6 +386,19 @@ proc mouseMove(ui: UiRoot, p: PointF, shift: ShiftState): bool =
   ui.mouseInside = true
   let shift = shift + ui.buttonShift
   var target: Control
+  if ui.designers.len > 0:
+    let d = ui.designFor(p)
+    if d != nil:
+      ui.setHover(nil)
+      d.designMouseMove(d.scope.formToClient(p), shift)
+      if ui.win != nil:
+        setCursorShape(d.cursor)
+        ui.cursorApplied = true
+        ui.fDesignCursor = true
+      return true
+    if ui.fDesignCursor:
+      ui.fDesignCursor = false
+      ui.updateCursor()
   if ui.fCaptured != nil:
     target = ui.fCaptured
     let over = target.clientRect.contains(target.formToClient(p))
@@ -354,7 +415,19 @@ proc mouseDown(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState,
                clicks: int): bool =
   ui.lastPos = p
   ui.mouseInside = true
-  if ui.fCaptured == nil: ui.setHover(ui.hitAt(p))
+  if ui.designers.len > 0:
+    let d = ui.designFor(p)
+    if d != nil:
+      ui.setHover(nil)
+      ui.focusControl(nil)         # the designer owns the keyboard now
+      ui.fKeyDesigner = d
+      ui.fDesignCap = d
+      ui.buttons.incl button
+      var sh = shift + ui.buttonShift
+      if clicks == 2 and button == mbLeft: sh.incl ssDouble
+      d.designMouseDown(d.scope.formToClient(p), button, sh, clicks)
+      return true
+  if ui.fCaptured == nil: ui.setHover(ui.hoverAt(p))
   let target = if ui.fCaptured != nil: ui.fCaptured else: ui.hitAt(p)
   if target == nil: return false
   if ui.fCaptured == nil: ui.fCaptured = target
@@ -382,6 +455,13 @@ proc mouseDown(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState,
 
 proc mouseUp(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState): bool =
   ui.lastPos = p
+  let dc = ui.fDesignCap
+  if dc != nil:
+    ui.buttons.excl button
+    if ui.buttons == {}: ui.fDesignCap = nil
+    dc.designMouseUp(dc.scope.formToClient(p), button, shift + ui.buttonShift)
+    if ui.buttons == {}: ui.setHover(ui.hoverAt(p))
+    return true
   let t = ui.fCaptured
   if t == nil: return false
   ui.buttons.excl button
@@ -395,10 +475,21 @@ proc mouseUp(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState): boo
   if ui.buttons == {}:
     ui.fCaptured = nil
     ui.fPressed = nil
-    ui.setHover(ui.hitAt(p))
+    ui.setHover(ui.hoverAt(p))
   true
 
 proc mouseWheel(ui: UiRoot, p: PointF, dx, dy: float32, shift: ShiftState): bool =
+  if ui.designers.len > 0:
+    let d = ui.designFor(p)
+    if d != nil:
+      if not d.designMouseWheel(d.scope.formToClient(p), shift + ui.buttonShift,
+                                dx, dy):
+        var handled = false
+        var c = Control(d.scope)
+        while c != nil and not handled:
+          c.doMouseWheel(shift + ui.buttonShift, dx, dy, handled)
+          c = Control(c.parent)
+      return true
   let target = if ui.fCaptured != nil: ui.fCaptured else: ui.hitAt(p)
   if target == nil: return false
   var handled = false
@@ -463,12 +554,25 @@ proc setAlt*(ui: UiRoot, v: bool) =
   ui.dirty = true
   ui.altChanged()
 
+proc keyDesigner(ui: UiRoot): DesignHook =
+  ## The design hook that owns the keyboard now, if any: the one last pressed
+  ## in, while focus is free or inside its scope.
+  let d = ui.fKeyDesigner
+  if d == nil or d.scope == nil or not d.scope.isVisible: return nil
+  if ui.fFocused == nil or inside(d.scope, ui.fFocused): d else: nil
+
 proc keyDown(ui: UiRoot, key: Key, shift: ShiftState, repeat = false): bool =
   if key == keyLAlt or key == keyRAlt: ui.setAlt(true)
   let wasRepeat = ui.keyRepeat
   ui.keyRepeat = repeat
   defer: ui.keyRepeat = wasRepeat
   var k = key
+  let kd = ui.keyDesigner()
+  if kd != nil:
+    if kd.designKeyDown(k, shift): return true
+    if ui.fFocused != nil:       # a control inside the design scope: no delivery
+      ui.runKeyChain(k, shift)
+      return true
   let target = if ui.fFocused != nil: ui.fFocused else: Control(ui.root)
   if ui.keyPreview and target != Control(ui.root):
     ui.root.doKeyDown(k, shift)
@@ -485,6 +589,10 @@ proc keyDown(ui: UiRoot, key: Key, shift: ShiftState, repeat = false): bool =
 proc keyUp(ui: UiRoot, key: Key, shift: ShiftState): bool =
   if key == keyLAlt or key == keyRAlt: ui.setAlt(false)
   var k = key
+  let kd = ui.keyDesigner()
+  if kd != nil:
+    kd.designKeyUp(k, shift)
+    return true
   let target = if ui.fFocused != nil: ui.fFocused else: Control(ui.root)
   if ui.keyPreview and target != Control(ui.root):
     ui.root.doKeyUp(k, shift)
@@ -542,11 +650,13 @@ proc handle*(ui: UiRoot, pe: PlatformEvent): bool =
   of ekKeyUp: ui.keyUp(pe.key, pe.shift)
   of ekTextInput:
     if ui.fFocused == nil: return false
+    if ui.designers.len > 0 and ui.keyDesigner() != nil: return true
     var s = pe.text
     ui.fFocused.doKeyPress(s)
     true
   of ekTextEditing:
     if ui.fFocused == nil: return false
+    if ui.designers.len > 0 and ui.keyDesigner() != nil: return true
     ui.fFocused.doTextEditing(pe.text, pe.editStart, pe.editLength)
     true
   of ekWindowMouseLeave:
@@ -601,7 +711,7 @@ proc paintFrame*(ui: UiRoot, clear, present: bool) =
   ui.root.layoutIfNeeded()
   if ui.hoverStale:
     ui.hoverStale = false
-    if ui.mouseInside and ui.fCaptured == nil: ui.setHover(ui.hitAt(ui.lastPos))
+    if ui.mouseInside and ui.fCaptured == nil: ui.setHover(ui.hoverAt(ui.lastPos))
     ui.root.layoutIfNeeded()
   var full = ui.dirty
   var bb = false

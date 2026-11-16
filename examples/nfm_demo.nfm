@@ -1,0 +1,86 @@
+object LoginForm: Form
+  width = 400
+  height = 330
+  caption = 'Sign in (nfm_demo.nfm)'
+  position = poScreenCenter
+  object menu: MainMenu
+    object fileMenu: MenuItem
+      caption = '&File'
+      object: MenuItem
+        caption = '&Clear'
+        shortcut = 'Ctrl+L'
+        onClick = clearClick
+      end
+      object: MenuItem
+        caption = '-'
+      end
+      object: MenuItem
+        caption = 'E&xit'
+        shortcut = 'Ctrl+Q'
+        onClick = exitClick
+      end
+    end
+  end
+  object title: Label
+    left = 24
+    top = 20
+    caption = 'Welcome back'
+    font.size = 22
+    font.style = [fsBold]
+  end
+  object userLabel: Label
+    left = 24
+    top = 70
+    caption = '&User name'
+    focusControl = userEdit
+  end
+  object userEdit: Edit
+    left = 24
+    top = 92
+    width = 340
+    anchors = [akLeft, akTop, akRight]
+    placeholder = 'you@example.com'
+  end
+  object passLabel: Label
+    left = 24
+    top = 130
+    caption = '&Password'
+    focusControl = passEdit
+  end
+  object passEdit: Edit
+    left = 24
+    top = 152
+    width = 340
+    anchors = [akLeft, akTop, akRight]
+    password = true
+  end
+  object remember: CheckBox
+    left = 24
+    top = 194
+    width = 200
+    caption = 'Remember me'
+    onChange = rememberChange
+  end
+  object okButton: Button
+    left = 188
+    top = 236
+    width = 84
+    anchors = [akRight, akBottom]
+    caption = 'Sign in'
+    isDefault = true
+    onClick = okClick
+  end
+  object cancelButton: Button
+    left = 280
+    top = 236
+    width = 84
+    anchors = [akRight, akBottom]
+    caption = 'Cancel'
+    isCancel = true
+    onClick = cancelClick
+  end
+  object status: StatusBar
+    simplePanel = true
+    simpleText = 'Enter your credentials.'
+  end
+end

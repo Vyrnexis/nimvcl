@@ -1,0 +1,64 @@
+object Sample: Form
+  width = 420
+  height = 300
+  caption = 'Sign in'
+  object mainMenu: MainMenu
+    object fileMenu: MenuItem
+      caption = '&File'
+      object: MenuItem
+        caption = 'E&xit'
+        shortcut = 'Ctrl+Q'
+        onClick = exitClick
+      end
+    end
+  end
+  object userLabel: Label
+    left = 16
+    top = 12
+    caption = 'It\'s a name'
+    focusControl = userEdit
+  end
+  object userEdit: Edit
+    left = 16
+    top = 34
+    width = 200
+    anchors = [akLeft, akTop, akRight]
+    placeholder = 'you@example.com'
+  end
+  object okButton: Button
+    left = 16
+    top = 80
+    font.size = 18
+    font.style = [fsBold]
+    color = #336699
+    caption = 'OK'
+    isDefault = true
+    onClick = okClick
+  end
+  object roleCombo: ComboBox
+    left = 16
+    top = 120
+    items = (
+      'Viewer'
+      'Editor'
+    )
+    itemIndex = 1
+  end
+  object table: ListView
+    left = 16
+    top = 160
+    object: ListColumn
+      caption = 'Name'
+      width = 120
+    end
+    object: ListColumn
+      caption = 'Size'
+      alignment = taRight
+    end
+  end
+  object status: StatusBar
+    object: StatusPanel
+      text = 'Ready'
+    end
+  end
+end

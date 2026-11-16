@@ -46,3 +46,31 @@ suite "form macro errors":
 
   test "wrong value type is reported on the property's line":
     expectError("wrong_type.nim", "width", 6)
+
+suite "loadForm errors (.nfm files)":
+  test "syntax error is reported with file:line:col":
+    expectError("nfm_parse_error.nim", "nfm_parse_error.nfm:2:13: unterminated string", 4)
+
+  test "unknown class":
+    expectError("nfm_unknown_class.nim", "nfm_unknown_class.nfm:2:3: unknown class `Buttn`", 4)
+
+  test "unknown property":
+    expectError("nfm_unknown_property.nim",
+                "nfm_unknown_property.nfm:3:5: `Button` has no property `captoin`", 4)
+
+  test "value of the wrong type":
+    expectError("nfm_bad_value.nim",
+                "nfm_bad_value.nfm:3:5: the value of `width` does not fit its type in `Button`", 4)
+
+  test "duplicate object name":
+    expectError("nfm_duplicate_name.nim", "nfm_duplicate_name.nfm:4:3: duplicate object name `ok`", 4)
+
+  test "unknown event":
+    expectError("nfm_unknown_event.nim", "nfm_unknown_event.nfm:3:5: `Button` has no event `onTap`", 4)
+
+  test "a handler that is never defined":
+    expectError("nfm_missing_handler.nim", "implementation of", 4)
+    check "okClick" in firstError(compileFail("nfm_missing_handler.nim"))
+
+  test "missing file":
+    expectError("nfm_missing_file.nim", "cannot read", 4)

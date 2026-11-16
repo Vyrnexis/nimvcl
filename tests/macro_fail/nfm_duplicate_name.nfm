@@ -1,0 +1,6 @@
+object Bad: Form
+  object ok: Button
+  end
+  object ok: Label
+  end
+end

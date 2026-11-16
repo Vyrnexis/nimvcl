@@ -4,8 +4,7 @@ A Delphi VCL-style UI library for Nim 2.2, drawn entirely with SDL3 (Linux
 first). Forms, `Align` and `Anchors`, `onClick` events, actions, menus, and a
 `form` macro that works like a `.dfm` checked by the compiler.
 
-**Status:** early. The API can still change. See [PLAN.md](PLAN.md) for the
-architecture and roadmap.
+**Status:** early. The API can still change.
 
 ![The nimvcl showcase: buttons and choices](docs/images/showcase-buttons.png)
 
@@ -94,7 +93,8 @@ Start at the [documentation index](docs/README.md).
   [actions](docs/guide/actions.md),
   [threads and timers](docs/guide/threads-and-timers.md),
   [painting](docs/guide/painting.md), [theming](docs/guide/theming.md),
-  [the form macro](docs/forms.md).
+  [the form macro](docs/forms.md),
+  [form files and the property registry](docs/guide/form-files.md).
 - Components: one page each, from [Label](docs/components/label.md) to
   [TreeView](docs/components/treeview.md); see the
   [component list](docs/README.md#components).
@@ -114,6 +114,8 @@ nim c -r examples/memo_demo.nim       # Memo
 nim c -r examples/grid_demo.nim       # DrawGrid and StringGrid
 nim c -r examples/views_demo.nim      # TreeView and ListView
 nim c -r examples/editor_demo.nim     # a text editor: file tree, CodeEdit tabs, find bar
+nim c -r examples/inspector_demo.nim  # the object inspector bound to a small form, .nfm save and reload
+nim c -r examples/nfm_demo.nim        # a form loaded from a .nfm file at compile time
 ```
 
 (`nimble install -d` first; `nim.cfg` already puts `src` on the path.)

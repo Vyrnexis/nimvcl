@@ -20,10 +20,11 @@
 ## client alive for as long as the list lives).
 
 import ../graphics/[geometry, canvas, image]
+import ../core/component
 export image
 
 type
-  ImageList* = ref object
+  ImageList* = ref object of Component
     fImages: seq[Image]
     fWidth, fHeight: float32
     fVersion: int
@@ -32,8 +33,12 @@ type
 
 const DisabledAlpha* = 110'u8     ## opacity of an icon drawn disabled
 
-proc newImageList*(width = 16'f32, height = 16'f32): ImageList =
-  ImageList(fWidth: width, fHeight: height)
+proc newImageList*(width = 16'f32, height = 16'f32,
+                   owner: Component = nil): ImageList =
+  new result
+  result.initComponent(owner)
+  result.fWidth = width
+  result.fHeight = height
 
 func version*(l: ImageList): int = l.fVersion
   ## Incremented by every change.

@@ -20,6 +20,7 @@ import nimvcl/controls/[common, label, button, checkbox, radiobutton, panel,
                         imagelist, viewsupport, treeview, listview,
                         gridmodel, grids, actions]
 import nimvcl/controls/docking
+import nimvcl/controls/designsurface
 import nimvcl/controls/[codemodel, highlight, nimlexer, folding, brackets, search,
                         codecommands, findbar, codeedit]
 import nimvcl/dsl/formmacro
@@ -33,6 +34,7 @@ export common, label, button, checkbox, radiobutton, panel, paintbox, bevel,
        pagecontrol, flowpanel, dialogs, memomodel, memo, combobox,
        imagelist, viewsupport, treeview, listview, gridmodel, grids, actions
 export docking
+export designsurface
 export codemodel, highlight, nimlexer, folding, brackets, search, codecommands,
        findbar, codeedit
 export formmacro

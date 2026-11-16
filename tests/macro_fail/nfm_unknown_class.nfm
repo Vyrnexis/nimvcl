@@ -1,0 +1,5 @@
+object Bad: Form
+  object ok: Buttn
+    caption = 'OK'
+  end
+end

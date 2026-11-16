@@ -1,7 +1,9 @@
 # Forms and frames
 
 `form` declares a window as a typed tree, like a Delphi `.dfm` that the Nim
-compiler checks. `frame` does the same for a reusable composite control
+compiler checks. (To keep the tree in a separate text file instead, a real
+`.dfm`, see [Form files](guide/form-files.md): `loadForm MainForm, "MainForm.nfm"`
+produces the same kind of typed form.) `frame` does the same for a reusable composite control
 (VCL `TFrame`). Both are exported by `import nimvcl`.
 
 ```nim
@@ -43,6 +45,7 @@ Inside a `form`/`frame` block, every statement is one of:
 | Statement | Meaning |
 |---|---|
 | `prop = value` | property assignment on the enclosing node (`self` at top level). `value` is any expression |
+| `font.size = 12` | one part of `font`, `margins`, `padding` or `constraints` |
 | `Type name:` + block | child of the enclosing node, stored in the field `name` (and `name.name = "name"`) |
 | `Type:` + block | unnamed child (a local only) |
 | `onEvent: stmts` | shorthand for `onEvent = proc(sender: Control) = stmts`; only for events of type `NotifyEvent` |
@@ -141,8 +144,9 @@ proc newBadge*(parent: Container = nil): Badge =
 
 ## Limitations
 
-* Properties are assigned with a plain `child.prop = value`; nested targets
-  such as `font.size = 12` are not supported (assign a whole `font(...)`).
+* Properties are assigned with a plain `child.prop = value`. The parts of a
+  composite property (`font`, `margins`, `padding`, `constraints`) can be set one
+  at a time, `font.size = 12` or `margins.left = 8`; nothing deeper than that.
 * Child types must be a plain identifier (no module qualification). Their
   constructor is looked up by name, so import the module that defines it.
 * Procs inside the block are not forward-declared: a proc can only call procs

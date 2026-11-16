@@ -1,0 +1,5 @@
+object Bad: Form
+  object ok: Button
+    onTap = tapped
+  end
+end
