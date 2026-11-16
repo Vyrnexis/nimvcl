@@ -10,8 +10,8 @@ const
 proc compileFail(file: string): string =
   ## Output of `nim c` on tests/macro_fail/<file> (compile only).
   let cmd = "nim c --hints:off --path:" & quoteShell(root / "src") &
-            " --compileOnly --nimcache:" & quoteShell(root / "build" / "nimcache_fail") &
-            " -o:" & quoteShell(root / "build" / "macro_fail_out") &
+            " --compileOnly --nimcache:" & quoteShell(root / "build" / ("nimcache_fail_" & $getCurrentProcessId())) &
+            " -o:" & quoteShell(root / "build" / ("macro_fail_out_" & $getCurrentProcessId())) &
             " " & quoteShell(here / "macro_fail" / file)
   let (output, code) = execCmdEx(cmd)
   check code != 0
