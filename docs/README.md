@@ -26,6 +26,7 @@ properties, events and methods.
 | [Forms and frames](forms.md) | The `form` and `frame` macros (a typed `.dfm`) |
 | [Layout](guide/layout.md) | `align`, `anchors`, margins, padding, constraints, autoSize |
 | [Events and input](guide/events-and-input.md) | Event types, keyboard, focus, mnemonics, shortcuts |
+| [Docking](guide/docking.md) | Dock panels, floating windows, saving the layout |
 | [Actions](guide/actions.md) | One command shared by menus, toolbars, buttons and keys |
 | [Threads and timers](guide/threads-and-timers.md) | `Timer`, `runOnUi`, `Application.queue` |
 | [Painting and custom controls](guide/painting.md) | `Canvas`, `PaintBox`, subclassing `Control` |
@@ -63,6 +64,7 @@ properties, events and methods.
 | [ScrollBox](components/scrollbox.md) | Scrolling container |
 | [Splitter](components/splitter.md) | Resizable divider |
 | [PageControl and TabControl](components/pagecontrol.md) | Tabs and pages |
+| [DockSite and DockPanel](components/docksite.md) | Dock panels, tab groups, floating windows |
 | [Frame](components/frame.md) | Reusable composite control |
 | [Bevel](components/bevel.md) | Separator lines and frames |
 

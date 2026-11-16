@@ -19,6 +19,8 @@ import nimvcl/controls/[common, label, button, checkbox, radiobutton, panel,
                         memomodel, memo, combobox,
                         imagelist, viewsupport, treeview, listview,
                         gridmodel, grids, actions]
+import nimvcl/controls/docking
+import nimvcl/controls/[codemodel, highlight, nimlexer, folding, brackets, search]
 import nimvcl/dsl/formmacro
 
 export color, geometry, font, image, context, canvas, sdlutil, events, window
@@ -29,4 +31,6 @@ export common, label, button, checkbox, radiobutton, panel, paintbox, bevel,
        hint, progressbar, trackbar, spinedit, splitter, statusbar, toolbar,
        pagecontrol, flowpanel, dialogs, memomodel, memo, combobox,
        imagelist, viewsupport, treeview, listview, gridmodel, grids, actions
+export docking
+export codemodel, highlight, nimlexer, folding, brackets, search
 export formmacro
