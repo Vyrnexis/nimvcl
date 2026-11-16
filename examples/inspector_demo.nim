@@ -208,12 +208,6 @@ proc ev(f: Form, kind: EventKind, p: PointF, clicks = 1) =
   Application.dispatch(PlatformEvent(kind: kind, windowId: f.win.id, x: p.x, y: p.y,
                                      button: mbLeft, clicks: clicks))
 
-proc resetWindow(d: Demo) =
-  ## Closing a drop-down resizes an offscreen window; put it back.
-  d.win.setLogicalSize(900, 620)
-  d.syncMetrics()
-  d.ui.invalidateAll()
-
 proc clickValue(d: Demo, name: string) =
   let i = d.ins.indexOfProp(name)
   let r = d.ins.valueRect(i)
@@ -226,10 +220,7 @@ proc shots(dir: string) =
   Application.init()
   let d = newDemo()
   d.show()
-  d.win.setLogicalSize(900, 620)
-  d.syncMetrics()
   d.shoot(dir, "1-properties-light")
-  
   d.ui.invalidateAll()
   d.shoot(dir, "1c")
   d.ins.setExpanded("font", true)
@@ -244,7 +235,6 @@ proc shots(dir: string) =
   d.shoot(dir, "4-enum-dropdown-light")
   d.ins.cancelEdit()
   d.ins.editCombo.closeUp()
-  d.resetWindow()
   d.select(Control(d.sample.findComponent("userEdit")))
   d.ins.sortedFlat = true
   d.shoot(dir, "5-flat-light")
@@ -255,7 +245,6 @@ proc shots(dir: string) =
   d.shoot(dir, "6-color-dark")
   d.ins.cancelEdit()
   d.ins.editCombo.closeUp()
-  d.resetWindow()
   d.select(Control(d.sample.findComponent("cancelButton")), add = true)
   d.shoot(dir, "7-multi-dark")
 

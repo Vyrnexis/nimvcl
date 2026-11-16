@@ -3,7 +3,7 @@
 ## borderless top-level window at the same place; all logic is the same.
 ## Events are built by hand and fed through Application.dispatch.
 
-import std/unittest
+import std/[unittest, os]
 import nimvcl
 import nimvcl/core/popup
 
@@ -252,3 +252,55 @@ suite "popup windows":
     check mainGated
     check inside and outsideClosed and not belowOpen
     check menuChain(m).len == 0
+
+suite "popups leave the owner window alone":
+  ## Opening and closing a drop-down or a context menu (a separate window, a
+  ## borderless top-level one on the offscreen driver) must not change the
+  ## owner's window size, logical size or what a screenshot shows.
+
+  proc shotBytes(f: Form, full: bool): string =
+    let path = getTempDir() / "nimvcl_popup_shot.bmp"
+    doAssert f.screenshot(path, full)
+    result = readFile(path)
+    removeFile path
+
+  proc sizes(f: Form): string =
+    $f.win.pointSize & $f.win.pixelSize & $f.win.logicalSize & $f.width & "x" & $f.height
+
+  test "ComboBox drop-down and PopupMenu: size and image unchanged":
+    let f = newForm(nil, 1200, 800)
+    let cb = newComboBox(f, csDropDownList, 10, 10, 200, 28)
+    cb.items = ["one", "two", "three"]
+    cb.itemIndex = 1
+    let pm = newPopupMenu(f)
+    pm.addItem("Copy")
+    pm.addItem("Paste")
+    f.show()
+    Application.processMessages()
+    let before = sizes(f)
+    let ref0 = shotBytes(f, full = true)
+    cb.dropDown()
+    Application.processMessages()
+    check sizes(f) == before
+    cb.closeUp()
+    Application.processMessages()
+    check sizes(f) == before
+    check shotBytes(f, full = false) == ref0      # partial path
+    pm.popup(f, 300, 300)
+    Application.processMessages()
+    check sizes(f) == before
+    closeAllPopups(f)
+    Application.processMessages()
+    check sizes(f) == before
+    check shotBytes(f, full = false) == ref0
+    check shotBytes(f, full = true) == ref0
+
+  test "two screenshots of a 1200x800 form in a row are equal and unclipped":
+    let f = newForm(nil, 1200, 800)
+    newButton(f, "far corner", 1000, 700, 150, 40)
+    f.show()
+    let a = shotBytes(f, full = false)
+    let b = shotBytes(f, full = false)
+    check f.win.pixelSize == (1200, 800)
+    check a == b
+    check b == shotBytes(f, full = true)
