@@ -31,6 +31,10 @@ Run the gallery yourself: `nim c -r examples/showcase.nim`.
   TrackBar, ProgressBar, ScrollBar, ScrollBox, Splitter, StatusBar, ToolBar,
   PageControl and TabControl, FlowPanel, GridPanel, PaintBox, Image, Bevel,
   Frame.
+- `CodeEdit`: a source code editor with a gutter (line numbers, fold markers,
+  breakpoint and bookmark icons), Nim syntax highlighting that follows the
+  theme, code folding, bracket matching, a find and replace bar, auto-indent
+  and a buffer that opens a 100 MB file in about a second.
 - Main menu, popup menus, hints, `&` mnemonics, shortcuts.
 - `ActionList` / `Action`: one command shared by menu items, tool buttons,
   buttons, check boxes and shortcuts.
@@ -109,6 +113,7 @@ nim c -r examples/edit_demo.nim       # Edit
 nim c -r examples/memo_demo.nim       # Memo
 nim c -r examples/grid_demo.nim       # DrawGrid and StringGrid
 nim c -r examples/views_demo.nim      # TreeView and ListView
+nim c -r examples/editor_demo.nim     # a text editor: file tree, CodeEdit tabs, find bar
 ```
 
 (`nimble install -d` first; `nim.cfg` already puts `src` on the path.)

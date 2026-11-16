@@ -459,6 +459,8 @@ proc setSelections*(m: CodeModel, s: openArray[Selection]) =
   m.breakGroup()
   if v != m.sels:
     m.sels = v
+    if m.groupDepth > 0 and m.undoStack.len > 0 and not m.newStepPending:
+      m.undoStack[^1].selAfter = v      # the group's final selection is what redo restores
     m.fireSel()
 
 proc setSelection*(m: CodeModel, s: Selection) = m.setSelections([s])
@@ -753,6 +755,15 @@ proc loadText*(m: CodeModel, data: string): LoadReport =
                       trailingNewline: m.trailingNewline)
   m.fireChanged(0, oldN, m.lines.len)
   m.fireSel()
+
+proc setLineEnding*(m: CodeModel, e: LineEnding) =
+  ## Changes the terminator `toText` / `saveFile` write. The document counts as
+  ## modified until it is saved again.
+  if e == m.fLineEnding and not m.fMixed: return
+  m.fLineEnding = e
+  m.fMixed = false
+  m.fModified = true
+  m.savedStep = -1
 
 proc loadFile*(m: CodeModel, path: string): LoadReport =
   ## Reads `path` (raises IOError if it cannot be read). Strips a UTF-8 BOM.

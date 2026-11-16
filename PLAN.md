@@ -3,9 +3,9 @@
 A Delphi VCL-style UI library for Nim, drawn entirely with SDL3.
 
 Status: phases 0-6 are done (the MVP, the standard set and the business set),
-and a deep review round has landed on top of them. Phases 7-9 (editor set,
-designer, reach) have not started. See "Progress and deviations" and "Open
-issues" at the end.
+and a deep review round has landed on top of them. Phase 7a (`CodeEdit`) is
+done; the rest of phases 7-9 (docking, designer, reach) are in progress or not
+started. See "Progress and deviations" and "Open issues" at the end.
 
 ## 1. Goal
 
@@ -270,7 +270,7 @@ These are reusable library parts. The IDE application itself lives in a
 separate repo, `nimvcl-ide` (phase 8), the way Delphi's VCL and its IDE were
 separate.
 
-- **7a. `CodeEdit`:** a code editor control (Delphi's SynEdit), separate from
+- **7a. `CodeEdit` (done):** a code editor control (Delphi's SynEdit), separate from
   Memo. It has a line-number gutter, a syntax-highlighting hook (a tokenizer
   per language, with Nim built in), current-line highlighting, bracket
   matching, folding, find and replace, and a buffer that opens very large
@@ -361,6 +361,18 @@ with ScrollingControl, `{.discardable.}` on every control constructor, the
 Splitter, StatusBar, ToolBar and ToolButton, scrolling pages in the settings
 demo, and `Control.free` (plus `PopupMenu.free`, and release on `MenuItem.delete`/
 `clear`) so Actions and ImageLists no longer keep removed controls alive.
+
+**Phase 7a (`CodeEdit`)**: the non-visual layer is plain Nim without SDL
+(`codemodel`: line array buffer with undo, line endings and byte-exact files;
+`highlight` + `nimlexer`: incremental highlighter with a Nim lexer;
+`folding`; `brackets`; `search` + `minire`: find with a built-in regex engine;
+`codecommands`: indent, comment, move-line and auto-indent rules). On top of it
+`codeedit` is the control (gutter with markers, line numbers and fold chevrons,
+inline IME, find bar in `findbar`, partial repaint of the caret) and
+`examples/editor_demo.nim` is the exit criterion: a small editor with a file
+tree, tabbed editors, find bar and status bar. Not done yet: word wrap,
+multiple carets, a minimap, language support beyond Nim (the `Highlighter` hook
+exists), wide-character (CJK) cell widths for Up/Down columns.
 
 Deviations from the plan, decided while building (details in the module
 comments and `docs/`):

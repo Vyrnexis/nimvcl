@@ -49,6 +49,7 @@ properties, events and methods.
 |---|---|
 | [Edit](components/edit.md) | Single-line text box |
 | [Memo](components/memo.md) | Multi-line text editor |
+| [CodeEdit](components/codeedit.md) | Source code editor: gutter, highlighting, folding, find bar |
 | [SpinEdit](components/spinedit.md) | Integer edit with up and down buttons |
 | [ComboBox](components/combobox.md) | Edit or list with a drop-down |
 | [TrackBar](components/trackbar.md) | Slider |

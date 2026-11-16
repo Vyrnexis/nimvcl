@@ -165,6 +165,7 @@ func charEnd(line: string, i: int): int =
   if k < n and line[k] == '\'': k + 1 else: -1
 
 method languageName*(h: NimHighlighter): string = "nim"
+method commentToken*(h: NimHighlighter): string = "#"
 
 method lexLine*(h: NimHighlighter, line: string, state: LexState,
                 tokens: var seq[Token]): LexState =

@@ -74,6 +74,11 @@ method lexLine*(h: Highlighter, line: string, state: LexState,
 
 method languageName*(h: Highlighter): string {.base.} = "text"
 
+method commentToken*(h: Highlighter): string {.base.} =
+  ## The line-comment prefix (`#`, `//`, `--`) used by "toggle comment";
+  ## empty when the language has none.
+  ""
+
 # ------------------------------------------------------------------- cache
 
 proc spliceSeq[T](s: var seq[T], first, oldN, newN: int) =
@@ -164,6 +169,11 @@ proc lexAll*(h: Highlighter) =
   if h.model != nil: h.ensure(h.model.lineCount - 1)
 
 func isClean*(h: Highlighter, line: int): bool = line < h.clean
+
+func cleanCount*(h: Highlighter): int = h.clean
+  ## Lines `0 ..< cleanCount` are lexed with exact states; asking for a token
+  ## beyond it lexes everything in between. A viewer of a huge file checks it
+  ## to avoid a long synchronous lex when the view jumps far ahead.
 
 proc tokenAt*(h: Highlighter, line, col: int): Token =
   ## The token covering byte `col` of `line`; a zero-length tkText token if
