@@ -32,7 +32,9 @@
 ##   drawn); Alt disables both.
 ## * The 8 handles resize (live); the constraints and `minSize` apply. Aligned
 ##   controls (`align != alNone`) cannot be moved and show only the handle of
-##   their free edge.
+##   their free edge. The design root has the right, bottom and corner handles
+##   (inside its corner), which resize the designed form as one undo step; it
+##   cannot be moved.
 ## * Keys: arrows move 1 px (Ctrl: one grid step), Shift+arrows resize (with
 ##   Ctrl: grid step), Delete deletes, Esc cancels a drag or creation, else
 ##   selects the parent, Tab and Shift+Tab walk the siblings, Ctrl+A selects
@@ -48,7 +50,8 @@
 ##
 ## Non-visual components (timers, image lists, menus...) are registered with
 ## `addNonVisual` and drawn as small draggable tiles; they are not in the
-## control tree. They appear in selections as `NonVisualTile` controls.
+## control tree. They appear in selections as `NonVisualTile` controls. A
+## tile's position is kept in its component's `designLeft`/`designTop`.
 ##
 ## The overlay is repainted correctly with partial repaints as long as changes
 ## go through the designer. After you change the geometry of a selected control
@@ -254,8 +257,12 @@ proc dropTarget(d: FormDesigner, p: PointF, excl: seq[Control]): Container =
 
 proc handleMask*(d: FormDesigner, c: Control): set[DesignHandle] =
   ## The handles `c` shows: all eight, the free edge of an aligned control,
-  ## none for the design root, tiles and `alClient` controls.
-  if c == Control(d.scope) or c.isTile: return {}
+  ## none for tiles and `alClient` controls. The design root has the right,
+  ## bottom and bottom-right ones (drawn inside its corner) unless its size is
+  ## owned by an `align`.
+  if c == Control(d.scope):
+    return if c.align in {alNone, alCustom}: {dhE, dhS, dhSE} else: {}
+  if c.isTile: return {}
   case c.align
   of alNone, alCustom: {dhNW .. dhW}
   of alTop: {dhS}
@@ -278,6 +285,19 @@ proc handleRect*(r: RectF, h: DesignHandle): RectF =
   of dhS: rectF(mx, r.bottom, s, s)
   of dhSW: rectF(r.x - s, r.bottom, s, s)
   of dhW: rectF(r.x - s, my, s, s)
+
+proc handleRectOf(d: FormDesigner, c: Control, r: RectF, h: DesignHandle): RectF =
+  ## Handles of a control hang outside it; those of the design root sit
+  ## inside its edges, since nothing outside the root is painted or hit.
+  if c != Control(d.scope): return handleRect(r, h)
+  let s = HandleSize
+  let mx = r.x + r.w / 2 - s / 2
+  let my = r.y + r.h / 2 - s / 2
+  case h
+  of dhE: rectF(r.right - s, my, s, s)
+  of dhS: rectF(mx, r.bottom - s, s, s)
+  of dhSE: rectF(r.right - s, r.bottom - s, s, s)
+  else: handleRect(r, h)
 
 proc visibleHandles(d: FormDesigner, c: Control): set[DesignHandle] =
   result = d.handleMask(c)
@@ -307,7 +327,7 @@ proc handleAt(d: FormDesigner, p: PointF, h: var DesignHandle): bool =
   for c in d.fSel:
     let r = d.boundsOf(c)
     for k in d.visibleHandles(c):
-      if handleRect(r, k).inflate(2).contains(p):
+      if d.handleRectOf(c, r, k).inflate(2).contains(p):
         h = k
         return true
 
@@ -336,10 +356,18 @@ proc overlayRects(d: FormDesigner): seq[RectF] =
   for g in d.fGuides: result.add g.inflate(2)
   if d.fBand.w > 0 or d.fBand.h > 0: result.add d.fBand.inflate(2)
 
+proc syncTiles(d: FormDesigner) =
+  ## Keeps `designLeft`/`designTop` of the tiles' components at the tile position.
+  for t in d.fTiles:
+    if t.component != nil:
+      t.component.designLeft = int(round(t.left))
+      t.component.designTop = int(round(t.top))
+
 proc refresh*(d: FormDesigner) =
   ## Repaints the overlay (old and new areas). Call after changing the
   ## geometry of a selected control from outside the designer.
   if d.scope == nil: return
+  d.syncTiles()
   for r in d.fLastOver: d.scope.invalidate(r)
   d.fLastOver = d.overlayRects()
   for r in d.fLastOver: d.scope.invalidate(r)
@@ -538,7 +566,8 @@ proc addNonVisual*(d: FormDesigner, comp: Component, x, y: float32,
                    kind = "", icon: Image = nil): NonVisualTile {.discardable.} =
   ## Shows `comp` as a tile at (`x`, `y`) in the design root. `kind` (a short
   ## class name such as "Timer") and `icon` decide what the tile shows; the
-  ## component's name is drawn under it.
+  ## component's name is drawn under it. The position is kept in the
+  ## component's `designLeft`/`designTop` while the tile is moved.
   let t = NonVisualTile(component: comp, kind: kind, icon: icon)
   t.initControl()
   t.name = comp.name
@@ -546,6 +575,19 @@ proc addNonVisual*(d: FormDesigner, comp: Component, x, y: float32,
   d.fTiles.add t
   d.refresh()
   t
+
+proc addNonVisual*(d: FormDesigner, comp: Component, kind = "",
+                   icon: Image = nil): NonVisualTile {.discardable.} =
+  ## Like the other `addNonVisual`, at the position saved in the component
+  ## (`designLeft`, `designTop`, as a form file stores them). A component
+  ## without a saved position (both 0) goes to the next free spot of a row
+  ## along the top of the design root.
+  var x = float32(comp.designLeft)
+  var y = float32(comp.designTop)
+  if comp.designLeft == 0 and comp.designTop == 0:
+    x = 8 + float32(d.fTiles.len) * (TileSize + 24)
+    y = 8
+  d.addNonVisual(comp, x, y, kind, icon)
 
 proc removeNonVisual*(d: FormDesigner, comp: Component) =
   for i in 0 ..< d.fTiles.len:
@@ -913,6 +955,12 @@ proc updateResize(d: FormDesigner, p: PointF, shift: ShiftState) =
               (h.hx > 0 and m * {dhE, dhNE, dhSE} != {})
     let okY = (h.hy < 0 and m * {dhN, dhNW, dhNE} != {}) or
               (h.hy > 0 and m * {dhS, dhSW, dhSE} != {})
+    if c == Control(d.scope):
+      # the design root keeps its position; its size (not the edge) snaps
+      let (w, hh) = d.sizeOk(c, if okX: snapE(o.w + dx) else: o.w,
+                             if okY: snapE(o.h + dy) else: o.h)
+      c.setBounds(o.x, o.y, w, hh)
+      continue
     var l = o.x
     var t = o.y
     var r = o.right
@@ -1258,7 +1306,7 @@ proc paintOverlay(d: FormDesigner, cv: Canvas) =
     cv.dashed(r, if i == 0: t.accent else: t.borderStrong)
     let fill = if i == 0 or single: t.accent else: t.textMuted
     for h in d.visibleHandles(c):
-      let hr = handleRect(r, h)
+      let hr = d.handleRectOf(c, r, h)
       cv.fillRect(hr, hex"#ffffff")
       cv.fillRect(hr.inflate(-1), fill)
   # the pending state is also what the next refresh compares against

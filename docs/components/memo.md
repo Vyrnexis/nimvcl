@@ -29,6 +29,7 @@ echo memo.text            # lines joined with "\n"
 | `scrollBars` | `MemoScrollBars` | `msNone`, `msHorizontal`, `msVertical`, `msBoth` |
 | `maxLength` | int | Limit in characters |
 | `placeholder` | string | Hint while empty |
+| `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
 | `caretPos` | `MemoPos` | `(line, col)` with a byte column |
 | `selStart`, `selLength`, `selText` | | Selection in the joined text (byte offsets) |
 

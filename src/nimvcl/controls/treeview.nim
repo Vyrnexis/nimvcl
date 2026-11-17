@@ -112,6 +112,7 @@ type
                         rect: RectF, state: ItemStates, defaultDraw: var bool)
 
   TreeView* = ref object of ScrollingControl
+    fBorder: BorderStyle
     fRoot: TreeNode
     fRows: seq[TreeNode]
     fSel: HashSet[TreeNode]
@@ -1055,7 +1056,7 @@ proc cancelSlow(tv: TreeView) =
 proc armSlow(tv: TreeView, n: TreeNode) =
   tv.fSlowNode = n
   if tv.fSlowTimer == nil:
-    let t = newTimer(tv, tv.slowClickDelay)
+    let t = newTimer(nil, tv.slowClickDelay)
     t.onTimer = proc(s: Timer) =
       s.enabled = false
       let m = tv.fSlowNode
@@ -1269,7 +1270,7 @@ method paint*(tv: TreeView, c: Canvas) =
   let t = tv.theme
   let enabled = tv.isEnabled
   let r = tv.clientRect
-  c.fillRoundRect(r, t.radius, if enabled: t.surface else: t.surfaceAlt)
+  c.fillFrame(r, t, tv.fBorder, if enabled: t.surface else: t.surfaceAlt)
   let vp = tv.viewport
   let ih = tv.itemHeight
   let focused = tv.focused
@@ -1323,7 +1324,7 @@ method paint*(tv: TreeView, c: Canvas) =
                taLeft, vaCenter)
   c.popClip()
   let ring = focused
-  c.strokeRoundRect(r, t.radius, if ring: t.focusRing else: t.borderStrong,
+  c.strokeFrame(r, t, tv.fBorder, if ring: t.focusRing else: t.borderStrong,
                     if ring: t.focusRingWidth else: t.borderWidth)
   procCall paint(Control(tv), c)
   if tv.fExtentStale:                    # rows were removed / hidden: shrink
@@ -1337,8 +1338,17 @@ method paint*(tv: TreeView, c: Canvas) =
 
 # -------------------------------------------------------------------- init
 
+func borderStyle*(x: TreeView): BorderStyle = x.fBorder
+proc `borderStyle=`*(x: TreeView, v: BorderStyle) =
+  ## `bsSingle` (default): the usual border and focus ring; `bsNone`: none,
+  ## so the control can sit flush in a panel.
+  if v == x.fBorder: return
+  x.fBorder = v
+  x.invalidate()
+
 proc initTreeView*(tv: TreeView, owner: Component = nil) =
   tv.initScrollingControl(owner)
+  tv.fBorder = bsSingle
   tv.setBounds(0, 0, 200, 220)
   tv.tabStop = true
   tv.fRoot = TreeNode(fTree: tv, fRow: -1, fLevel: -1, fExpanded: true,

@@ -20,6 +20,12 @@ type
     ## Min/max size. 0 means unconstrained.
     minWidth*, minHeight*, maxWidth*, maxHeight*: float32
 
+  BorderStyle* = enum
+    ## The border of a form (`bsSizeable`, `bsSingle`, `bsNone`) or of a list,
+    ## tree, grid, memo or code editor control: `bsNone` draws none, any other
+    ## value draws the usual one (`bsSingle` is the default).
+    bsSizeable, bsSingle, bsNone
+
   MouseButton* = enum mbLeft, mbRight, mbMiddle, mbX1, mbX2
 
   ShiftKey* = enum

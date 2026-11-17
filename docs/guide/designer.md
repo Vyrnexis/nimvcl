@@ -60,6 +60,7 @@ container is not in a form yet.
 | Drag a selected control | Moves the selection; drop on a container to reparent |
 | Alt while dragging | No grid or guide snapping |
 | Drag a handle | Resizes (live); `constraints` and `minSize` apply |
+| Drag the right, bottom or corner handle of the design root | Resizes the designed form (see below) |
 | Arrows | Move by 1 px; Ctrl: by the grid |
 | Shift+arrows | Resize by 1 px; Ctrl+Shift: by the grid |
 | Delete | Deletes the selection |
@@ -80,6 +81,17 @@ Controls can only be dropped into containers that accept children:
 `TabControl` and `ScrollBox`. Other controls (a `Button`, a `ToolBar`...) are
 selected as a unit and never entered. Set `designer.acceptsChildren` to change
 the rule. The scroll bars of a scrolling control are not design children.
+
+### Resizing the design root
+
+With the design root selected, three handles (right, bottom and bottom-right)
+sit just inside its corner, as Delphi lets you size the form in the designer.
+Dragging one resizes the root live (the size snaps to the grid, `constraints`
+and `minSize` apply), Esc cancels it, and the change is one undo step that also
+fires `onModified`. The root's position never changes and it cannot be moved by
+dragging; a root with an `align` other than `alNone` has no handles, since its
+layout owns the size. Anchored and aligned children follow as in the running
+form. A `Form` root resizes its window.
 
 ### Aligned controls
 
@@ -176,6 +188,12 @@ let timer = newComponent(surface)
 timer.name = "Timer1"
 designer.addNonVisual(timer, 40, 380, kind = "Timer")   # optional icon: Image
 ```
+
+`designer.addNonVisual(timer, kind = "Timer")` (no position) puts the tile at
+the component's saved `designLeft`/`designTop`, the way a form file stores
+them, or in the next free spot of a row along the top when it has none. While a
+tile is moved, nudged, undone or redone its component's `designLeft` and
+`designTop` follow, so `formToNfm` saves the layout of the tiles.
 
 The tile shows the first two letters of `kind` (or the icon) and the name
 under it. It is selected, dragged (inside the design root only) and deleted

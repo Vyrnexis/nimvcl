@@ -138,6 +138,7 @@ type
                                defaultDraw: var bool)
 
   ListView* = ref object of ScrollingControl
+    fBorder: BorderStyle
     fItems: seq[ListItem]
     fColumns: seq[ListColumn]
     fCount: int                      ## virtual item count
@@ -1107,7 +1108,7 @@ proc cancelSlow(lv: ListView) =
 proc armSlow(lv: ListView, i: int) =
   lv.fSlowIdx = i
   if lv.fSlowTimer == nil:
-    let t = newTimer(lv, lv.slowClickDelay)
+    let t = newTimer(nil, lv.slowClickDelay)
     t.onTimer = proc(s: Timer) =
       s.enabled = false
       let j = lv.fSlowIdx
@@ -1479,7 +1480,7 @@ method paint*(lv: ListView, c: Canvas) =
   let t = lv.theme
   let enabled = lv.isEnabled
   let r = lv.clientRect
-  c.fillRoundRect(r, t.radius, if enabled: t.surface else: t.surfaceAlt)
+  c.fillFrame(r, t, lv.fBorder, if enabled: t.surface else: t.surfaceAlt)
   let vp = lv.viewport
   let focused = lv.focused
   let rad = max(t.radius - 1, 2)
@@ -1545,14 +1546,23 @@ method paint*(lv: ListView, c: Canvas) =
   c.popClip()
   if lv.fStyle == vsReport and lv.headerHeight > 0: lv.paintHeader(c)
   let ring = focused
-  c.strokeRoundRect(r, t.radius, if ring: t.focusRing else: t.borderStrong,
+  c.strokeFrame(r, t, lv.fBorder, if ring: t.focusRing else: t.borderStrong,
                     if ring: t.focusRingWidth else: t.borderWidth)
   procCall paint(Control(lv), c)
 
 # -------------------------------------------------------------------- init
 
+func borderStyle*(x: ListView): BorderStyle = x.fBorder
+proc `borderStyle=`*(x: ListView, v: BorderStyle) =
+  ## `bsSingle` (default): the usual border and focus ring; `bsNone`: none,
+  ## so the control can sit flush in a panel.
+  if v == x.fBorder: return
+  x.fBorder = v
+  x.invalidate()
+
 proc initListView*(lv: ListView, owner: Component = nil) =
   lv.initScrollingControl(owner)
+  lv.fBorder = bsSingle
   lv.setBounds(0, 0, 360, 220)
   lv.tabStop = true
   lv.fIndex = -1

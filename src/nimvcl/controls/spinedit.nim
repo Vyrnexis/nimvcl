@@ -194,7 +194,7 @@ proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
   s.fMax = 100
   s.fInc = 1
   s.setBounds(0, 0, 100, currentTheme().controlHeight)
-  s.repeat = newTimer(s, RepeatDelayMs)
+  s.repeat = newTimer(nil, RepeatDelayMs)
   s.repeat.onTimer = proc(t: Timer) = s.repeatTick()
   s.padding = spacing(2)
   let e = newEdit(s)

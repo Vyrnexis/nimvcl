@@ -87,6 +87,38 @@ for i, caption in ["Small", "Medium", "Large"]:
   b.onClick = sizeClicked
 ```
 
+**Closures made in a `for` loop must capture the loop value.** A `for`
+variable is one variable shared by every pass, so a closure that mentions it
+sees the value of the last pass by the time it runs. Capture a copy with
+`capture` from `std/sugar`, or build the closure in a helper proc, whose
+parameters are fresh on each call:
+
+```nim
+import std/sugar
+
+# wrong: every button reports 2
+for i in 0 ..< 3:
+  let b = newButton(form, "Item " & $i, 16, float32(16 + i * 34))
+  b.onClick = proc(sender: Control) = echo "item ", i
+
+# right: capture the value for this pass...
+for i in 0 ..< 3:
+  let b = newButton(form, "Item " & $i, 16, float32(16 + i * 34))
+  capture i:
+    b.onClick = proc(sender: Control) = echo "item ", i
+
+# ...or let a helper proc own it
+proc wire(b: Button, n: int) =
+  b.onClick = proc(sender: Control) = echo "item ", n
+
+for i in 0 ..< 3:
+  wire(newButton(form, "Item " & $i, 16, float32(16 + i * 34)), i)
+```
+
+The same goes for `onChange`, `onTimer`, menu item handlers and every other
+closure made inside a loop. Pattern 3 above (one shared handler and `tag`)
+avoids the problem altogether.
+
 ## Keyboard
 
 `onKeyDown` gets `key: var Key`. Set it to `Key(0)` to swallow the key. (Name the

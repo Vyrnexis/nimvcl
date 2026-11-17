@@ -93,11 +93,18 @@ type
 
   PropError* = object of CatchableError
 
+  EventParam* = object
+    ## One parameter of an event's proc type.
+    name*: string                        ## `sender`
+    typeName*: string                    ## `Control`, `var CloseAction`
+
   PropInfo* = ref object
     name*: string                        ## `"caption"`; a sub-property is `"font.size"`
     kind*: PropKind
     category*: PropCategory
     typeName*: string                    ## the Nim type as written at registration
+    params*: seq[EventParam]             ## events: the handler's parameters (not counting a form's `self`)
+    returnType*: string                  ## events: the result type, "" for none
     enumNames*: seq[string]              ## pkEnum: values by ordinal; pkSet: elements by bit
     stored*: bool                        ## written to form files when not default
     defaultWhen*: string                 ## default while this bool property is true
@@ -301,6 +308,21 @@ proc setHandlerName*(o: Obj, event, handler: string) =
 
 # ---------------------------------------------------------------- PropInfo
 
+macro eventSignature(T: typedesc): untyped =
+  ## `(params, returnType)` of a proc type, as literals.
+  var impl = T.getTypeInst[1].getTypeImpl
+  while impl.kind == nnkBracketExpr or impl.kind == nnkSym: impl = impl.getTypeImpl
+  var params = newTree(nnkBracket)
+  var ret = newLit("")
+  if impl.kind == nnkProcTy:
+    if impl[0][0].kind != nnkEmpty: ret = newLit(impl[0][0].repr)
+    for d in impl[0][1 .. ^1]:
+      for j in 0 ..< d.len - 2:
+        params.add newTree(nnkObjConstr, bindSym"EventParam",
+                           newTree(nnkExprColonExpr, ident"name", newLit(d[j].strVal)),
+                           newTree(nnkExprColonExpr, ident"typeName", newLit(d[^2].repr)))
+  result = newTree(nnkTupleConstr, prefix(params, "@"), ret)
+
 proc propInfo*[C, V](name: string, cat: PropCategory, typeName: string,
                      getter: proc(c: C): V, setter: proc(c: C, v: V)): PropInfo =
   ## One property of class `C` with value type `V`.
@@ -310,6 +332,9 @@ proc propInfo*[C, V](name: string, cat: PropCategory, typeName: string,
     result.enumNames = enumNamesOf(V)
   when V is (proc):
     result.category = pcEvents
+    let sig = eventSignature(V)
+    result.params = sig[0]
+    result.returnType = sig[1]
     result.get = proc(o: Obj): PropValue = pvEvent(handlerNameOf(o, name))
     result.set = proc(o: Obj, v: PropValue) =
       if v.kind != pkEvent: raise kindError("a handler name", v)

@@ -1,7 +1,8 @@
 ## `PageControl` + `TabSheet` and `TabControl` (VCL TPageControl / TTabControl).
 ##
 ## Both draw the same tab strip (`TabBase`): tabs across the top, the selected
-## one joined to the body below. `tabIndex` is the selected tab; changing it
+## one joined to the body below (`tabPosition = tpBottom` puts the strip under
+## the body, tabs hanging down, like the message view of an IDE). `tabIndex` is the selected tab; changing it
 ## (click, keys or code) first asks `onChanging(sender, allowChange)` (set
 ## `allowChange = false` to veto), then fires `onChange`.
 ##
@@ -44,6 +45,9 @@ import ../core/[input, form]
 import ./common
 
 type
+  TabPosition* = enum
+    tpTop, tpBottom          ## where the tab strip sits
+
   TabChangingEvent* = proc(sender: Control, allowChange: var bool)
 
   TabBase* = ref object of Container
@@ -52,6 +56,7 @@ type
     fHotTab: int                # -1 none, tab index, or -2/-3 scroll arrows
     fFillBody: bool
     fHideTabs: bool             # no strip: pages are switched by code only
+    fPos: TabPosition
     fEnsure: bool               # scroll the selected tab into view on next paint
     onChange*: NotifyEvent
     onChanging*: TabChangingEvent
@@ -98,10 +103,26 @@ proc `showTabs=`*(t: TabBase, v: bool) =
   t.requestLayout()
   t.invalidate()
 
+func tabPosition*(t: TabBase): TabPosition = t.fPos
+proc `tabPosition=`*(t: TabBase, v: TabPosition) =
+  ## `tpTop` (default) or `tpBottom`: the strip under the body, the selected
+  ## tab joined to the body above it. Pages and children move to fit.
+  if v == t.fPos: return
+  t.fPos = v
+  t.fHotTab = -1
+  t.needsLayout = true      # the padding moved from the top to the bottom
+  t.requestLayout()
+  t.invalidate()
+
 proc stripHeight*(t: TabBase): float32 =
   ## Height of the tab strip (derived from the theme, no window needed); 0
   ## when `showTabs` is false.
   if t.fHideTabs: 0'f32 else: t.theme.controlHeight
+
+proc place(t: TabBase, r: RectF): RectF =
+  ## A rectangle laid out for a strip along the top edge (y from the strip's
+  ## top), in client coordinates: mirrored for `tpBottom`.
+  if t.fPos == tpTop: r else: rectF(r.x, t.height - r.y - r.h, r.w, r.h)
 
 proc tabWidth(t: TabBase, i: int): float32 =
   if not t.tabVisible(i): return 0
@@ -135,7 +156,7 @@ proc tabRect*(t: TabBase, i: int): RectF =
   ## Tab `i` in client coordinates; empty when scrolled out to the left or
   ## hidden.
   t.normalizeFirst()
-  t.rectOf(i)
+  t.place(t.rectOf(i))
 
 proc tabsRight(t: TabBase): float32 =
   ## Right edge of the last tab as currently scrolled.
@@ -149,6 +170,7 @@ proc arrowRect(t: TabBase, left: bool): RectF =
 
 proc tabAt*(t: TabBase, x, y: float32): int =
   ## Tab under the point, -1 none, -2 / -3 the left / right scroll arrow.
+  let y = if t.fPos == tpTop: y else: t.height - y    # strip-local, from its outer edge
   if y < 0 or y >= t.stripHeight: return -1
   t.normalizeFirst()
   if t.overflowing:
@@ -289,14 +311,15 @@ method paint*(t: TabBase, c: Canvas) =
     t.fEnsure = false
     t.ensureVisible(t.fIndex)
   # body
-  let body = rectF(0, max(h - 1, 0), w, max(t.height - max(h - 1, 0), 0))
+  let bodyH = max(t.height - max(h - 1, 0), 0)
+  let body = rectF(0, if t.fPos == tpTop: max(h - 1, 0) else: 0, w, bodyH)
   if t.fFillBody: c.fillRoundRect(body, th.radius, th.surface)
   c.strokeRoundRect(body, th.radius, th.border, th.borderWidth)
   if t.fHideTabs:
     procCall paint(Control(t), c)
     return
   let right = t.stripRight
-  c.pushClip(rectF(0, 0, right + 2, h))
+  c.pushClip(t.place(rectF(0, 0, right + 2, h)))
   var selR = rectF(0, 0, 0, 0)
   for i in t.fFirst ..< t.tabCount:
     let r = t.rectOf(i)
@@ -305,29 +328,29 @@ method paint*(t: TabBase, c: Canvas) =
     if i == t.fIndex:
       selR = r
       continue
-    c.pushClip(rectF(r.x - 1, 0, r.w + 2, h))
+    c.pushClip(t.place(rectF(r.x - 1, 0, r.w + 2, h)))
     let fill = if t.fHotTab == i and en: th.hover else: th.surfaceAlt
-    c.fillRoundRect(rectF(r.x, r.y, r.w, r.h + 6), th.radius, fill)
-    c.strokeRoundRect(rectF(r.x, r.y, r.w, r.h + 6), th.radius, th.border, 1)
+    c.fillRoundRect(t.place(rectF(r.x, r.y, r.w, r.h + 6)), th.radius, fill)
+    c.strokeRoundRect(t.place(rectF(r.x, r.y, r.w, r.h + 6)), th.radius, th.border, 1)
     c.popClip()
-    c.drawMnemonic(t.tabText(i), t.font, rectF(r.x + 4, r.y, r.w - 8, r.h - 1),
+    c.drawMnemonic(t.tabText(i), t.font, t.place(rectF(r.x + 4, r.y, r.w - 8, r.h - 1)),
                    if en: th.textMuted else: th.textDisabled, t.altHeld,
                    taCenter, vaCenter)
   if selR.w > 0:
-    c.pushClip(rectF(selR.x - 1, 0, selR.w + 2, h))
-    let full = rectF(selR.x, selR.y, selR.w, selR.h + 6)
+    c.pushClip(t.place(rectF(selR.x - 1, 0, selR.w + 2, h)))
+    let full = t.place(rectF(selR.x, selR.y, selR.w, selR.h + 6))
     c.fillRoundRect(full, th.radius, if t.fFillBody: th.surface else: th.window)
     c.strokeRoundRect(full, th.radius, th.borderStrong, 1)
     c.popClip()
     c.drawMnemonic(t.tabText(t.fIndex), t.font,
-                   rectF(selR.x + 4, selR.y, selR.w - 8, selR.h),
+                   t.place(rectF(selR.x + 4, selR.y, selR.w - 8, selR.h)),
                    if en: th.text else: th.textDisabled, t.altHeld, taCenter, vaCenter)
     if t.focused:
-      drawFocusRing(c, rectF(selR.x, selR.y, selR.w, selR.h), th)
+      drawFocusRing(c, t.place(rectF(selR.x, selR.y, selR.w, selR.h)), th)
   c.popClip()
   if t.overflowing:
     for left in [true, false]:
-      let r = t.arrowRect(left)
+      let r = t.place(t.arrowRect(left))
       let canGo =
         if left: t.fFirst > 0
         else: t.tabsRight > right
@@ -340,7 +363,8 @@ method paint*(t: TabBase, c: Canvas) =
   procCall paint(Control(t), c)
 
 method padding*(t: TabBase): Spacing =
-  spacing(1, max(t.stripHeight, 1), 1, 1)
+  if t.fPos == tpTop: spacing(1, max(t.stripHeight, 1), 1, 1)
+  else: spacing(1, 1, 1, max(t.stripHeight, 1))
 
 proc initTabBase(t: TabBase, owner: Component) =
   t.initContainer(owner)

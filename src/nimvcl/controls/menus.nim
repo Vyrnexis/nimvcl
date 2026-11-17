@@ -61,13 +61,15 @@ type
     onClick*: MenuItemEvent
 
   MenuItemEvent* = proc(sender: MenuItem)
+  PopupEvent* = proc(sender: PopupMenu)
+    ## `PopupMenu.onPopup`: called just before the menu opens.
 
   PopupMenu* = ref object of Component
     fRoot: MenuItem
     fTargets: seq[Control]
     fShown: PopupWindow           # the last popup window this menu opened
     fImgListener: int             # id in the image list (0: none)
-    onPopup*: proc(sender: PopupMenu)
+    onPopup*: PopupEvent
 
   MenuPanel = ref object of Container
     ## The content of one menu popup.

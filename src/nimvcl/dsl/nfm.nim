@@ -24,7 +24,7 @@
 ## * run-time use of the registry: `loadNfm`, `formToNfm`, `nfmToFormMacro`;
 ## * the `loadForm` macro.
 
-import std/[strutils, tables, macros, os, sets]
+import std/[strutils, tables, macros, os, sets, hashes]
 import ../graphics/color
 import ../core/[component, control, form]
 import ../controls/[menus, statusbar, listview, actions]
@@ -632,6 +632,15 @@ proc buildTree(node: NfmNode, parent, rootOwner: Obj, file: string, opt: NfmOpti
 proc applyProps(b: Built, file: string, opt: NfmOptions,
                 byName: Table[string, Obj]) =
   for p in b.node.props:
+    if p.name == "designLeft" or p.name == "designTop":
+      # the design position of a non-visual component (Component.designLeft/Top)
+      if not (b.obj of Component) or p.value.kind != nvInt:
+        opt.problem(file, p.line, p.col, "`" & p.name & "` takes a whole number")
+        continue
+      let v = try: parseInt(p.value.text) except ValueError: 0
+      if p.name == "designLeft": Component(b.obj).designLeft = v
+      else: Component(b.obj).designTop = v
+      continue
     let info = b.ci.findProp(p.name)
     if info == nil:
       opt.problem(file, p.line, p.col,
@@ -694,11 +703,53 @@ proc loadNfmFile*(path: string, owner: Component = nil,
 
 # ------------------------------------------------------------------ saving
 
-proc nodeOf(o: Obj, nameOverride = ""): NfmNode =
+proc hash(o: Obj): Hash = hash(cast[pointer](o))
+
+type SaveCtx = object
+  nested: HashSet[Obj]    ## objects that are written as the child of another one
+
+proc needsParent(ci: ClassInfo): bool =
+  ## Classes created through `attach` (menu items) cannot stand alone.
+  var c = ci
+  while c != nil:
+    if c.attach != nil: return true
+    c = c.parent
+
+proc isStandalone(x: Component): bool =
+  ## A non-visual component (a timer, an image list, a popup menu...) that a
+  ## form file writes as an object of its owner.
+  if x of Control: return false
+  let ci = classOf(x)
+  ci != nil and not ci.needsParent
+
+proc gatherAll(o: Obj, all: var seq[Obj], seen: var HashSet[Obj]) =
+  if seen.containsOrIncl(o): return
+  all.add o
+  for k in kidsOf(o): gatherAll(k, all, seen)
+  if o of Component:
+    for x in Component(o).components:
+      if x.isStandalone: gatherAll(x, all, seen)
+
+proc newSaveCtx(root: Obj): SaveCtx =
+  ## Finds everything that appears as a child of something (menu items in a
+  ## menu, actions in a list...), so a component owned by the form that is
+  ## also such a child is not written twice.
+  var all: seq[Obj]
+  var seen: HashSet[Obj]
+  gatherAll(root, all, seen)
+  for o in all:
+    for k in kidsOf(o): result.nested.incl k
+
+proc nodeOf(o: Obj, ctx: SaveCtx, nameOverride = ""): NfmNode =
   let ci = classOf(o)
   if ci == nil: return nil
   result = NfmNode(className: ci.name,
                    name: if nameOverride.len > 0: nameOverride else: objectName(o))
+  if o of Component:
+    let c = Component(o)
+    if c.designLeft != 0 or c.designTop != 0:
+      result.props.add NfmProp(name: "designLeft", value: nfmInt(c.designLeft))
+      result.props.add NfmProp(name: "designTop", value: nfmInt(c.designTop))
   var ordered: seq[PropInfo]
   for p in ci.propsOf:
     if p.kind != pkEvent: ordered.add p
@@ -724,14 +775,20 @@ proc nodeOf(o: Obj, nameOverride = ""): NfmNode =
       if not isDefault(o, p):
         result.props.add NfmProp(name: p.name, value: toNfmValue(p, p.get(o)))
   for k in kidsOf(o):
-    let n = nodeOf(k)
+    let n = nodeOf(k, ctx)
     if n != nil: result.children.add n
+  if o of Component:
+    # non-visual components owned by this one, as Delphi writes them
+    for x in Component(o).components:
+      if x.isStandalone and Obj(x) notin ctx.nested:
+        let n = nodeOf(x, ctx)
+        if n != nil: result.children.add n
 
 proc objectToNfmNode*(o: Obj, rootName = ""): NfmNode =
   ## The syntax tree of an object and its children: only properties that
   ## differ from a fresh instance, in registry order. Events appear when a
   ## handler name was recorded for them (by `loadNfm` or `setProp`).
-  nodeOf(o, rootName)
+  nodeOf(o, newSaveCtx(o), rootName)
 
 proc objectToNfm*(o: Obj, rootName = ""): string =
   let n = objectToNfmNode(o, rootName)

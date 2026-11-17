@@ -30,9 +30,11 @@
 ## Tab applies and edits the next row (Shift+Tab: previous), Left/Right
 ## collapse and expand, Space toggles a check box.
 ##
-## Every successful change goes through the registry (`setProp`) and calls
-## `onPropertyChanged(sender, target, propName)`; a sub-property is reported
-## with its dotted name (`font.size`).
+## Every change goes through the registry (`setProp`). Before it is applied
+## `onPropertyChanging(sender, target, propName, newValue, accept, message)` can
+## refuse it (the old value stays and the message shows in the error line);
+## afterwards `onPropertyChanged(sender, target, propName)` is called. A
+## sub-property is reported with its dotted name (`font.size`).
 ##
 ## This module is not part of the `import nimvcl` umbrella (it pulls in the
 ## property registry): `import nimvcl/controls/inspector`.
@@ -60,6 +62,9 @@ type
   EditKind = enum ekNone, ekText, ekCombo
 
   PropertyChangedEvent* = proc(sender: Control, target: Obj, prop: string)
+  PropertyChangingEvent* = proc(sender: Control, target: Obj, prop: string,
+                                newValue: PropValue, accept: var bool,
+                                message: var string)
   CreateHandlerEvent* = proc(sender: Control, target: Obj, event: string): string
   ExtraEditorEvent* = proc(sender: Control, target: Obj, prop: string)
   HandlerListEvent* = proc(sender: Control, target: Obj, event: string): seq[string]
@@ -85,6 +90,12 @@ type
     fHandlers: seq[string]
     onPropertyChanged*: PropertyChangedEvent
       ## A value was changed through the inspector (after it was applied).
+    onPropertyChanging*: PropertyChangingEvent
+      ## Called for each target before an edit is applied. Set `accept = false`
+      ## to refuse it: the old value stays and `message` (a default text when
+      ## empty) becomes `lastError`, shown in the inspector's error line. No
+      ## target changes when any of them refuses. `prop` is the dotted name
+      ## (`font.size`); `newValue` is what would be set.
     onCreateHandler*: CreateHandlerEvent
       ## Double click on an event row without a handler: returns the name of a
       ## new handler (""): nothing happens. When nil, `<Name><Event>` is used.
@@ -403,8 +414,22 @@ proc isBold*(ins: ObjectInspector, name: string): bool =
 
 # ------------------------------------------------------------------ applying
 
+proc vetoed(ins: ObjectInspector, t: Obj, name: string, v: PropValue): bool =
+  ## Asks `onPropertyChanging`; true (and `lastError` set) when it refuses.
+  if ins.onPropertyChanging == nil: return false
+  var accept = true
+  var msg = ""
+  ins.onPropertyChanging(ins, t, name, v, accept, msg)
+  if accept: return false
+  ins.fError = if msg.len > 0: msg else: "`" & name & "` cannot be changed"
+  ins.invalidate()
+  true
+
 proc applyValue(ins: ObjectInspector, row: Row, v: PropValue): bool =
   ## Sets `v` on every target; false (and `lastError`) when one refuses.
+  for t in ins.fTargets:
+    let q = infoFor(t, row.info.name)
+    if q != nil and ins.vetoed(t, row.info.name, v): return false
   for t in ins.fTargets:
     let q = infoFor(t, row.info.name)
     if q == nil: continue
@@ -487,7 +512,9 @@ proc endEditor(ins: ObjectInspector) =
 
 proc cancelEdit*(ins: ObjectInspector) =
   ## Closes the editor without applying.
-  if ins.fEditKind != ekNone: ins.endEditor()
+  if ins.fEditKind != ekNone:
+    ins.endEditor()
+    ins.fError = ""
 
 proc comboValue(ins: ObjectInspector, row: Row, v: var PropValue): string =
   ## The value picked in the combo for `row`; error text or "".
@@ -781,9 +808,11 @@ method paint*(ins: ObjectInspector, c: Canvas) =
     c.line(ins.fSplit - 0.5, endY, ins.fSplit - 0.5, vp.bottom, t.border, 1)
   c.popClip()
   # --- error line
-  if ins.fError.len > 0 and ins.fEditKind != ekNone:
-    let er = ins.valueRect(ins.fEditRow)
-    c.strokeRoundRect(rectF(er.x, er.y, er.w, er.h), 2, t.danger, 1.5)
+  if ins.fError.len > 0:
+    if ins.fEditKind != ekNone:
+      let er = ins.valueRect(ins.fEditRow)
+      c.strokeRoundRect(rectF(er.x, er.y, er.w, er.h), 2, t.danger, 1.5)
+    c.fillRect(rectF(1, r.h - 23, r.w - 2, 22), t.surface)
     c.textRect(ins.fError, fnt, rectF(8, r.h - 22, r.w - 16, 20), t.danger, taLeft, vaCenter)
   c.strokeRoundRect(r, t.radius, if ins.focused: t.focusRing else: t.borderStrong,
                     if ins.focused: t.focusRingWidth else: t.borderWidth)
@@ -870,6 +899,7 @@ proc handleDouble(ins: ObjectInspector, i: int) =
       if ins.onCreateHandler != nil: name = ins.onCreateHandler(ins, t, q.name)
       else: name = defaultHandlerName(t, q.name)
       if name.len == 0: continue
+      if ins.vetoed(t, q.name, pvEvent(name)): continue
       try:
         q.set(t, pvEvent(name))
         if ins.onPropertyChanged != nil: ins.onPropertyChanged(ins, t, q.name)

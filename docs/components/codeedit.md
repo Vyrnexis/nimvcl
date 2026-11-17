@@ -52,6 +52,7 @@ UTF-8 line (the status bar of an editor shows `line + 1`).
 | `caretPos` | `CodePos` | `(line, col)`; setting expands folds and scrolls |
 | `selection` | `Selection` | `sel(anchor, caret)`; `select(a, b)` is the same |
 | `selectedText`, `hasSelection` | | The primary selection (there is only one) |
+| `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
 | `tabWidth` | int | Width of a TAB in cells (default 4) |
 | `insertSpaces` | bool | Tab and indentation insert spaces (default) or TABs |
 | `showWhitespace` | bool | Dots for spaces, arrows for TABs |
@@ -96,6 +97,9 @@ caret first unless it lands inside the selection.
 | `markSaved()` | Declare the text saved |
 | `gotoLine(line, col = 0)` | Caret there (clamped), folds expanded, line centred when it was out of view |
 | `ensureVisible(line, col = 0, center = false)` | Scroll without moving the caret |
+| `replaceRange(a, b, text, keepSelection = false)`, `insertAt(pos, text)` | Edit from outside the way the user would: one undo step, repaint, `onChange`. The caret ends after the new text, or with `keepSelection` the selection stays (shifted along with the text). Returns false when read-only or nothing changes |
+| `beginUndoGroup()`, `endUndoGroup()` | Make every edit in between one undo step (they nest) |
+| `touched(follow = true)` | After you changed `model` directly: resync, repaint and fire `onChange`, `onCaretMove`, `onModifiedChanged` |
 | `undo()`, `redo()`, `cutToClipboard()`, `copyToClipboard()`, `pasteFromClipboard()`, `selectAll()` | Without a selection copy and cut take the whole line |
 | `indent()`, `outdent()`, `toggleComment()`, `duplicateLine()`, `deleteLine()`, `moveLineUp()`, `moveLineDown()` | Line commands; one undo step each |
 | `foldAll()`, `unfoldAll()`, `foldCaret()`, `unfoldCaret()`, `toggleFold(line)` | Folding; `isFolded(line)`, `canFold(line)`, `isLineVisible(line)` |

@@ -78,7 +78,7 @@ proc syncTimer(p: ProgressBar) =
   ## The timer runs while the style is marquee and the bar is showing.
   if p.fStyle == pbsMarquee and p.isShowing:
     if p.fTimer == nil:
-      p.fTimer = newTimer(p, MarqueeMs)
+      p.fTimer = newTimer(nil, MarqueeMs)
       p.fTimer.onTimer = proc(t: Timer) = p.advanceMarquee()
     p.fTimer.enabled = true
   elif p.fTimer != nil:

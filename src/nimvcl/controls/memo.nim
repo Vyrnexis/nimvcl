@@ -72,6 +72,7 @@ type
     breaks: seq[int32]        ## byte start of visual lines 1 ..
 
   Memo* = ref object of ScrollingControl
+    fBorder: BorderStyle
     model: MemoModel
     layouts: seq[LineLayout]
     fRows: seq[int32]         ## visual rows per line (wrap mode)
@@ -633,8 +634,17 @@ proc modelChanged(e: Memo, first, oldN, newN: int) =
 
 # ------------------------------------------------------------ construction
 
+func borderStyle*(x: Memo): BorderStyle = x.fBorder
+proc `borderStyle=`*(x: Memo, v: BorderStyle) =
+  ## `bsSingle` (default): the usual border and focus ring; `bsNone`: none,
+  ## so the control can sit flush in a panel.
+  if v == x.fBorder: return
+  x.fBorder = v
+  x.invalidate()
+
 proc initMemo*(e: Memo, owner: Component = nil) =
   e.initScrollingControl(owner)
+  e.fBorder = bsSingle
   e.model = newMemoModel()
   e.layouts = @[LineLayout()]
   e.fFen = @[0'i32, 1]
@@ -1114,8 +1124,8 @@ method paint*(e: Memo, c: Canvas) =
     elif foc: t.accent
     elif hot: t.borderStrong
     else: t.border
-  c.fillRoundRect(r, t.radius, bg)
-  c.strokeRoundRect(r, t.radius, bc, t.borderWidth)
+  c.fillFrame(r, t, e.fBorder, bg)
+  c.strokeFrame(r, t, e.fBorder, bc, t.borderWidth)
 
   let vp = e.viewport
   let rh = e.rowH

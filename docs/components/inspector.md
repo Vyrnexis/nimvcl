@@ -61,7 +61,9 @@ Click a value (or select the row and press Enter):
 | event | an editable combo of handler names; a double click on an empty row asks `onCreateHandler` for a new name |
 
 Edits go through the registry (`setProp`), so a bad value raises nothing in the
-inspector: it is reported in `lastError` and the old value stays. Every applied
+inspector: it is reported in `lastError` (and drawn in a line at the bottom of the
+inspector) and the old value stays. Before an edit is applied
+`onPropertyChanging` can refuse it (see below). Every applied
 change calls `onPropertyChanged(sender, target, propName)`; a sub-property is
 reported by its dotted name (`font.size`, `anchors.akRight`). The inspector does
 not repaint the target for you: the property setters already do.
@@ -83,12 +85,13 @@ Left and Right collapse and expand; Space toggles a check box.
 | `knownHandlers` | `seq[string]` | Handler names offered by the event editors |
 | `splitX` | float32 | Width of the name column |
 | `targets` | `seq[Obj]` | What is inspected (read-only) |
-| `lastError` | string | Why the last edit was rejected ("" when fine) |
+| `lastError` | string | Why the last edit was rejected ("" when fine); shown at the bottom of the inspector until the next edit, `inspect` or Esc |
 
 ## Events
 
 | Event | Description |
 |---|---|
+| `onPropertyChanging(sender, target: Obj, prop: string, newValue: PropValue, accept: var bool, message: var string)` | Before a value is applied, for each target. Set `accept = false` to refuse: nothing changes (with several targets one refusal stops the whole edit), `message` (or a default text) becomes `lastError` and shows in the error line, and a typed edit stays open. Also asked before a handler name is created by double click. `prop` is the dotted name (`font.size`) |
 | `onPropertyChanged(sender, target: Obj, prop: string)` | A value was changed by the user (after it was applied) |
 | `onCreateHandler(sender, target: Obj, event: string): string` | Double click on an event row without a handler: return the name of a new handler (the application writes the stub), or "" to do nothing. When nil, `<Name><Event>` is used |
 | `onEditExtra(sender, target: Obj, prop: string)` | The "..." button of a string list or image was pressed |

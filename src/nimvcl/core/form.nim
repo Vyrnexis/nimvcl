@@ -28,7 +28,6 @@ type
   ModalResult* = enum
     mrNone, mrOk, mrCancel, mrAbort, mrRetry, mrIgnore, mrYes, mrNo, mrClose
   FormPosition* = enum poDesigned, poScreenCenter, poMainFormCenter
-  BorderStyle* = enum bsSizeable, bsSingle, bsNone
   FormStyle* = enum fsNormal, fsStayOnTop
 
   FormCloseEvent* = proc(sender: Form, action: var CloseAction)

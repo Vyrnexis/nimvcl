@@ -225,7 +225,8 @@ proc splitOn(s: string, c: char): seq[string] =
       start = i + 1
   result.add s[start .. ^1]
 
-func endOfInsert(start: CodePos, s: string): CodePos =
+func endOfInsert*(start: CodePos, s: string): CodePos =
+  ## Where the caret is after inserting `s` (already normalised to "\n") at `start`.
   var nl = 0
   var lastNl = -1
   for i in 0 ..< s.len:

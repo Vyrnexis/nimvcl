@@ -278,3 +278,15 @@ proc textWidth*(c: Control, text: string, f: FontSpec): float32 =
 
 proc textHeight*(c: Control, f: FontSpec): float32 =
   if c.canMeasure: ceil(c.measure("Ag", f).h) else: ceil(f.size * 1.25'f32)
+
+# ------------------------------------------------------------- frame helpers
+
+proc fillFrame*(c: Canvas, r: RectF, t: Theme, style: BorderStyle, col: Color) =
+  ## Fills a bordered control's background: rounded like its border, or square
+  ## and edge to edge with `bsNone`.
+  if style == bsNone: c.fillRect(r, col) else: c.fillRoundRect(r, t.radius, col)
+
+proc strokeFrame*(c: Canvas, r: RectF, t: Theme, style: BorderStyle, col: Color,
+                  width: float32) =
+  ## The border of a control; nothing with `bsNone`.
+  if style != bsNone: c.strokeRoundRect(r, t.radius, col, width)

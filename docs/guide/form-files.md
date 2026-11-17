@@ -132,6 +132,43 @@ end
 A `shortcut` is written as the string `shortcut("...")` takes. The grid sizes of a
 `GridPanel` (`columns`, `rows`) are strings such as `'100, 50%, auto'`.
 
+### Non-visual components
+
+Components that are not controls (`Timer`, `ImageList`, `PopupMenu`,
+`ActionList`) are written as objects of the component that owns them, as Delphi
+writes them inside the form, after the owner's controls:
+
+```
+object Form1: Form
+  object box: Panel
+    object tick: Timer
+      designLeft = 12
+      designTop = 4
+      interval = 250
+    end
+  end
+  object pop: PopupMenu
+    images = imgs
+    object cut: MenuItem
+      caption = 'Cut'
+    end
+  end
+  object imgs: ImageList
+  end
+end
+```
+
+`loadNfm` and `loadForm` create them with the enclosing object as owner, and
+`formToNfm` writes every non-visual component owned by the form (or by a
+container in it), but each only once: menu items and actions are written inside
+their menu or list even when the form owns them, and the helper timers a
+control creates for itself are not owned by it and never appear.
+
+`designLeft` and `designTop` (fields of `Component`, like Delphi's `DesignInfo`)
+are the position of the component's tile in the form designer. They are ignored
+at run time and written only when they are not both 0. A designer reads them
+when it shows the tile and keeps them current while the tile is dragged.
+
 ### What is stored
 
 The writer emits only properties that differ from a fresh instance of the same
@@ -311,7 +348,14 @@ let a = ci.findProp("align")
 echo a.enumNames                                   # @["alNone", "alTop", ...]
 echo a.enumValue("alClient"), " ", a.enumName(5)   # 5 alClient
 let btn2 = ci.createObject(nil, nil)               # a new instance through the registered factory
+for p in classByName("Form").findProp("onClose").params:
+  echo p.name, ": ", p.typeName                    # sender: Form / action: var CloseAction
 ```
+
+Event types such as `NotifyEvent`, `FormCloseEvent` and `PopupEvent` are public,
+so an IDE can build a handler stub from `params` without its own table. Every
+`Component` also has an identity `hash`, so `Table[Control, X]` and
+`HashSet[Component]` work without a local `hash` proc.
 
 | Call | Result |
 |---|---|
@@ -321,6 +365,7 @@ let btn2 = ci.createObject(nil, nil)               # a new instance through the 
 | `isDefault(obj, name)`, `defaultOf(ci, prop)` | defaults are measured on a fresh instance of the object's class |
 | `kidsOf(obj)`, `createObject(ci, owner, parent)` | the owned children (controls, menu items, columns, panels) and creation |
 | `handlerNameOf(obj, "onClick")`, `setHandlerName` | the handler names recorded for events |
+| `PropInfo.params`, `PropInfo.returnType` | of an event: the handler's parameters (`name`, `typeName` as written, e.g. `var CloseAction`) and result type, from the event's proc type |
 | `subProps(prop)` | the virtual sub-properties of a composite or a set |
 
 ### Registering your own classes

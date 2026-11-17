@@ -46,6 +46,7 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 | `col`, `row` | int | Current cell (never a fixed one) |
 | `selection` | `GridRect` | Selected range (inclusive) |
 | `horzLines`, `vertLines`, `hotTrack` | bool | Look |
+| `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
 | `StringGrid.cells[c, r]` | string | Cell text. Also `rows[r]`, `cols[c]` as `seq[string]` |
 | `StringGrid.colAlignments[c]` | `HAlign` | Column text alignment |
 | `StringGrid.sortOnHeaderClick` | bool | Click a header to sort |

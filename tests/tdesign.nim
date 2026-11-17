@@ -498,7 +498,7 @@ suite "form designer":
     left.align = alClient
     check x.d.handleMask(left) == {}
     check x.d.handleMask(x.a).card == 8
-    check x.d.handleMask(x.f).card == 0
+    check x.d.handleMask(x.f) == {dhE, dhS, dhSE}      # the design root: right, bottom, corner
     x.done
 
   test "alignment, size and spacing commands":
@@ -646,6 +646,96 @@ suite "form designer":
     x.d.removeNonVisual(tm)
     check x.d.nonVisuals.len == 0
     x.done
+
+  test "non-visual tiles keep their position in designLeft/designTop":
+    let x = build(grid = false)
+    let tm = newComponent(x.f)
+    tm.name = "Timer1"
+    let t = x.d.addNonVisual(tm, 20, 300, "Timer")
+    check tm.designLeft == 20 and tm.designTop == 300
+    x.f.drag(30, 310, 90, 350)
+    check tm.designLeft == 80 and tm.designTop == 340
+    check x.d.undo()
+    check tm.designLeft == 20 and tm.designTop == 300
+    check x.d.redo()
+    x.d.select(t)
+    x.d.nudge(2, 3)
+    check tm.designLeft == 82 and tm.designTop == 343
+    # a tile for a component with a saved position goes there; one without
+    # gets a free spot along the top
+    let t2 = newComponent(x.f)
+    t2.name = "Timer2"
+    t2.designLeft = 120
+    t2.designTop = 250
+    let tile2 = x.d.addNonVisual(t2, "Timer")
+    check tile2.left == 120 and tile2.top == 250
+    let t3 = newComponent(x.f)
+    t3.name = "Timer3"
+    let tile3 = x.d.addNonVisual(t3)
+    check tile3.top == 8
+    check t3.designLeft == int(tile3.left) and t3.designTop == 8
+    check tile3.left != t.left or tile3.top != t.top
+    x.done
+
+  test "the design root resizes from its right, bottom and corner handles":
+    let x = build(grid = false)
+    var modified = 0
+    x.d.onModified = proc(d: FormDesigner) = inc modified
+    check x.d.selection == @[Control(x.f)]
+    # corner: handles sit inside the root's corner
+    x.f.drag(497, 397, 537, 427)
+    check x.f.width == 540 and x.f.height == 430
+    check x.f.left == 0 and x.f.top == 0
+    check modified == 1
+    check x.d.undo()
+    check x.f.width == 500 and x.f.height == 400
+    check x.d.redo()
+    check x.f.width == 540 and x.f.height == 430
+    # right edge: width only; bottom edge: height only
+    x.f.drag(537, 215, 507, 215)
+    check x.f.width == 510 and x.f.height == 430
+    x.f.drag(255, 427, 255, 407)
+    check x.f.width == 510 and x.f.height == 410
+    # a drag from the empty area is a rubber band and never moves the root
+    x.f.drag(400, 300, 300, 200)
+    check x.f.left == 0 and x.f.top == 0 and x.f.width == 510 and x.f.height == 410
+    # Esc puts the size back
+    x.d.select(x.f)
+    x.f.down(507, 407)
+    x.f.moveTo(447, 357, {ssLeft})
+    check x.f.width == 450
+    x.f.tap(keyEscape)
+    x.f.up(447, 357)
+    check x.f.width == 510 and x.f.height == 410
+    # minSize and the constraints apply; the root keeps its position
+    x.f.drag(507, 407, 20, 20)
+    check x.f.width >= x.d.minSize and x.f.height >= x.d.minSize
+    check x.f.left == 0 and x.f.top == 0
+    x.done
+
+  test "an embedded design root (a panel) resizes too, in its parent":
+    Application.init()
+    let host = newForm(nil, 700, 500)
+    let root = newPanel(host, "", 20, 20, 420, 320)
+    newButton(root, "B", 10, 10, 60, 24)
+    host.show()
+    discard host.paintIfDirty()
+    let d = newFormDesigner(root)
+    d.snapToGrid = false
+    var modified = 0
+    d.onModified = proc(sender: FormDesigner) = inc modified
+    check d.handleMask(root) == {dhE, dhS, dhSE}
+    host.drag(20 + 417, 20 + 317, 20 + 417 + 60, 20 + 317 + 40)
+    check root.width == 480 and root.height == 360
+    check root.left == 20 and root.top == 20
+    check modified == 1
+    checkSame(host, "after resizing the design root")
+    check d.undo()
+    check root.width == 420 and root.height == 320
+    # an aligned root has no handles: its layout owns the size
+    root.align = alClient
+    check d.handleMask(root) == {}
+    host.freeWindow()
 
   test "hidden controls are selectable with showHidden":
     let x = build()

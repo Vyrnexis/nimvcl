@@ -35,6 +35,7 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 | `pageCount`, `sheets()` | | The pages |
 | `tabs` | `seq[string]` | TabControl captions; `addTab(caption)` appends |
 | `showTabs` | bool | `false` hides the tab strip; pages are then switched by code only. Default `true` |
+| `tabPosition` | `TabPosition` | `tpTop` (default) or `tpBottom`: the strip under the body with the tabs hanging down, joined to the page above, like the message view of an IDE |
 | `TabSheet.caption` | string | Tab text; `&` makes a mnemonic |
 | `TabSheet.tabVisible` | bool | `false` hides the tab (like Delphi's `TabVisible`); default `true` |
 
@@ -71,6 +72,7 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
   control takes no focus; `activePage`, `activePageIndex`, `tabIndex` and
   `cycle` still work, and `onChange` still fires.
 * Disabled pages cannot be selected by the user either.
-* When tabs do not fit, small arrows appear to scroll the strip.
+* When tabs do not fit, small arrows appear to scroll the strip (at the bottom edge with `tpBottom`).
+* `tabRect(i)` and `tabAt(x, y)` work in client coordinates for both positions.
 
 [Back to the index](../README.md)

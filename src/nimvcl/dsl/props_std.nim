@@ -18,8 +18,6 @@ import ../controls/[common, label, button, checkbox, radiobutton, panel, paintbo
 import ./props
 export props
 
-type PopupEvent = proc(sender: PopupMenu)
-
 # ------------------------------------------------------ accessor helpers
 
 proc getItems(c: ListBox): seq[string] =
@@ -305,6 +303,7 @@ registerClass(ToolButton, parent = Control):
 registerClass(TabBase, parent = Container, abstract = true):
   category Appearance:
     showTabs: bool
+    tabPosition: TabPosition
   category Behaviour:
     tabIndex: int
   category Events:
@@ -342,6 +341,7 @@ registerClass(Edit, parent = Control):
 
 registerClass(Memo, parent = ScrollingControl):
   category Appearance:
+    borderStyle: BorderStyle
     scrollBars: MemoScrollBars
     placeholder: string
   category Behaviour:
@@ -385,6 +385,7 @@ registerClass(ComboBox, parent = Container, kids = noKids()):
 
 registerClass(ListBox, parent = ScrollingControl, kids = noKids()):
   category Appearance:
+    borderStyle: BorderStyle
     style: ListBoxStyle
     itemHeight: float32
     showFocusRect: bool
@@ -440,6 +441,7 @@ registerClass(ScrollBar, parent = Control):
 
 registerClass(TreeView, parent = ScrollingControl, kids = noKids()):
   category Appearance:
+    borderStyle: BorderStyle
     showLines: bool
     showRoot: bool
     showButtons: bool
@@ -467,6 +469,7 @@ registerClass(TreeView, parent = ScrollingControl, kids = noKids()):
 registerClass(ListView, parent = ScrollingControl,
               kids = columnKids(self)):
   category Appearance:
+    borderStyle: BorderStyle
     viewStyle: ListViewStyle
     showHeader: bool
     gridLines: bool
@@ -504,6 +507,7 @@ registerClass(ListColumn, parent = nil, create = newColumnOf(parent),
 
 registerClass(DrawGrid, parent = ScrollingControl, kids = noKids()):
   category Appearance:
+    borderStyle: BorderStyle
     horzLines: bool
     vertLines: bool
     defaultColWidth: float32
@@ -531,6 +535,7 @@ registerClass(StringGrid, parent = DrawGrid):
 
 registerClass(CodeEdit, parent = ScrollingControl, kids = noKids()):
   category Appearance:
+    borderStyle: BorderStyle
     showLineNumbers: bool
     showWhitespace: bool
     showIndentGuides: bool

@@ -1,6 +1,9 @@
 ## `Component`: the VCL TComponent analogue. A named object with an owner.
 ## Ownership is for lookup (and later streaming) only; memory is managed by ORC.
 
+import std/hashes
+export hashes.Hash
+
 type
   ActionLinkBase* = ref object of RootObj
     ## Hook between a client (control or menu item) and an `Action`
@@ -15,6 +18,14 @@ type
     handlerNames*: seq[(string, string)]
       ## (event name, handler name) pairs recorded when a form file binds an
       ## event by name (dsl/props.nim); lets a form be saved again.
+    designLeft*, designTop*: int
+      ## Where a non-visual component's tile sits on the design surface (like
+      ## Delphi's `DesignInfo`). Ignored at run time. A form file stores the
+      ## pair only when it is not (0, 0).
+
+proc hash*(c: Component): Hash =
+  ## Identity hash, so `Table`/`HashSet` keyed by any component or control work.
+  hash(cast[pointer](c))
 
 method clientClicked*(l: ActionLinkBase) {.base.} =
   ## The linked client was clicked (after its own state change and `onClick`).

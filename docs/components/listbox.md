@@ -28,6 +28,7 @@ list.onChange = proc(sender: Control) =
 | `itemHeight` | float32 | Row height |
 | `style` | `ListBoxStyle` | `lbStandard` or `lbOwnerDraw` (with `onDrawItem`) |
 | `topIndex` | int | First visible row |
+| `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
 
 ## Events
 

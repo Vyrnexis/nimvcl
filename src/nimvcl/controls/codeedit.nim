@@ -115,6 +115,7 @@ type
   DragMode = enum dmChar, dmWord, dmLine, dmGutter
 
   CodeEdit* = ref object of ScrollingControl
+    fBorder: BorderStyle
     fModel: CodeModel
     fHl: Highlighter
     fFold: FoldMap
@@ -524,8 +525,11 @@ proc updateFindStatus(e: CodeEdit, force = false) =
 
 # ----------------------------------------------------------------- touched
 
-proc touched(e: CodeEdit, follow = true) =
-  ## Text, selection, composition or size changed.
+proc touched*(e: CodeEdit, follow = true) =
+  ## Brings the view up to date after `model` was changed directly (text,
+  ## selection): resyncs the content, repaints and fires `onChange`,
+  ## `onCaretMove` and `onModifiedChanged` as needed. With `follow` the caret
+  ## is scrolled into view. The editing methods of `CodeEdit` call it for you.
   e.resetBlink()
   e.syncContent()
   if follow: e.scrollCaretIntoView()
@@ -947,6 +951,49 @@ proc `selection=`*(e: CodeEdit, s: Selection) =
 proc select*(e: CodeEdit, a, b: CodePos) =
   ## Selects from `a` (anchor) to `b` (caret).
   e.selection = sel(a, b)
+
+proc replaceRange*(e: CodeEdit, a, b: CodePos, text: string,
+                   keepSelection = false): bool {.discardable.} =
+  ## Replaces the text from `a` up to `b` (either order; positions are
+  ## clamped) with `text`, the way the user's own edit would: one undo step
+  ## (inside `beginUndoGroup` it joins the group), the view repaints and
+  ## `onChange` fires. By default the caret ends after the inserted text; with
+  ## `keepSelection` the selection stays where it was (adjusted to the new
+  ## text). False when read-only or when the text does not change.
+  e.fDesiredV = -1
+  if not keepSelection:
+    result = e.fModel.replace(a, b, text)
+  else:
+    var a = e.fModel.snapPos(a)
+    var b = e.fModel.snapPos(b)
+    if b < a: swap a, b
+    let before = e.fModel.selection
+    result = e.fModel.replaceInGroup(a, b, text)
+    if result:
+      # carry the selection along: positions after the edit shift with it,
+      # positions inside the replaced range go to the end of the new text
+      let stop = endOfInsert(a, text.replace("\r\n", "\n").replace('\r', '\n'))
+      proc carry(p: CodePos): CodePos =
+        if p <= a: p
+        elif p < b: stop
+        elif p.line == b.line: (stop.line, stop.col + p.col - b.col)
+        else: (p.line + stop.line - b.line, p.col)
+      e.fModel.setSelection(sel(carry(before.anchor), carry(before.caret)))
+  e.touched(follow = not keepSelection)
+
+proc insertAt*(e: CodeEdit, p: CodePos, text: string,
+               keepSelection = false): bool {.discardable.} =
+  ## `replaceRange(p, p, text)`.
+  e.replaceRange(p, p, text, keepSelection)
+
+proc beginUndoGroup*(e: CodeEdit) =
+  ## Every edit until the matching `endUndoGroup` becomes one undo step
+  ## (groups nest).
+  e.fModel.beginGroup()
+
+proc endUndoGroup*(e: CodeEdit) =
+  e.fModel.endGroup()
+  e.touched(follow = false)
 
 proc selectAll*(e: CodeEdit) =
   e.fModel.selectAll()
@@ -1879,7 +1926,7 @@ method paint*(e: CodeEdit, c: Canvas) =
     elif foc: t.accent
     elif hot: t.borderStrong
     else: t.border
-  c.fillRoundRect(r, t.radius, bg)
+  c.fillFrame(r, t, e.fBorder, bg)
 
   let vp = e.viewport
   let rh = e.rowH
@@ -2075,8 +2122,8 @@ method paint*(e: CodeEdit, c: Canvas) =
     c.popClip()
 
   # border over everything inside
-  c.strokeRoundRect(r, t.radius, bc, t.borderWidth)
-  if foc and enabled: drawFocusRing(c, r, t)
+  c.strokeFrame(r, t, e.fBorder, bc, t.borderWidth)
+  if foc and enabled and e.fBorder != bsNone: drawFocusRing(c, r, t)
   procCall paint(Control(e), c)
 
 # ------------------------------------------------------------ construction
@@ -2091,8 +2138,17 @@ proc defaultGotoLine(e: CodeEdit) =
       e.gotoLine(l, col)
     except ValueError: discard
 
+func borderStyle*(x: CodeEdit): BorderStyle = x.fBorder
+proc `borderStyle=`*(x: CodeEdit, v: BorderStyle) =
+  ## `bsSingle` (default): the usual border and focus ring; `bsNone`: none,
+  ## so the control can sit flush in a panel.
+  if v == x.fBorder: return
+  x.fBorder = v
+  x.invalidate()
+
 proc initCodeEdit*(e: CodeEdit, owner: Component = nil) =
   e.initScrollingControl(owner)
+  e.fBorder = bsSingle
   e.fModel = newCodeModel()
   e.fFolding = true
   e.fInsertSpaces = true

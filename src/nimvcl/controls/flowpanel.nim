@@ -48,8 +48,6 @@ type
     fCols, fRows: seq[GridSize]
     fCells: Table[Control, GridCell]
 
-proc hash(c: Control): Hash = hash(cast[pointer](c))
-
 func gsAbsolute*(v: float32): GridSize = GridSize(kind: gkAbsolute, value: v)
 func gsPercent*(v: float32): GridSize = GridSize(kind: gkPercent, value: v)
 func gsAuto*(): GridSize = GridSize(kind: gkAuto)

@@ -11,6 +11,7 @@ const
 # --------------------------------------------------------------- loadForm
 
 loadForm Sample, "nfm/sample.nfm"
+loadForm NonVis, "nfm/nonvisual.nfm"
 
 var clicks, exits: int
 proc okClick(self: Sample, sender: Control) = inc clicks
@@ -262,6 +263,87 @@ suite "loadForm (compile time)":
     let x = readFile(here / "nfm" / "sample.nfm")
     check formToNfm(newSample()) == x
     check formToNfm(newSample()) == formToNfm(loadNfm(x))
+
+suite "non-visual components":
+  const nv = readFile(here / "nfm" / "nonvisual.nfm")
+
+  test "the run-time loader creates them, owned by their parent in the file":
+    let f = loadNfm(nv)
+    let box = Panel(f.findComponent("box"))
+    let tick = Timer(box.findComponent("tick"))
+    check tick != nil and tick.interval == 250
+    check tick.owner == Component(box)
+    check tick.designLeft == 12 and tick.designTop == 4
+    let pop = PopupMenu(f.findComponent("pop"))
+    check pop != nil and pop.owner == Component(f)
+    check pop.designLeft == 40 and pop.designTop == 150
+    check pop.items.count == 1 and pop.items[0].caption == "Cut"
+    let imgs = ImageList(f.findComponent("imgs"))
+    check imgs.width == 24
+    check pop.images == imgs
+    let acts = ActionList(f.findComponent("acts"))
+    check acts.components.len == 1
+    # controls are not duplicated as components of the form
+    check f.controlCount == 1
+
+  test "the file is written again as it was":
+    check formToNfm(loadNfm(nv)) == nv
+
+  test "components built in code are written, once, with their design position":
+    let f = newForm(nil, 300, 200)
+    f.name = "F"
+    let t = newTimer(f, 500)
+    t.name = "Timer1"
+    t.designLeft = 16
+    t.designTop = 24
+    let il = newImageList(16, 16, f)
+    il.name = "Images"
+    let pm = newPopupMenu(f)
+    pm.name = "Pop"
+    pm.images = il
+    # menu items owned by the form (as `newMenuItem(owner = form)` does) are
+    # written inside their menu only
+    let mi = newMenuItem("Open", owner = f)
+    mi.name = "OpenItem"
+    pm.add mi
+    let al = newActionList(f)
+    al.name = "Acts"
+    let a = newAction(al, "Run")
+    a.name = "RunAct"
+    check formToNfm(f) == "object F: Form\n  width = 300\n  height = 200\n" &
+      "  object Timer1: Timer\n    designLeft = 16\n    designTop = 24\n    interval = 500\n  end\n" &
+      "  object Images: ImageList\n  end\n" &
+      "  object Pop: PopupMenu\n    images = Images\n    object OpenItem: MenuItem\n" &
+      "      caption = 'Open'\n    end\n  end\n" &
+      "  object Acts: ActionList\n    object RunAct: Action\n      caption = 'Run'\n    end\n  end\n" &
+      "end\n"
+    # and loads back
+    let g = loadNfm(formToNfm(f))
+    check formToNfm(g) == formToNfm(f)
+
+  test "a design position of (0, 0) is not written; the loader rejects a non-number":
+    let f = newForm(nil, 100, 100)
+    f.name = "F"
+    newTimer(f).designLeft = 0
+    check "designLeft" notin formToNfm(f)
+    expect NfmError:
+      discard loadNfm("object F: Form\n  object t: Timer\n    designLeft = 'x'\n  end\nend\n")
+
+  test "loadForm creates them too (owner = the form or the panel)":
+    let f = newNonVis()
+    check f.tick.owner == Component(f.box)
+    check f.tick.interval == 250 and f.tick.designLeft == 12
+    check f.pop.owner == Component(f) and f.pop.designTop == 150
+    check f.pop.images == f.imgs
+    check f.acts.components.len == 1
+    check formToNfm(f) == nv
+
+  test "a control's own helper timers are not written":
+    let f = newForm(nil, 200, 100)
+    f.name = "F"
+    let s = newSpinEdit(f, 0, 0, 100, 24)
+    s.name = "spin"
+    check "Timer" notin formToNfm(f)
 
 suite "converters":
   test "nfmToFormMacro":

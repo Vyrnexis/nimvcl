@@ -1,0 +1,33 @@
+object NonVis: Form
+  width = 300
+  height = 200
+  object box: Panel
+    left = 8
+    top = 8
+    object go: Button
+      caption = 'Go'
+    end
+    object tick: Timer
+      designLeft = 12
+      designTop = 4
+      interval = 250
+    end
+  end
+  object pop: PopupMenu
+    designLeft = 40
+    designTop = 150
+    images = imgs
+    object cut: MenuItem
+      caption = 'Cut'
+    end
+  end
+  object acts: ActionList
+    object doIt: Action
+      caption = 'Do it'
+    end
+  end
+  object imgs: ImageList
+    width = 24
+    height = 24
+  end
+end

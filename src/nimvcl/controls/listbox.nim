@@ -70,6 +70,7 @@ type
   DataEvent* = proc(sender: Control, index: int): string
 
   ListBox* = ref object of ScrollingControl
+    fBorder: BorderStyle
     fItems: seq[string]
     fCount: int                  # virtual item count
     fSel: HashSet[int]
@@ -678,7 +679,7 @@ method paint*(lb: ListBox, c: Canvas) =
   let t = lb.theme
   let enabled = lb.isEnabled
   let r = lb.clientRect
-  c.fillRoundRect(r, t.radius, if enabled: t.surface else: t.surfaceAlt)
+  c.fillFrame(r, t, lb.fBorder, if enabled: t.surface else: t.surfaceAlt)
   let vp = lb.viewport
   let ih = lb.itemHeight
   let n = lb.count
@@ -709,12 +710,21 @@ method paint*(lb: ListBox, c: Canvas) =
       lb.drawItemText(c, row, lb.itemText(i), st)
   c.popClip()
   let ring = focused and lb.fShowFocusRect
-  c.strokeRoundRect(r, t.radius, if ring: t.focusRing else: t.borderStrong,
+  c.strokeFrame(r, t, lb.fBorder, if ring: t.focusRing else: t.borderStrong,
                     if ring: t.focusRingWidth else: t.borderWidth)
   procCall paint(Control(lb), c)
 
+func borderStyle*(x: ListBox): BorderStyle = x.fBorder
+proc `borderStyle=`*(x: ListBox, v: BorderStyle) =
+  ## `bsSingle` (default): the usual border and focus ring; `bsNone`: none,
+  ## so the control can sit flush in a panel.
+  if v == x.fBorder: return
+  x.fBorder = v
+  x.invalidate()
+
 proc initListBox*(lb: ListBox, owner: Component = nil) =
   lb.initScrollingControl(owner)
+  lb.fBorder = bsSingle
   lb.setBounds(0, 0, 160, 140)
   lb.tabStop = true
   lb.fIndex = -1

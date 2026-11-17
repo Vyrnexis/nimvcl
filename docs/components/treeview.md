@@ -31,6 +31,7 @@ TreeView:
 | `showLines`, `showButtons`, `showRoot`, `rowSelect` | bool | Look |
 | `indent`, `itemHeight` | float32 | Metrics (`itemHeight` 0 = automatic) |
 | `readOnly` | bool | Disable in-place rename |
+| `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
 
 TreeNode: `text`, `data` (`RootRef`), `tag`, `imageIndex`, `selectedIndex`, `expanded`,
 `hasChildren`, `checked`, `parent`, `level`, `index`, `children`, `childCount`.

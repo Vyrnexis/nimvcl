@@ -118,6 +118,7 @@ type
   DragMode = enum dmNone, dmSelect, dmColSize, dmRowSize, dmColMove
 
   DrawGrid* = ref object of ScrollingControl
+    fBorder: BorderStyle
     fCols, fRows: AxisSizes
     fFixedCols, fFixedRows: int        # effective (clamped to the counts)
     fReqFixedCols, fReqFixedRows: int  # as requested; survive count shrinking
@@ -1047,7 +1048,7 @@ method paint*(g: DrawGrid, c: Canvas) =
   let t = g.theme
   let enabled = g.isEnabled
   let r = g.clientRect
-  c.fillRoundRect(r, t.radius, if enabled: t.surface else: t.surfaceAlt)
+  c.fillFrame(r, t, g.fBorder, if enabled: t.surface else: t.surfaceAlt)
   let v = g.viewport
   let a = g.scrollArea
   let fw = float32(g.fixedW)
@@ -1069,14 +1070,23 @@ method paint*(g: DrawGrid, c: Canvas) =
     c.pushClip(v)
     c.fillRect(rectF(x - 1, v.y, 2, v.h), t.accent)
     c.popClip()
-  c.strokeRoundRect(r, t.radius, if g.focused: t.focusRing else: t.borderStrong,
+  c.strokeFrame(r, t, g.fBorder, if g.focused: t.focusRing else: t.borderStrong,
                     if g.focused: t.focusRingWidth else: t.borderWidth)
   procCall paint(Control(g), c)
 
 # ------------------------------------------------------------ construction
 
+func borderStyle*(x: DrawGrid): BorderStyle = x.fBorder
+proc `borderStyle=`*(x: DrawGrid, v: BorderStyle) =
+  ## `bsSingle` (default): the usual border and focus ring; `bsNone`: none,
+  ## so the control can sit flush in a panel.
+  if v == x.fBorder: return
+  x.fBorder = v
+  x.invalidate()
+
 proc initDrawGrid*(g: DrawGrid, owner: Component = nil) =
   g.initScrollingControl(owner)
+  g.fBorder = bsSingle
   g.fCols = initAxis(5, 64)
   g.fRows = initAxis(5, 24)
   g.fFixedCols = 1
