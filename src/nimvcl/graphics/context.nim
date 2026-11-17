@@ -163,9 +163,18 @@ proc fontKey(ctx: RenderContext, spec: FontSpec, align = 0'u8): FontKey =
   let size = if spec.size <= 0: DefaultFontSize else: spec.size
   (r.path, int32(round(size * ctx.scale * 64)), r.ttfStyle, align)
 
+proc openFontAt(path: string, px: float32): Font =
+  let (data, len) = embeddedFontData(path)
+  if data != nil:   # static memory; the IO is closed with the font, the bytes stay
+    let io = ioFromConstMem(data, csize_t(len))
+    if io == nil: return nil
+    result = openFontIO(io, true, px)
+  else:
+    result = openFont(path.cstring, px)
+
 proc openEntry(key: FontKey): FontEntry =
   let px = key.px64.float32 / 64
-  let f = openFont(key.path.cstring, px)
+  let f = openFontAt(key.path, px)
   if f == nil:
     raise newException(IOError, "openFont " & key.path & ": " & $getError())
   setFontHinting(f, hintingLight)

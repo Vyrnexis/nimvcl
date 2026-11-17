@@ -33,7 +33,14 @@ and fonts `font(family, size, style)` with `fsBold`, `fsItalic`.
 
 ## Fonts
 
-The bundled fonts are Noto Sans and Noto Sans Mono. For glyphs they lack,
+The bundled fonts are Noto Sans (regular, bold, italic) and Noto Sans Mono.
+They are **embedded in the executable** at compile time and opened from memory,
+so a built app needs no font files next to it. This adds about 2.4 MB to the
+binary; build with `-d:nimvclNoEmbedFonts` to skip it and load the files from
+the `assets` folder instead. Overrides: if `NIMVCL_ASSETS` names a folder with
+`fonts/<file>.ttf`, that file is loaded from disk instead of the embedded copy,
+and `registerFontFamily("sans", ...)` replaces a bundled family.
+`fontSource(font("sans"))` reports "embedded", "disk" or "registered". For glyphs they lack,
 nimvcl keeps a global fallback list. It holds the Noto Symbols fonts and, when
 one is installed, **a system CJK font**: the first of Noto Sans CJK, Noto Serif
 CJK, WenQuanYi (Micro Hei / Zen Hei) or Droid Sans Fallback found in the usual

@@ -4,7 +4,7 @@
 ## logical size and a style. It holds no SDL handle; the `RenderContext`
 ## resolves it to a rasterised font at `size * scale` when text is drawn.
 
-import std/[os, tables, strutils]
+import std/[os, tables, sets, strutils]
 
 type
   FontStyle* = enum
@@ -57,11 +57,26 @@ const
   TtfBold = 0x01'u32
   TtfItalic = 0x02'u32
   # font.nim lives in src/nimvcl/graphics; the assets are four levels up.
-  # TODO: embed the bundled fonts with staticRead once the size trade-off is decided.
   CompiledAssetsDir = currentSourcePath().parentDir.parentDir.parentDir.parentDir / "assets"
+  EmbeddedPrefix* = "embedded:"   ## `ResolvedFont.path` prefix of a font held in the binary
+
+# The bundled fonts live in the binary (about 2.4 MB). Build with
+# -d:nimvclNoEmbedFonts to skip that and load them from disk only.
+when not defined(nimvclNoEmbedFonts):
+  const
+    EmbRegular = staticRead(CompiledAssetsDir / "fonts" / "NotoSans-Regular.ttf")
+    EmbBold = staticRead(CompiledAssetsDir / "fonts" / "NotoSans-Bold.ttf")
+    EmbItalic = staticRead(CompiledAssetsDir / "fonts" / "NotoSans-Italic.ttf")
+    EmbMono = staticRead(CompiledAssetsDir / "fonts" / "NotoSansMono-Regular.ttf")
+  let embeddedFonts = {
+    "NotoSans-Regular.ttf": EmbRegular, "NotoSans-Bold.ttf": EmbBold,
+    "NotoSans-Italic.ttf": EmbItalic, "NotoSansMono-Regular.ttf": EmbMono}.toTable
+else:
+  let embeddedFonts = initTable[string, string]()
 
 var
   families: Table[string, FontFiles]
+  userFamilies: HashSet[string]
   fallbackFiles: seq[string]
   fallbackEpoch = 0
   initialized = false
@@ -98,10 +113,30 @@ proc fontsDir(): string = assetsDir() / "fonts"
 proc registerFontFamily*(family, regular: string, bold = "", italic = "",
                          boldItalic = "") =
   ## Registers (or replaces) a family from TTF file paths. Missing variants
-  ## fall back to `regular` plus a synthetic style.
+  ## fall back to `regular` plus a synthetic style. A registered family wins
+  ## over the bundled one of the same name.
+  userFamilies.incl family.toLowerAscii
   families[family.toLowerAscii] = FontFiles(regular: regular, bold: bold,
                                             italic: italic, boldItalic: boldItalic)
   inc fallbackEpoch   # contexts rebuild fonts
+
+proc embeddedFontData*(path: string): tuple[data: pointer, len: int] =
+  ## Bytes of a font held in the binary (`path` is `embedded:<file name>`),
+  ## or (nil, 0). The memory is static: never free it.
+  if path.startsWith(EmbeddedPrefix):
+    let name = path[EmbeddedPrefix.len .. ^1]
+    if name in embeddedFonts:
+      let s = addr embeddedFonts[name]
+      return (cast[pointer](cstring(s[])), s[].len)
+
+proc bundledFont(file: string): string =
+  ## Where a bundled font is loaded from: a copy under `NIMVCL_ASSETS` when
+  ## that variable is set and the file exists there, else the embedded copy,
+  ## else the assets folder on disk.
+  let e = getEnv("NIMVCL_ASSETS")
+  if e.len > 0 and fileExists(e / "fonts" / file): return e / "fonts" / file
+  if file in embeddedFonts: return EmbeddedPrefix & file
+  fontsDir() / file
 
 proc addFallbackFontFile*(path: string) =
   ## Appends a global fallback font (symbols, CJK, emoji). Missing files are
@@ -113,13 +148,12 @@ proc addFallbackFontFile*(path: string) =
 proc ensureFontRegistry() =
   if initialized: return
   initialized = true
-  let d = fontsDir()
   if "sans" notin families:
-    families["sans"] = FontFiles(regular: d / "NotoSans-Regular.ttf",
-                                 bold: d / "NotoSans-Bold.ttf",
-                                 italic: d / "NotoSans-Italic.ttf")
+    families["sans"] = FontFiles(regular: bundledFont("NotoSans-Regular.ttf"),
+                                 bold: bundledFont("NotoSans-Bold.ttf"),
+                                 italic: bundledFont("NotoSans-Italic.ttf"))
   if "mono" notin families:
-    families["mono"] = FontFiles(regular: d / "NotoSansMono-Regular.ttf")
+    families["mono"] = FontFiles(regular: bundledFont("NotoSansMono-Regular.ttf"))
   const sys = "/usr/share/fonts/noto"
   # NotoColorEmoji.ttf is deliberately NOT probed: SDL_ttf 3.2 does not scale
   # CBDT bitmap strikes, so its glyphs render at a fixed 136x128 px. Opt in
@@ -173,3 +207,13 @@ proc resolveFont*(spec: FontSpec): ResolvedFont =
   # Underline and strike-out are NOT passed to SDL_ttf: its renderer text engine
   # clips the underline and renders the strike as a light gap. The Canvas draws
   # both itself.
+
+proc fontSource*(spec: FontSpec): string =
+  ## Where the font for `spec` comes from: "embedded" (in the binary),
+  ## "disk" (bundled file loaded from `NIMVCL_ASSETS` or the assets folder) or
+  ## "registered" (a family set with `registerFontFamily`).
+  let r = resolveFont(spec)
+  let fam = if spec.family.len == 0: DefaultFamily else: spec.family.toLowerAscii
+  if r.path.startsWith(EmbeddedPrefix): "embedded"
+  elif fam in userFamilies and fam in families: "registered"
+  else: "disk"
