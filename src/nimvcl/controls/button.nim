@@ -182,17 +182,43 @@ method doClick*(b: Button) =
 
 # ------------------------------------------------------------------- paint
 
+func luminance(c: Color): float32 =
+  (0.2126'f32 * float32(c.r) + 0.7152'f32 * float32(c.g) + 0.0722'f32 * float32(c.b)) / 255
+
+func customFace(base: Color, s: VisualState, t: Theme): Color =
+  ## Face of a button with its own `color`: hover and pressed shade the colour
+  ## toward its contrast side, disabled fades it into the surface.
+  let away = if luminance(base) > 0.5: clBlack else: clWhite
+  case s
+  of vsNormal: base
+  of vsHover: mix(base, away, 0.12)
+  of vsPressed: mix(base, clBlack, 0.22)
+  of vsDisabled: mix(base, t.surface, 0.6)
+
+func contrastText(base: Color): Color =
+  if luminance(base) > 0.6: rgb(20, 20, 20) else: clWhite
+
 method paint*(b: Button, c: Canvas) =
   b.ensureHook()
   let t = b.theme
   let st = b.state
-  let accent = b.fDefault and st != vsDisabled
+  let own = not b.parentColor and b.color.a > 0   # a colour set by the program
+  let accent = b.fDefault and st != vsDisabled and not own
   let r = b.clientRect
-  let fill = if accent: accentFaceColor(t, st) else: faceColor(t, st, b.fFlat)
+  let fill =
+    if own: customFace(b.color, st, t)
+    elif accent: accentFaceColor(t, st)
+    else: faceColor(t, st, b.fFlat)
   c.fillRoundRect(r, t.radius, fill)
-  if not accent and not b.fFlat:
+  if own:
+    c.strokeRoundRect(r, t.radius, mix(fill, clBlack, 0.18), t.borderWidth)
+  elif not accent and not b.fFlat:
     c.strokeRoundRect(r, t.radius, borderColorFor(t, st), t.borderWidth)
-  let txt = if accent: t.accentText else: textColorFor(t, st)
+  let txt =
+    if own: (if st == vsDisabled: mix(contrastText(b.color), fill, 0.5)
+             else: contrastText(b.color))
+    elif accent: t.accentText
+    else: textColorFor(t, st)
   c.drawMnemonic(b.caption, b.font, r.inflate(-t.spacing + 2), txt, b.altHeld,
                  taCenter, vaCenter)
   if b.focused: drawFocusRing(c, r, t, onFilled = accent)
