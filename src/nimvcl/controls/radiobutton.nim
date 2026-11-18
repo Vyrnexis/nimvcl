@@ -144,6 +144,7 @@ method paint*(r: RadioButton, c: Canvas) =
   let t = r.theme
   let st = r.visualState(r.fHot, r.isPressed)
   let box = indicatorRect(r)
+  if r.ownColor: c.fillRect(r.clientRect, r.color)   # the area behind
   if r.fChecked:
     c.fillEllipse(box, accentFaceColor(t, st))
     let d = 6'f32
@@ -152,7 +153,8 @@ method paint*(r: RadioButton, c: Canvas) =
   else:
     c.fillEllipse(box, faceColor(t, st))
     c.strokeEllipse(box, borderColorFor(t, st), t.borderWidth)
-  c.drawMnemonic(r.caption, r.font, indicatorCaptionRect(r, t), textColorFor(t, st),
+  c.drawMnemonic(r.caption, r.font, indicatorCaptionRect(r, t),
+                 r.ink(t, r.color, st != vsDisabled),
                  r.altHeld, taLeft, vaCenter)
   if r.focused:
     c.strokeEllipse(box, t.focusRing, t.focusRingWidth)

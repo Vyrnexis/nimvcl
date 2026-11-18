@@ -1117,7 +1117,7 @@ method paint*(e: Memo, c: Canvas) =
   let enabled = e.isEnabled
   let foc = e.focused
   let r = e.clientRect
-  let bg = if enabled: t.surface else: t.surfaceAlt
+  let bg = e.fieldFill(t, enabled)
   let hot = e.host of UiRoot and UiRoot(e.host).hovered == Control(e)
   let bc =
     if not enabled: t.border
@@ -1132,12 +1132,13 @@ method paint*(e: Memo, c: Canvas) =
   let font = e.font
   let fm = c.fontMetrics(font)
   let o = e.textOrigin
-  let textCol = if enabled: t.text else: t.textDisabled
+  let textCol = e.ink(t, bg, enabled)
   let model = e.model
   c.pushClip(vp)
 
   if e.showsPlaceholder:
-    c.drawText(e.fPlaceholder, font, o.x, e.rowTop(0), if enabled: t.textMuted else: t.textDisabled)
+    c.drawText(e.fPlaceholder, font, o.x, e.rowTop(0),
+               if enabled: legible(t.textMuted, bg) else: t.textDisabled)
   else:
     let n = model.lineCount
     let firstRow = max(int(floor((e.scrollPosY - float64(PadY)) / float64(rh))), 0)
@@ -1200,7 +1201,7 @@ method paint*(e: Memo, c: Canvas) =
     let s = c.scale
     let cr = e.caretRect
     let cw = max(round(s), 1'f32) / s
-    c.fillRect(rectF(floor(cr.x * s) / s, cr.y, cw, cr.h), t.text)
+    c.fillRect(rectF(floor(cr.x * s) / s, cr.y, cw, cr.h), e.ink(t, bg))
   c.popClip()
   if foc and enabled:
     drawFocusRing(c, r, t)

@@ -97,9 +97,10 @@ proc panelRect*(b: StatusBar, i: int): RectF =
 
 method paint*(b: StatusBar, c: Canvas) =
   let t = b.theme
-  let col = if b.isEnabled: t.textMuted else: t.textDisabled
+  let bg = if b.ownColor: b.color else: t.surfaceAlt
+  let col = b.ink(t, bg, b.isEnabled, t.textMuted)
   let r = b.clientRect
-  c.fillRect(r, t.surfaceAlt)
+  c.fillRect(r, bg)
   c.line(0, 0.5, r.w, 0.5, t.border, 1)
   if b.fSimple or b.fPanels.len == 0:
     c.textRect(b.caption, b.font, rectF(t.spacing, 1, max(r.w - GripSize - t.spacing, 0), r.h - 1),

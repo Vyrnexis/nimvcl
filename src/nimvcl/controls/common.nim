@@ -40,31 +40,21 @@ export math, geometry, color, font, canvas, types, control, theme, input
 
 type
   TextStyle* = object
-    ## Text colour of a control that has one of its own: nothing set (theme
-    ## text), a fixed `Color`, or a `ThemeColor` role resolved at paint time.
-    ## Setting one replaces the other.
-    hasColor: bool
-    color: Color
+    ## Text colour role of a control (`Label`, `Panel`): the theme's text, or a
+    ## `ThemeColor` role resolved at paint time. A fixed colour is the control's
+    ## `font.color`, which takes precedence over the role.
     role: ThemeColor
 
   VisualState* = enum
     ## What a clickable control looks like.
     vsNormal, vsHover, vsPressed, vsDisabled
 
-func fixed*(s: TextStyle): bool = s.hasColor
-func fixedColor*(s: TextStyle): Color = s.color
 func role*(s: TextStyle): ThemeColor = s.role
-proc setColor*(s: var TextStyle, v: Color) =
-  s.hasColor = true
-  s.color = v
-  s.role = tcText
-proc setRole*(s: var TextStyle, v: ThemeColor) =
-  s.hasColor = false
-  s.role = v
+proc setRole*(s: var TextStyle, v: ThemeColor) = s.role = v
 proc reset*(s: var TextStyle) = s = TextStyle()
 func resolve*(s: TextStyle, t: Theme): Color =
   ## The colour to draw with under theme `t`.
-  if s.hasColor: s.color else: t.resolve(s.role)
+  t.resolve(s.role)
 
 # ---------------------------------------------------------------- creation
 
@@ -204,6 +194,61 @@ func borderColorFor*(t: Theme, s: VisualState): Color =
 
 func textColorFor*(t: Theme, s: VisualState): Color =
   if s == vsDisabled: t.textDisabled else: t.text
+
+# -------------------------------------------- own colour and font colour
+
+func luminance*(c: Color): float32 =
+  (0.2126'f32 * float32(c.r) + 0.7152'f32 * float32(c.g) + 0.0722'f32 * float32(c.b)) / 255
+
+func contrastText*(base: Color): Color =
+  ## Dark or white text, whichever reads on `base`.
+  if luminance(base) > 0.6: rgb(20, 20, 20) else: clWhite
+
+func shade*(base: Color, amount: float32): Color =
+  ## `base` moved toward black or white (its contrast side): hover and
+  ## header tones derived from a colour the program chose.
+  mix(base, (if luminance(base) > 0.5: clBlack else: clWhite), amount)
+
+func legible*(fg, bg: Color): Color =
+  ## `fg`, unless it hardly differs from `bg`: then the contrast text of `bg`.
+  if abs(luminance(fg) - luminance(bg)) >= 0.4'f32: fg else: contrastText(bg)
+
+method colorOwner*(c: Control): Control {.base.} =
+  ## The control whose `color` this one's fill follows: itself, except for the
+  ## inner edit of a combo box or spin edit.
+  c
+
+proc ownColor*(c: Control): bool =
+  ## True when the program set `color` on `c` (it does not follow the parent).
+  let o = c.colorOwner
+  not o.parentColor and o.color.a > 0
+
+proc hasFontColor*(c: Control): bool = c.font.color.a > 0
+
+proc fieldFill*(c: Control, t: Theme, enabled: bool): Color =
+  ## Background of an input-like control: its own `color`, else the theme's
+  ## `surface`; a disabled one fades toward the disabled surface.
+  if c.ownColor:
+    let col = c.colorOwner.color
+    if enabled: col else: mix(col, t.surfaceAlt, 0.6)
+  elif enabled: t.surface
+  else: t.surfaceAlt
+
+proc ink*(c: Control, t: Theme, backdrop: Color, enabled = true,
+          themeText = clTransparent): Color =
+  ## Text colour of `c` over `backdrop`: the disabled colour, else `font.color`
+  ## when set, else `themeText` (default `t.text`) made legible on `backdrop`.
+  if not enabled: t.textDisabled
+  elif c.font.color.a > 0: c.font.color
+  else: legible(if themeText.a == 0: t.text else: themeText, backdrop)
+
+proc rowHover*(c: Control, t: Theme, base: Color): Color =
+  ## Hover tone of a list row: the theme's, or a shade of an own colour.
+  if c.ownColor: shade(base, 0.10'f32) else: t.hover
+
+proc headerFill*(c: Control, t: Theme, base: Color): Color =
+  ## Header/fixed-area tone: `surfaceAlt`, or a shade of an own colour.
+  if c.ownColor: shade(base, 0.06'f32) else: t.surfaceAlt
 
 proc effectiveFont*(c: Control, bold = false): FontSpec =
   if bold: c.font.bold else: c.font

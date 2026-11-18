@@ -36,6 +36,8 @@ ToolBar:
 |---|---|---|
 | `images` | `ImageList` | Icons for `imageIndex` |
 | `flat` | bool | Buttons have no face until hovered (default true) |
+| `color` | Color | Own background: the bar fill, with tool buttons shading it for hover and pressed; default `theme.surface`. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ToolButton:
 

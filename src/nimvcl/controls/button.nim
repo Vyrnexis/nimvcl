@@ -182,9 +182,6 @@ method doClick*(b: Button) =
 
 # ------------------------------------------------------------------- paint
 
-func luminance(c: Color): float32 =
-  (0.2126'f32 * float32(c.r) + 0.7152'f32 * float32(c.g) + 0.0722'f32 * float32(c.b)) / 255
-
 func customFace(base: Color, s: VisualState, t: Theme): Color =
   ## Face of a button with its own `color`: hover and pressed shade the colour
   ## toward its contrast side, disabled fades it into the surface.
@@ -194,9 +191,6 @@ func customFace(base: Color, s: VisualState, t: Theme): Color =
   of vsHover: mix(base, away, 0.12)
   of vsPressed: mix(base, clBlack, 0.22)
   of vsDisabled: mix(base, t.surface, 0.6)
-
-func contrastText(base: Color): Color =
-  if luminance(base) > 0.6: rgb(20, 20, 20) else: clWhite
 
 method paint*(b: Button, c: Canvas) =
   b.ensureHook()
@@ -215,7 +209,8 @@ method paint*(b: Button, c: Canvas) =
   elif not accent and not b.fFlat:
     c.strokeRoundRect(r, t.radius, borderColorFor(t, st), t.borderWidth)
   let txt =
-    if own: (if st == vsDisabled: mix(contrastText(b.color), fill, 0.5)
+    if b.hasFontColor and st != vsDisabled: b.font.color
+    elif own: (if st == vsDisabled: mix(contrastText(b.color), fill, 0.5)
              else: contrastText(b.color))
     elif accent: t.accentText
     else: textColorFor(t, st)

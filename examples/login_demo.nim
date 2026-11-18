@@ -27,7 +27,7 @@ form WelcomeForm:
     font = font(size = 18, style = {fsBold})
   Label detail:
     left = 24; top = 62
-    textColor = self.theme.textMuted
+    font.color = self.theme.textMuted
   Button ok:
     caption = "OK"; left = 206; top = 104; width = 90
     isDefault = true
@@ -76,11 +76,11 @@ form LoginForm:
     onClick: self.close()
   Label status:
     caption = "Enter your credentials."; left = 20; top = 352
-    textColor = self.theme.textMuted
+    font.color = self.theme.textMuted
   onShow: self.activeControl = self.user
 
   proc showError(self: LoginForm, msg: string) =
-    self.status.textColor = self.theme.danger
+    self.status.fontColor = self.theme.danger
     self.status.caption = msg
 
   proc showWelcome(self: LoginForm) =
@@ -101,7 +101,7 @@ form LoginForm:
       setFocus(self.password)
     else:
       self.greeted = name
-      self.status.textColor = self.theme.textMuted
+      self.status.fontColor = self.theme.textMuted
       self.status.caption = "Signed in as " & name
       self.showWelcome()
 

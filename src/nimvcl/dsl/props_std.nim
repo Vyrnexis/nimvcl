@@ -194,7 +194,6 @@ registerClass(Label, parent = Control):
     wordWrap: bool
     transparent: bool
     muted: bool
-    textColor: Color
   category Behaviour:
     focusControl: Control
 
@@ -233,7 +232,6 @@ registerClass(Panel, parent = Container):
     caption: string
     borderStyle: PanelBorder
     alignment: HAlign
-    textColor: Color
 
 registerClass(GroupBox, parent = Container):
   category Appearance:

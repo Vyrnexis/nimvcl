@@ -140,7 +140,7 @@ proc buildMain(): Form =
   l5.name = "labWrap"
   l5.wordWrap = true
   l5.autoSize = true
-  l5.textColor = f.theme.textMuted
+  l5.fontColor = f.theme.textMuted
 
   # --- panels and bevels
   let gp = newGroupBox(f, "Panels and bevels", 256, 250, 240, 180)
@@ -182,7 +182,7 @@ proc buildMain(): Form =
   cap.name = "imgCaption"
   cap.wordWrap = true
   cap.autoSize = true
-  cap.textColor = f.theme.textMuted
+  cap.fontColor = f.theme.textMuted
 
   # --- paint box
   let gx = newGroupBox(f, "PaintBox", 0, 446, 768, 100)

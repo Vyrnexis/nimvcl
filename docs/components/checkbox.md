@@ -24,6 +24,8 @@ tri.state = cbGrayed
 | `state` | `CheckBoxState` | `cbUnchecked`, `cbChecked`, `cbGrayed` |
 | `allowGrayed` | bool | Clicking cycles through the gray state too |
 | `autoSize` | bool | Size to box and caption (default, off with an explicit size) |
+| `color` | Color | Own background: the area behind the box and caption; none by default (follows the parent). Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

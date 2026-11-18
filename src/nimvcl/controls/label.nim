@@ -50,26 +50,31 @@ proc `transparent=`*(l: Label, v: bool) =
 func focusControl*(l: Label): Control = l.fFocusControl
 proc `focusControl=`*(l: Label, v: Control) = l.fFocusControl = v
 
-func textColor*(l: Label): Color =
-  ## The own text colour (only meaningful when `hasTextColor`).
-  l.fText.fixedColor
-func hasTextColor*(l: Label): bool = l.fText.fixed
-proc `textColor=`*(l: Label, v: Color) =
-  ## A fixed colour; it does not follow theme switches (see `textRole`).
-  l.fText.setColor v
-  l.invalidate()
+proc textColor*(l: Label): Color {.deprecated: "use font.color".} =
+  ## Deprecated alias of `font.color` (alpha 0: none set).
+  l.font.color
+proc hasTextColor*(l: Label): bool = l.hasFontColor
+proc `textColor=`*(l: Label, v: Color) {.deprecated: "use font.color".} =
+  ## Deprecated alias: sets `font.color` (a fixed colour; it does not follow
+  ## theme switches) and drops `textRole`. Like any own font, it ends
+  ## `parentFont`.
+  l.fText.reset()
+  l.fontColor = v
 func textRole*(l: Label): ThemeColor = l.fText.role
 proc `textRole=`*(l: Label, v: ThemeColor) =
   ## Text colour by theme role (`tcMuted`, `tcAccent`, ...), resolved at paint
-  ## time so it follows theme switches. Replaces a fixed `textColor`.
+  ## time so it follows theme switches. It replaces an own `font.color`.
   l.fText.setRole v
+  if l.hasFontColor: l.fontColor = clTransparent   # the role replaces a fixed colour
   l.invalidate()
 proc resetTextColor*(l: Label) =
-  ## Back to the theme's `text` colour.
+  ## Back to the theme's `text` colour (clears `font.color` and `textRole`).
   l.fText.reset()
+  if l.hasFontColor:
+    l.fontColor = clTransparent
   l.invalidate()
 
-func muted*(l: Label): bool = not l.fText.fixed and l.fText.role == tcMuted
+func muted*(l: Label): bool = l.fText.role == tcMuted
 proc `muted=`*(l: Label, v: bool) =
   ## Shortcut for `textRole = tcMuted` (true) / `resetTextColor` (false).
   if v: l.textRole = tcMuted
@@ -86,9 +91,7 @@ method preferredSize*(l: Label): SizeF =
 method paint*(l: Label, c: Canvas) =
   let t = l.theme
   if not l.fTransparent: c.fillRect(l.clientRect, l.color)
-  let col =
-    if not l.isEnabled: t.textDisabled
-    else: l.fText.resolve(t)
+  let col = l.ink(t, l.color, l.isEnabled, l.fText.resolve(t))
   c.drawMnemonic(l.caption, l.font, l.clientRect, col, l.altHeld, l.fAlignment,
                  l.fLayout, wrap = l.fWordWrap)
   procCall paint(Control(l), c)

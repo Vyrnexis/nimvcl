@@ -980,7 +980,9 @@ proc cellTextColor*(g: DrawGrid, state: GridDrawStates): Color =
   let t = g.theme
   if not g.isEnabled: t.textDisabled
   elif gdSelected in state and (g.focused or g.fEditing): t.selectionText
-  else: t.text
+  else:
+    let bg = g.fieldFill(t, true)
+    g.ink(t, if gdFixed in state: g.headerFill(t, bg) else: bg)
 
 proc drawCellText*(g: DrawGrid, c: Canvas, rect: RectF, text: string,
                    state: GridDrawStates, align = taLeft, bold = false) =
@@ -996,7 +998,8 @@ proc paintPane(g: DrawGrid, c: Canvas, cols, rows: GridCoord, clip: RectF,
   if cols.col > cols.row or rows.col > rows.row or clip.isEmpty: return
   let t = g.theme
   c.pushClip(clip)
-  c.fillRect(clip, if fixedPane: t.surfaceAlt else: t.surface)
+  let bg = g.fieldFill(t, true)
+  c.fillRect(clip, if fixedPane: g.headerFill(t, bg) else: bg)
   let vl = g.fVLines
   let hl = g.fHLines
   let enabled = g.isEnabled
@@ -1022,7 +1025,7 @@ proc paintPane(g: DrawGrid, c: Canvas, cols, rows: GridCoord, clip: RectF,
       if gdSelected in st:
         c.fillRect(slot, if focused and enabled: t.selection else: t.selectionInactive)
       elif gdHot in st:
-        c.fillRect(slot, t.hover)
+        c.fillRect(slot, g.rowHover(t, bg))
       let rect = rectF(x, y, max(w - (if vl or isFixed: 1 else: 0), 0),
                        max(h - (if hl or isFixed: 1 else: 0), 0))
       g.drawCell(c, cc, r, rect, st)
@@ -1048,7 +1051,7 @@ method paint*(g: DrawGrid, c: Canvas) =
   let t = g.theme
   let enabled = g.isEnabled
   let r = g.clientRect
-  c.fillFrame(r, t, g.fBorder, if enabled: t.surface else: t.surfaceAlt)
+  c.fillFrame(r, t, g.fBorder, g.fieldFill(t, enabled))
   let v = g.viewport
   let a = g.scrollArea
   let fw = float32(g.fixedW)

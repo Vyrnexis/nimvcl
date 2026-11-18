@@ -24,10 +24,11 @@ note.muted = true                       # follows theme switches
 | `layout` | `VAlign` | `vaTop`, `vaCenter`, `vaBottom` |
 | `wordWrap` | bool | Wrap at the label width; the height follows the text |
 | `autoSize` | bool | Size to the text. True by default, off when you pass a width or height |
-| `transparent` | bool | Do not paint a background |
-| `textColor` | Color | A fixed text color (does not follow theme switches); `resetTextColor()` undoes it |
+| `transparent` | bool | Do not paint a background. Otherwise the label is filled with `color` |
+| `color` | Color | Background when not `transparent` |
+| `font.color` | Color | A fixed text color (VCL `Font.Color`; does not follow theme switches). Alpha 0, the default, is the theme's text color. `fontColor` is a shortcut; `resetTextColor()` undoes it. `textColor` is a deprecated alias |
 | `muted` | bool | The theme's muted text color, resolved at paint time, so it follows light/dark |
-| `textRole` | `ThemeColor` | `tcText`, `tcMuted`, `tcAccent`, `tcDanger`, `tcDisabled`: a theme color by role |
+| `textRole` | `ThemeColor` | `tcText`, `tcMuted`, `tcAccent`, `tcDanger`, `tcDisabled`: a theme color by role. Replaces `font.color` |
 | `focusControl` | Control | Gets the focus on Alt+mnemonic or a click |
 | `font` | FontSpec | e.g. `font(size = 20, style = {fsBold})` |
 

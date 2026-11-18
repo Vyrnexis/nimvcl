@@ -29,6 +29,8 @@ list.onChange = proc(sender: Control) =
 | `style` | `ListBoxStyle` | `lbStandard` or `lbOwnerDraw` (with `onDrawItem`) |
 | `topIndex` | int | First visible row |
 | `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
+| `color` | Color | Own background: the list background; hover rows are a shade of it, selection keeps the theme colors. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

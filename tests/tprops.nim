@@ -147,6 +147,14 @@ suite "registry":
     setProp(p, "font.style.fsItalic", pvBool(true))
     check p.font.style == {fsBold, fsItalic}
     check not isDefault(p, "font.size")
+    check isDefault(p, "font.color")
+    check classByName("Label").findProp("font.color") != nil
+    check classByName("Label").findProp("font.color").kind == pkColor
+    check classByName("Label").findProp("textColor") == nil      # replaced by font.color
+    setProp(p, "font.color", pvColor(hex"#336699"))
+    check p.font.color == hex"#336699"
+    check getProp(p, "font.color") == pvColor(hex"#336699")
+    check not isDefault(p, "font.color")
     setProp(p, "margins.left", pvFloat(4))
     setProp(p, "margins.bottom", pvInt(9))
     check p.margins == spacing(4, 0, 0, 9)

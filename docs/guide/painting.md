@@ -29,7 +29,10 @@ Rectangle helpers: `r.inflate(d)` grows or shrinks every side by `d`;
 
 Helpers: `rectF(x, y, w, h)`, `pointF`, `sizeF`, colors `rgb(r, g, b)`,
 `rgba(r, g, b, a)`, `hex"#2563eb"`, `clBlack`, `clWhite`, `clTransparent`,
-and fonts `font(family, size, style)` with `fsBold`, `fsItalic`.
+and fonts `font(family, size, style)` with `fsBold`, `fsItalic`. A `FontSpec` also
+has a `color` (alpha 0: none, the theme's text color); the Canvas text calls take
+the color as an argument, so a control passes `font.color` itself when it is
+set (see [theming](theming.md#per-control-colors-and-fonts)).
 
 ## Fonts
 
@@ -198,7 +201,9 @@ What to know:
   `invalidateRect(r)` (same as `invalidate(r)`) with that rect in the control's
   client coordinates: see "Partial repainting" below.
 * Read colors and metrics from `theme` so your control follows the light and dark
-  themes, see [theming](theming.md).
+  themes, see [theming](theming.md). Honour the user's choices too: paint the
+  background with `color` when `parentColor` is false (`not c.parentColor and
+  c.color.a > 0`), and draw text with `c.font.color` when `c.fontColor.a > 0`.
 
 You can also use your control as a child in the `form` macro, see
 [forms](../forms.md) ("Custom controls as children").

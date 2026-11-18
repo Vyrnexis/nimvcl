@@ -101,7 +101,7 @@ suite "parser and writer":
     check ok.props[1].value.kind == nvInt
     check ok.props[3].name == "font.style" and ok.props[3].value.items == @["fsBold"]
     check ok.props[4].value.kind == nvColor
-    check ok.props[6].value.kind == nvBool
+    check ok.props[7].value.kind == nvBool
     check n.children[4].props[2].value.items == @["Viewer", "Editor"]
     check n.children[0].line == 5 and n.children[0].col == 3
 
@@ -149,6 +149,7 @@ suite "run-time loading":
     check ok.font.size == 18
     check ok.font.style == {fsBold}
     check ok.color == hex"#336699"
+    check ok.font.color == hex"#aa0000"
     check ok.isDefault
     check ComboBox(f.findComponent("roleCombo")).itemIndex == 1
     let lv = ListView(f.findComponent("table"))
@@ -230,6 +231,45 @@ suite "run-time loading":
     check again.contains("anchors = []")
     check formToNfm(loadNfm(again)) == again
 
+suite "font.color in form files":
+  test "written only when set, restored by the run-time loader":
+    let f = newForm(nil, 100, 100)
+    f.name = "F"
+    let l = newLabel(f, "x")
+    l.name = "l"
+    let e = newEdit(f)
+    e.name = "e"
+    check "font.color" notin formToNfm(f)
+    l.fontColor = hex"#336699"
+    e.fontColor = hex"#aa000080"
+    let text = formToNfm(f)
+    check "font.color = #336699" in text
+    check "font.color = #aa000080" in text
+    check text.count("font.color") == 2
+    check "font.family" notin text and "font.size" notin text   # only the colour differs
+    let g = loadNfm(text)
+    check Label(g.findComponent("l")).fontColor == hex"#336699"
+    check Edit(g.findComponent("e")).fontColor == hex"#aa000080"
+    check formToNfm(g) == text
+
+  test "a font that is inherited writes nothing":
+    let f = newForm(nil, 100, 100)
+    f.name = "F"
+    let p = newPanel(f)
+    p.name = "p"
+    p.fontColor = hex"#336699"
+    let l = newLabel(p, "x")
+    l.name = "l"
+    check l.fontColor == hex"#336699"               # follows the panel (parentFont)
+    let text = formToNfm(f)
+    check text.count("font.color") == 1
+
+  test "the old textColor name still loads, and is written as font.color":
+    let f = loadNfm("object F: Form\n  object p: Panel\n    textColor = #00ff00\n  end\nend\n")
+    check Panel(f.findComponent("p")).fontColor == hex"#00ff00"
+    check "font.color = #00ff00" in formToNfm(f)
+    check "textColor" notin formToNfm(f)
+
 suite "loadForm (compile time)":
   test "a typed form with a field per named object":
     let f = newSample()
@@ -240,6 +280,8 @@ suite "loadForm (compile time)":
     check f.okButton.font.size == 18
     check f.okButton.font.style == {fsBold}
     check f.okButton.color == hex"#336699"
+    check f.okButton.font.color == hex"#aa0000"
+    check f.userEdit.font.color.a == 0              # not written, not set
     check f.userLabel.focusControl == Control(f.userEdit)
     check f.roleCombo.itemIndex == 1
     check f.table.columns.len == 2

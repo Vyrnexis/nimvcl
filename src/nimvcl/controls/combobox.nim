@@ -277,6 +277,7 @@ proc dropDown*(c: ComboBox) =
   let w = if c.fDropWidth > 0: c.fDropWidth else: c.width
   let h = float32(rows) * ih + 2
   c.fList.font = c.font
+  if c.ownColor: c.fList.color = c.colorOwner.color else: c.fList.parentColor = true
   c.fList.itemHeight = ih
   c.fList.align = alClient
   c.fList.setBounds(0, 0, w, h)
@@ -411,6 +412,8 @@ method doResize*(c: ComboBox) =
   procCall doResize(Container(c))
   c.layoutEdit()
 
+method colorOwner*(e: ComboEdit): Control = e.combo
+
 method doEnter*(c: ComboBox) =
   procCall doEnter(Container(c))
   c.invalidate()
@@ -422,7 +425,7 @@ method paint*(c: ComboBox, cv: Canvas) =
   let enabled = c.isEnabled
   let foc = c.focused or (c.fStyle == csDropDown and c.fEdit.focused)
   let r = c.clientRect
-  let bg = if enabled: t.surface else: t.surfaceAlt
+  let bg = c.fieldFill(t, enabled)
   let bc =
     if not enabled: t.border
     elif foc or c.fOpen: t.accent
@@ -434,13 +437,14 @@ method paint*(c: ComboBox, cv: Canvas) =
   if enabled and (c.fHot or c.fOpen):
     let hotArea = if c.fStyle == csDropDownList: rectF(1, 1, c.width - 2, c.height - 2)
                   else: btnRect
-    cv.fillRoundRect(hotArea, max(t.radius - 1, 1), if c.fOpen: t.pressed else: t.hover)
+    cv.fillRoundRect(hotArea, max(t.radius - 1, 1), if c.fOpen: (if c.ownColor: shade(bg, 0.18'f32) else: t.pressed)
+                                              else: c.rowHover(t, bg))
   if c.fStyle == csDropDownList:
     let ta = rectF(8, 0, max(c.width - ArrowW - 8, 0), c.height)
-    cv.textRect(c.text, c.font, ta, if enabled: t.text else: t.textDisabled,
+    cv.textRect(c.text, c.font, ta, c.ink(t, bg, enabled),
                 taLeft, vaCenter)
   cv.drawArrow(pointF(ar.x + ar.w / 2 - 0.5, ar.y + ar.h / 2), 4, adDown,
-               if enabled: t.textMuted else: t.textDisabled)
+               if enabled: legible(t.textMuted, bg) else: t.textDisabled)
   cv.strokeRoundRect(r, t.radius, bc, t.borderWidth)
   if foc and enabled: drawFocusRing(cv, r, t)
   procCall paint(Control(c), cv)

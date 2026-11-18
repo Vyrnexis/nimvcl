@@ -493,14 +493,17 @@ suite "list and tree data as text":
     let r = loadNfmFile(here / "nfm" / "listdata.nfm")
     check TreeView(r.findComponent("tv")).nodeLines == f.tv.nodeLines
 
-  test "Label/Panel textColor is stored":
+  test "Label/Panel font.color is stored (and the old textColor name still loads)":
     let f = newForm(nil, 100, 100)
     f.name = "F"
     let l = newLabel(f, "x")
     l.name = "l"
-    l.textColor = Color(r: 255, g: 0, b: 0, a: 255)
-    check "textColor = #ff0000" in formToNfm(f).replace("#FF0000", "#ff0000")
-    check Label(loadNfm(formToNfm(f)).findComponent("l")).textColor == l.textColor
+    l.fontColor = Color(r: 255, g: 0, b: 0, a: 255)
+    check "font.color = #ff0000" in formToNfm(f).replace("#FF0000", "#ff0000")
+    check "textColor" notin formToNfm(f)
+    check Label(loadNfm(formToNfm(f)).findComponent("l")).fontColor == l.fontColor
+    let old = loadNfm("object F: Form\n  object l: Label\n    textColor = #00ff00\n  end\nend\n")
+    check Label(old.findComponent("l")).fontColor == hex"#00ff00"
 
 suite "component references: action and popupMenu":
   Application.init()

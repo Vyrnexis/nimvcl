@@ -370,6 +370,13 @@ proc parseNfm*(text: string, fileName = ""): NfmNode =
     lx.fail(lx.tok.line, lx.tok.col,
             "unexpected " & describe(lx.tok) & " after the end of the root object")
 
+proc legacyNames(n: NfmNode) =
+  ## Older files wrote the text colour of a label or panel as `textColor`; it
+  ## is now `font.color`.
+  for p in n.props.mitems:
+    if p.name == "textColor": p.name = "font.color"
+  for c in n.children: legacyNames(c)
+
 # ------------------------------------------------------------------ writer
 
 proc quoteNfm*(s: string): string =
@@ -730,6 +737,7 @@ proc loadNfm*(text: string, owner: Component = nil, options: NfmOptions = nil,
   ## Parses `text` and builds the form it describes. The root object must be a
   ## `Form` (or a registered subclass). Raises `NfmError` with `file:line:col`.
   let root = parseNfm(text, fileName)
+  legacyNames(root)
   let o = buildNfm(root, owner, options, fileName)
   if o == nil or not (o of Form):
     raise nfmError(fileName, root.line, root.col,
@@ -863,6 +871,7 @@ proc nfmToFormMacro*(text: string, fileName = ""): string =
   ## Parts of composite properties stay `font.size = 12` (the `form` macro
   ## supports that form).
   let root = parseNfm(text, fileName)
+  legacyNames(root)
   var names = initHashSet[string]()
   for n in walk(root):
     if n.name.len > 0: names.incl n.name
@@ -1041,6 +1050,7 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
   var root: NfmNode
   try: root = parseNfm(text, path)
   except NfmError as e: error("loadForm: " & e.msg, site)
+  legacyNames(root)
   let file = path
 
   var names = initHashSet[string]()

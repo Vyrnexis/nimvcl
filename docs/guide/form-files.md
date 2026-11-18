@@ -118,11 +118,13 @@ and only the parts that differ from the default:
 ```
 font.size = 18
 font.style = [fsBold]
+font.color = #dc2626
 margins.left = 8
 constraints.minWidth = 100
 ```
 
-The parts: `font.family`, `font.size`, `font.style`; `margins.left|top|right|bottom`
+The parts: `font.family`, `font.size`, `font.style`, `font.color` (written only
+when set; an old `textColor` of a label or panel still loads as `font.color`); `margins.left|top|right|bottom`
 (also `padding`); `constraints.minWidth|minHeight|maxWidth|maxHeight`. Giving a
 `font` part makes the control use its own font (`parentFont` is cleared, as in
 Delphi); the same goes for `color`.

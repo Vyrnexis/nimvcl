@@ -177,7 +177,7 @@ func `==`*(a, b: PropValue): bool =
   of pkSet: a.bits == b.bits
   of pkColor: a.color == b.color
   of pkFont: a.font.family == b.font.family and a.font.size == b.font.size and
-             a.font.style == b.font.style
+             a.font.style == b.font.style and a.font.color == b.font.color
   of pkSpacing: a.spacing == b.spacing
   of pkConstraints: a.cons == b.cons
   of pkObject: a.obj == b.obj
@@ -469,7 +469,7 @@ proc isDescendantOf*(o: Obj, className: string): bool =
 const
   SpacingSubs = ["left", "top", "right", "bottom"]
   ConstraintSubs = ["minWidth", "minHeight", "maxWidth", "maxHeight"]
-  FontSubs = ["family", "size", "style"]
+  FontSubs = ["family", "size", "style", "color"]
 
 proc fontStyleNames*(): seq[string] = enumNamesOf(FontStyle)
 
@@ -489,6 +489,7 @@ proc getSub*(v: PropValue, sub: string): PropValue =
     of "family": return pvString(v.font.family)
     of "size": return pvFloat(float(v.font.size))
     of "style": return pvSet(setToBits(v.font.style))
+    of "color": return pvColor(v.font.color)
     else: discard
   of pkSpacing:
     case sub
@@ -526,6 +527,9 @@ proc withSub*(v: PropValue, sub: string, x: PropValue): PropValue =
     of "style":
       if x.kind != pkSet: raise kindError("a set", x)
       result.font.style = bitsToSet[FontStyle](x.bits)
+    of "color":
+      if x.kind != pkColor: raise kindError("a colour", x)
+      result.font.color = x.color
     else: raise newException(PropError, "no sub-property `" & sub & "`")
   of pkSpacing:
     case sub
@@ -549,6 +553,7 @@ proc subKindOf(kind: PropKind, sub: string): PropKind =
     case sub
     of "family": pkString
     of "style": pkSet
+    of "color": pkColor
     else: pkFloat
   else: pkFloat
 
@@ -569,6 +574,7 @@ proc makeSub(parent: PropInfo, sub: string): PropInfo =
                     declaredIn: parent.declaredIn)
   if result.kind == pkSet: result.enumNames = fontStyleNames()
   if result.kind == pkString: result.typeName = "string"
+  if result.kind == pkColor: result.typeName = "Color"
   result.get = proc(o: Obj): PropValue = getSub(parent.get(o), sub)
   result.set = proc(o: Obj, v: PropValue) =
     parent.set(o, withSub(parent.get(o), sub, v))

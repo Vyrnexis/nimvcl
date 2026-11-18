@@ -23,6 +23,9 @@ type
     onPress*: proc(dir: int)
     onRelease*: proc()
 
+  SpinField = ref object of Edit
+    spin: SpinEdit                 ## the inner edit follows the spin edit's `color`
+
   SpinEdit* = ref object of Container
     edit*: Edit
     buttons*: SpinButtons
@@ -81,22 +84,27 @@ method doMouseLeave*(b: SpinButtons) =
   b.invalidate()
   procCall doMouseLeave(Control(b))
 
+method colorOwner*(e: SpinField): Control = e.spin
+
 method paint*(b: SpinButtons, c: Canvas) =
   let t = b.theme
+  let sp = if b.parent != nil: Control(b.parent) else: Control(b)
+  let bg = sp.fieldFill(t, b.isEnabled)
   let en = b.isEnabled
   let r = b.clientRect
   for dir in [1, -1]:
     let half = if dir == 1: rectF(0, 0, r.w, r.h / 2) else: rectF(0, r.h / 2, r.w, r.h / 2)
     var fill = clTransparent
-    if en and b.pressedDir == dir and b.hotDir == dir: fill = t.pressed
-    elif en and b.hotDir == dir and b.pressedDir == 0: fill = t.hover
+    if en and b.pressedDir == dir and b.hotDir == dir:
+      fill = if sp.ownColor: shade(bg, 0.18'f32) else: t.pressed
+    elif en and b.hotDir == dir and b.pressedDir == 0: fill = sp.rowHover(t, bg)
     if fill.a > 0:
       c.pushClip(half)
       c.fillRoundRect(r.inflate(-1), t.radius, fill)
       c.popClip()
     let ctr = pointF(r.w / 2, half.y + half.h / 2)
     c.drawArrow(ctr, 3.5, if dir == 1: adUp else: adDown,
-                if en: t.text else: t.textDisabled)
+                b.ink(t, bg, en))
   procCall paint(Control(b), c)
 
 # ------------------------------------------------------------- SpinEdit
@@ -108,7 +116,7 @@ method paint*(s: SpinEdit, c: Canvas) =
   let enabled = s.isEnabled
   let r = s.clientRect
   let foc = s.edit.focused and enabled
-  c.fillRoundRect(r, t.radius, if enabled: t.surface else: t.surfaceAlt)
+  c.fillRoundRect(r, t.radius, s.fieldFill(t, enabled))
   c.strokeRoundRect(r, t.radius,
                     if not enabled: t.border elif foc: t.accent else: t.borderStrong,
                     t.borderWidth)
@@ -197,7 +205,9 @@ proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
   s.repeat = newTimer(nil, RepeatDelayMs)
   s.repeat.onTimer = proc(t: Timer) = s.repeatTick()
   s.padding = spacing(2)
-  let e = newEdit(s)
+  let e = SpinField(spin: s)
+  e.initEdit(s)
+  s.insertControl e
   e.borderStyle = ebNone
   e.align = alClient
   e.text = "0"

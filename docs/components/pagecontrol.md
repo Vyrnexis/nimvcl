@@ -38,6 +38,8 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 | `tabPosition` | `TabPosition` | `tpTop` (default) or `tpBottom`: the strip under the body with the tabs hanging down, joined to the page above, like the message view of an IDE |
 | `TabSheet.caption` | string | Tab text; `&` makes a mnemonic |
 | `TabSheet.tabVisible` | bool | `false` hides the tab (like Delphi's `TabVisible`); default `true` |
+| `color` | Color | Own background: the page body and the selected tab (`TabControl` too: its body is not filled otherwise); other tabs are a shade of it. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

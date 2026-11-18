@@ -30,6 +30,8 @@ free.add "banana"
 | `autoComplete` | bool | Complete typed text from the items (`csDropDown`) |
 | `dropDownCount` | int | Visible rows in the list (default 8) |
 | `dropDownWidth` | float32 | List width; 0 = same as the box |
+| `color` | Color | Own background: the field and the drop-down list; default `theme.surface`. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 Shortcuts also exist directly on the combo: `add`, `insert`, `delete`, `clear`,
 `combo[i]`.

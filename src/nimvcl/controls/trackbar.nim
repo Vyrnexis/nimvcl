@@ -180,7 +180,8 @@ method paint*(t: TrackBar, c: Canvas) =
   let groove =
     if t.horiz: rectF(ThumbSize / 2, l - g / 2, system.max(len - ThumbSize, 0), g)
     else: rectF(l - g / 2, ThumbSize / 2, g, system.max(len - ThumbSize, 0))
-  c.fillRoundRect(groove, g / 2, th.surfaceAlt)
+  if t.ownColor: c.fillRect(t.clientRect, t.color)   # the area behind
+  c.fillRoundRect(groove, g / 2, if t.ownColor: shade(t.color, 0.12'f32) else: th.surfaceAlt)
   c.strokeRoundRect(groove, g / 2, th.border, 1)
   # filled part up to the thumb
   let a = t.posToAxis(t.fPos)

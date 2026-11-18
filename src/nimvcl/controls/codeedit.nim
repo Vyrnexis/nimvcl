@@ -1886,6 +1886,7 @@ proc drawTokens(e: CodeEdit, c: Canvas, text: string, toks: openArray[Token],
   ## Draws one row from its tokens: neighbours of the same style are merged
   ## and drawn piece by piece (split at tabs).
   let t = e.theme
+  let bg = e.fieldFill(t, enabled)
   var w: Walk
   var i = 0
   while i < toks.len:
@@ -1903,7 +1904,10 @@ proc drawTokens(e: CodeEdit, c: Canvas, text: string, toks: openArray[Token],
       if q < 0: q = b
       if q > p:
         let pw = e.drawPiece(c, text, p, q, x0 + w.x, ty, font,
-                             if enabled: st.color else: t.textDisabled,
+                             if not enabled: t.textDisabled
+                             elif st.color == t.text: e.ink(t, bg)   # plain text: `font.color`
+                             elif e.ownColor: legible(st.color, bg)
+                             else: st.color,
                              textArea.x - 4, textArea.right + 4, false)
         w.x += pw
         w.i = q
@@ -1920,7 +1924,8 @@ method paint*(e: CodeEdit, c: Canvas) =
   let foc = e.focused
   let r = e.clientRect
   let hot = e.host of UiRoot and UiRoot(e.host).hovered == Control(e)
-  let bg = if enabled: t.surface else: t.surfaceAlt
+  let bg = e.fieldFill(t, enabled)
+  let ink = e.ink(t, bg, enabled)
   let bc =
     if not enabled: t.border
     elif foc: t.accent
@@ -1966,8 +1971,8 @@ method paint*(e: CodeEdit, c: Canvas) =
   let matches = if rowLines.len > 0: e.visibleMatches(rowLines[0], rowLines[^1]) else: @[]
   var mi = 0
   let lineHi = mix(bg, t.accent, 0.07'f32)
-  let guideCol = mix(bg, t.text, 0.12'f32)
-  let wsCol = mix(bg, t.text, 0.30'f32)
+  let guideCol = mix(bg, ink, 0.12'f32)
+  let wsCol = mix(bg, ink, 0.30'f32)
   let matchCol = hex"#f59e0b"
 
   c.pushClip(textArea)
@@ -2023,7 +2028,7 @@ method paint*(e: CodeEdit, c: Canvas) =
     if text.len > 0:
       let useTokens = e.fHl != nil and not (composing and line == e.compLine)
       if not useTokens:
-        discard e.drawPiece(c, text, 0, text.len, x0, ty, e.font, if enabled: t.text else: t.textDisabled,
+        discard e.drawPiece(c, text, 0, text.len, x0, ty, e.font, ink,
                             textArea.x - 4, textArea.right + 4, false)
       else:
         if e.fApprox:
@@ -2057,8 +2062,8 @@ method paint*(e: CodeEdit, c: Canvas) =
     # the folded pill
     if e.isCollapsed(line):
       let pr = e.pillRect(line)
-      c.fillRoundRect(pr, 3, mix(bg, t.text, 0.10'f32))
-      c.strokeRoundRect(pr, 3, mix(bg, t.text, 0.22'f32), 1)
+      c.fillRoundRect(pr, 3, mix(bg, ink, 0.10'f32))
+      c.strokeRoundRect(pr, 3, mix(bg, ink, 0.22'f32), 1)
       let cy = pr.y + pr.h / 2 + 2
       for k in -1 .. 1:
         c.fillRect(rectF(pr.x + pr.w / 2 + float32(k) * 4.5 - 1, cy - 1.5, 2, 2), t.textMuted)
@@ -2067,7 +2072,7 @@ method paint*(e: CodeEdit, c: Canvas) =
       let ca = e.xOfCol(text, e.compCol)
       let cb = e.xOfCol(text, e.compCol + e.composition.len)
       let base = y + baseOff + fm.ascent + 1.5'f32
-      underline(c, x0 + ca, x0 + cb, base, 1, t.text)
+      underline(c, x0 + ca, x0 + cb, base, 1, ink)
       let sa = e.xOfCol(text, e.compCol + e.compCursor)
       if sa < cb: underline(c, x0 + sa, x0 + cb, base, 2, t.accent)
 
@@ -2077,24 +2082,24 @@ method paint*(e: CodeEdit, c: Canvas) =
     if cr.y + cr.h > vp.y and cr.y < vp.bottom:
       let s = c.scale
       if e.fOverwrite:
-        c.fillRect(rectF(floor(cr.x * s) / s, cr.y, cr.w, cr.h), t.text.withAlpha(90))
-        c.frameRect(rectF(floor(cr.x * s) / s, cr.y, cr.w, cr.h), t.text, 1)
+        c.fillRect(rectF(floor(cr.x * s) / s, cr.y, cr.w, cr.h), ink.withAlpha(90))
+        c.frameRect(rectF(floor(cr.x * s) / s, cr.y, cr.w, cr.h), ink, 1)
       else:
         c.fillRect(rectF(floor(cr.x * s) / s, cr.y, max(round(1.5'f32 * s), 1'f32) / s, cr.h),
-                   t.text)
+                   ink)
   c.popClip()
 
   # gutter
   if gw > 0:
     let gutterRect = rectF(vp.x, vp.y, gw, vp.h)
     c.pushClip(gutterRect)
-    let gbg = mix(bg, t.surfaceAlt, 0.55'f32)
+    let gbg = if e.ownColor: e.headerFill(t, bg) else: mix(bg, t.surfaceAlt, 0.55'f32)
     c.fillRect(gutterRect, gbg)
     c.fillRect(rectF(gutterRect.right - 1, vp.y, 1, vp.h), t.border)
     let mw = e.markerW
     let nw = e.numbersW
     let numFont = e.font
-    let numMuted = mix(gbg, t.textMuted, 0.85'f32)
+    let numMuted = mix(gbg, (if e.ownColor: legible(t.textMuted, gbg) else: t.textMuted), 0.85'f32)
     for ri in 0 ..< rowLines.len:
       let line = rowLines[ri]
       let y = rowTops[ri]
@@ -2111,13 +2116,13 @@ method paint*(e: CodeEdit, c: Canvas) =
       if nw > 0:
         let s = $(line + 1)
         let right = vp.x + mw + nw - NumPadR
-        let col = if line == caretLine: t.text else: numMuted
+        let col = if line == caretLine: ink else: numMuted
         c.drawText(s, numFont, right - float32(s.len) * adv, y + baseOff, col)
       # fold chevron
       if e.fFold != nil and e.fFold.canFold(line):
         let cell = rectF(vp.x + mw + nw, y, FoldColW, rh)
         let folded = e.fFold.isCollapsed(line)
-        let col = if folded: t.text elif e.fGutterHot: t.textMuted else: numMuted
+        let col = if folded: ink elif e.fGutterHot: t.textMuted else: numMuted
         drawChevron(c, cell, not folded, col)
     c.popClip()
 

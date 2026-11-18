@@ -665,7 +665,8 @@ proc itemTextColor*(lb: ListBox, state: ItemStates): Color =
   let t = lb.theme
   if isDisabled in state: t.textDisabled
   elif isSelected in state and lb.focused: t.selectionText
-  else: t.text
+  elif isSelected in state and not lb.ownColor: lb.ink(t, t.selectionInactive)
+  else: lb.ink(t, lb.fieldFill(t, true))
 
 proc drawItemText*(lb: ListBox, c: Canvas, rect: RectF, text: string,
                    state: ItemStates) =
@@ -679,7 +680,8 @@ method paint*(lb: ListBox, c: Canvas) =
   let t = lb.theme
   let enabled = lb.isEnabled
   let r = lb.clientRect
-  c.fillFrame(r, t, lb.fBorder, if enabled: t.surface else: t.surfaceAlt)
+  let bg = lb.fieldFill(t, enabled)
+  c.fillFrame(r, t, lb.fBorder, bg)
   let vp = lb.viewport
   let ih = lb.itemHeight
   let n = lb.count
@@ -701,7 +703,7 @@ method paint*(lb: ListBox, c: Canvas) =
       c.fillRoundRect(box, rad,
                       if focused and enabled: t.selection else: t.selectionInactive)
     elif isHot in st:
-      c.fillRoundRect(box, rad, t.hover)
+      c.fillRoundRect(box, rad, lb.rowHover(t, bg))
     if isFocused in st and lb.fMulti:
       c.strokeRoundRect(box, rad, t.focusRing, 1)
     if ownerDraw:

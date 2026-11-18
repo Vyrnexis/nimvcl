@@ -15,7 +15,7 @@
 ## aligned children sit below the caption; setting `padding` has no effect.
 ## `alNone` children are positioned from the client origin, so use
 ## `clientArea` as their reference rectangle. It passes the parent's colour on
-## to its children.
+## to its children. An own `color` fills the whole box behind them.
 
 import ./common
 
@@ -43,22 +43,27 @@ proc `alignment=`*(p: Panel, v: HAlign) =
   p.fAlignment = v
   p.invalidate()
 
-func textColor*(p: Panel): Color =
-  ## The own caption colour (only meaningful when `hasTextColor`).
-  p.fText.fixedColor
-func hasTextColor*(p: Panel): bool = p.fText.fixed
-proc `textColor=`*(p: Panel, v: Color) =
-  ## A fixed caption colour; it does not follow theme switches (see `textRole`).
-  p.fText.setColor v
-  p.invalidate()
+proc textColor*(p: Panel): Color {.deprecated: "use font.color".} =
+  ## Deprecated alias of `font.color` (alpha 0: none set).
+  p.font.color
+proc hasTextColor*(p: Panel): bool = p.hasFontColor
+proc `textColor=`*(p: Panel, v: Color) {.deprecated: "use font.color".} =
+  ## Deprecated alias: sets `font.color` (fixed, does not follow theme
+  ## switches) and drops `textRole`. Like any own font, it ends `parentFont`.
+  p.fText.reset()
+  p.fontColor = v
 func textRole*(p: Panel): ThemeColor = p.fText.role
 proc `textRole=`*(p: Panel, v: ThemeColor) =
-  ## Caption colour by theme role, resolved at paint time.
+  ## Caption colour by theme role, resolved at paint time. An own `font.color`
+  ## wins over it.
   p.fText.setRole v
+  if p.hasFontColor: p.fontColor = clTransparent   # the role replaces a fixed colour
   p.invalidate()
 proc resetTextColor*(p: Panel) =
-  ## Back to the theme's `text` colour.
+  ## Back to the theme's `text` colour (clears `font.color` and `textRole`).
   p.fText.reset()
+  if p.hasFontColor:
+    p.fontColor = clTransparent
   p.invalidate()
 
 method inheritedColor*(p: Panel): Color = p.theme.surface
@@ -75,7 +80,7 @@ method paint*(p: Panel, c: Canvas) =
                       if p.fBorder == pbRaised: t.borderStrong else: t.border,
                       t.borderWidth)
   if p.caption.len > 0:
-    let col = if p.isEnabled: p.fText.resolve(t) else: t.textDisabled
+    let col = p.ink(t, fill, p.isEnabled, p.fText.resolve(t))
     c.drawMnemonic(p.caption, p.font, r.inflate(-t.spacing), col, false,
                    p.fAlignment, vaCenter)   # no mnemonic: a Panel never activates it
   procCall paint(Control(p), c)
@@ -116,7 +121,8 @@ method paint*(g: GroupBox, c: Canvas) =
   let ch = g.captionHeight
   let top = floor(ch / 2)
   let frame = rectF(0, top, g.width, g.height - top)
-  let col = if g.isEnabled: t.text else: t.textDisabled
+  if g.ownColor: c.fillRect(g.clientRect, g.color)   # the area behind
+  let col = g.ink(t, g.color, g.isEnabled)
   if g.caption.len == 0:
     c.strokeRoundRect(frame, t.radius, t.border, t.borderWidth)
   else:

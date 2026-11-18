@@ -28,6 +28,8 @@ closeBtn.isCancel = true                     # Esc clicks it
 | `autoSize` | bool | Width follows the caption |
 | `enabled` | bool | Disabled buttons ignore input |
 | `action` | Action | Share caption, hint and enabled with an [Action](../guide/actions.md) |
+| `color` | Color | Own background: the face; hover, pressed and disabled are shades of it, and the text contrasts with it. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

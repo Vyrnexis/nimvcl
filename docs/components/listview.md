@@ -32,6 +32,8 @@ lv.onSelectItem = proc(sender: Control, item: ListItem, selected: bool) =
 | `sortColumn`, `sortOrder` | int, `SortOrder` | Arrow in the header (you do the sorting) |
 | `readOnly` | bool | Disable in-place rename |
 | `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
+| `color` | Color | Own background: the items area; the header and hover are shades of it. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ListItem: `caption`, `subItems`, `imageIndex`, `checked`, `selected`, `data`, `tag`, `index`.
 

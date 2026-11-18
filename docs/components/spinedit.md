@@ -21,6 +21,8 @@ qty.onChange = proc(sender: Control) =
 | `minValue`, `maxValue` | int | Range (default 0..100) |
 | `increment` | int | Step for arrows, wheel and buttons (PageUp/PageDown use 10 steps) |
 | `edit` | `Edit` | The inner edit, for fine tuning |
+| `color` | Color | Own background: the field behind the edit and the arrow buttons. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

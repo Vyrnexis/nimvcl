@@ -580,7 +580,7 @@ method paint*(e: Edit, c: Canvas) =
   let enabled = e.isEnabled
   let foc = e.focused
   let r = e.clientRect
-  let bg = if enabled: t.surface else: t.surfaceAlt
+  let bg = e.fieldFill(t, enabled)
   let hot = e.host of UiRoot and UiRoot(e.host).hovered == Control(e)
   let single = e.fBorderStyle == ebSingle
   if single:
@@ -600,12 +600,13 @@ method paint*(e: Edit, c: Canvas) =
   let lh = fm.lineHeight
   let ty = ta.y + floor((ta.h - lh) / 2)
   let tx = ta.x - e.scrollOffset
-  let textCol = if enabled: t.text else: t.textDisabled
+  let textCol = e.ink(t, bg, enabled)
   c.pushClip(ta)
 
   let sh = e.shown
   if e.showsPlaceholder:
-    c.drawText(e.fPlaceholder, font, ta.x, ty, if enabled: t.textMuted else: t.textDisabled)
+    c.drawText(e.fPlaceholder, font, ta.x, ty,
+               if enabled: legible(t.textMuted, bg) else: t.textDisabled)
   elif sh.text.len > 0:
     template xOf(i: int): float32 = tx + e.textWidth(sh.text[0 ..< i])
     if foc and enabled and sh.selA != sh.selB:
@@ -629,7 +630,7 @@ method paint*(e: Edit, c: Canvas) =
     let s = c.scale
     let cw = max(round(s), 1'f32) / s
     let cx = floor((tx + e.textWidth(sh.text[0 ..< sh.caret])) * s) / s
-    c.fillRect(rectF(cx, ty, cw, lh), t.text)
+    c.fillRect(rectF(cx, ty, cw, lh), e.ink(t, bg))
   c.popClip()
 
   if foc and enabled and single:

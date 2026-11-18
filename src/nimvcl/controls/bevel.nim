@@ -24,7 +24,7 @@ method paint*(b: Bevel, c: Canvas) =
   let h = b.height
   case b.fShape
   of bsBox:
-    c.fillRoundRect(b.clientRect, t.radius, t.surfaceAlt)
+    c.fillRoundRect(b.clientRect, t.radius, if b.ownColor: b.color else: t.surfaceAlt)
     c.strokeRoundRect(b.clientRect, t.radius, t.border, t.borderWidth)
   of bsFrame: c.strokeRoundRect(b.clientRect, t.radius, t.border, t.borderWidth)
   of bsTopLine: c.fillRect(rectF(0, 0, w, t.borderWidth), t.border)

@@ -30,6 +30,8 @@ pass.password = true                       # shows dots
 | `borderStyle` | `EditBorder` | `ebSingle` or `ebNone` |
 | `autoSelect` | bool | Select all when the edit gets the focus (also by a click: see Tips) |
 | `selStart`, `selLength`, `selText`, `caretPos` | int / string | Selection and caret (UTF-8 byte indexes) |
+| `color` | Color | Own background: the box fill (`TEdit.Color`); default `theme.surface`. A disabled edit fades it. With no `font.color`, text stays readable on a dark or light fill. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

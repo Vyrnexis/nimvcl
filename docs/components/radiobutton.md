@@ -25,6 +25,8 @@ for r in [small, medium, large]:
 | `caption` | string | Label text, `&` for a mnemonic |
 | `checked` | bool | Checking one unchecks its siblings |
 | `autoSize` | bool | Size to circle and caption |
+| `color` | Color | Own background: the area behind the circle and caption; none by default (follows the parent). Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

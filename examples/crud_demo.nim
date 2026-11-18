@@ -79,7 +79,7 @@ form CustomerDlg:
     caption = "&Active customer"; left = 20; top = 260
   Label errorLbl:
     left = 20; top = 290
-    textColor = rgb(224, 49, 49)
+    font.color = rgb(224, 49, 49)
   Button okBtn:
     caption = "OK"; isDefault = true
     left = 252; top = 322; width = 88

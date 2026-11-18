@@ -107,7 +107,7 @@ method paint*(p: ProgressBar, c: Canvas) =
   let thick = if horiz: r.h else: r.w
   let rad = min(thick / 2, t.radius + 2)
   let en = p.isEnabled
-  c.fillRoundRect(r, rad, t.surfaceAlt)
+  c.fillRoundRect(r, rad, if p.ownColor: p.color else: t.surfaceAlt)   # the track
   c.strokeRoundRect(r, rad, t.border, t.borderWidth)
   let inner = r.inflate(-t.borderWidth - 1)
   let fill = if en: t.accent else: t.textDisabled

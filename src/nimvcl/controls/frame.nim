@@ -1,6 +1,6 @@
 ## `Frame` (VCL TFrame): a transparent container used as the base type of
 ## reusable composite controls. The `frame` macro (dsl/formmacro.nim) derives
-## from it. It draws nothing itself and its children inherit the colour of the
+## from it. It draws nothing itself, unless it has an own `color`, and its children inherit the colour of the
 ## frame's parent, so it can be dropped on any surface.
 
 import ./common, ./panel
@@ -12,6 +12,7 @@ method inheritedColor*(f: Frame): Color =
   if f.parent != nil: f.parent.color else: f.theme.window
 
 method paint*(f: Frame, c: Canvas) =
+  if f.ownColor: c.fillRect(f.clientRect, f.color)   # only a colour set on the frame itself
   procCall paint(Control(f), c)
 
 proc initFrame*(f: Frame, owner: Component = nil) =

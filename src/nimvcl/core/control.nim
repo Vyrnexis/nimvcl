@@ -524,7 +524,9 @@ method revealControl*(c: Container, descendant: Control) {.base.} =
 # ----------------------------------------------------------------- setters
 
 func sameFont(a, b: FontSpec): bool =
-  a.family == b.family and a.size == b.size and a.style == b.style
+  a.family == b.family and a.size == b.size and a.style == b.style and
+    a.color.r == b.color.r and a.color.g == b.color.g and a.color.b == b.color.b and
+    a.color.a == b.color.a
 func sameColor(a, b: Color): bool =
   a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a
 
@@ -708,6 +710,18 @@ proc `parentFont=`*(c: Control, v: bool) =
   if not v: c.fFont = c.font      # freeze the inherited value
   c.fParentFont = v
   c.fontChanged()
+
+proc fontColor*(c: Control): Color =
+  ## Text colour of the effective font (VCL `Font.Color`); alpha 0 means the
+  ## theme's text colour.
+  c.font.color
+
+proc `fontColor=`*(c: Control, v: Color) =
+  ## Shortcut for `font.color = v`: sets an own font (ends `parentFont`) with
+  ## that text colour. `clTransparent` goes back to the theme's text colour.
+  var f = c.font
+  f.color = v
+  c.font = f
 
 proc color*(c: Control): Color
 

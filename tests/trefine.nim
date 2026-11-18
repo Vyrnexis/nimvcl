@@ -74,7 +74,7 @@ suite "theme colours":
     let f = newForm(nil, 200, 60)
     let l = newLabel(f, "MMMMMMMM", 4, 4)
     l.font = font(size = 28, style = {fsBold})
-    l.textColor = hex"#ff0000"
+    l.fontColor = hex"#ff0000"
     Application.theme = themeDark()
     check f.shotOf("nimvcl_trefine_r.bmp").countNear(hex"#ff0000") > 50
 
@@ -83,8 +83,8 @@ suite "theme colours":
     check not p.hasTextColor and p.textRole == tcText
     p.textRole = tcMuted
     check p.textRole == tcMuted and not p.hasTextColor
-    p.textColor = hex"#00ff00"
-    check p.hasTextColor and p.textColor == hex"#00ff00"
+    p.fontColor = hex"#00ff00"
+    check p.hasTextColor and p.fontColor == hex"#00ff00"
     p.resetTextColor()
     check not p.hasTextColor and p.textRole == tcText
     let f = newForm(nil, 200, 60)

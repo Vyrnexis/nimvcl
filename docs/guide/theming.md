@@ -58,23 +58,51 @@ fonts lack. See [painting](painting.md#fonts).
 
 ## Per-control colors and fonts
 
-A single control can override the theme:
+A single control can override the theme, the way Delphi does it:
 
 ```nim
 let warn = newLabel(form, "Careful!", 16, 60)
 warn.font = font(size = 16, style = {fsBold})
-warn.textColor = hex"#dc2626"
+warn.fontColor = hex"#dc2626"          # same as font.color
 
 let panel = newPanel(form, "", 16, 100, 200, 60)
 panel.color = rgb(255, 244, 214)
+
+let name = newEdit(form, "", 16, 180, 200)
+name.color = hex"#fff7d6"              # the box fill, like TEdit.Color
 ```
 
-`color` and `font` are inherited from the parent unless set (`parentColor`,
-`parentFont`). A Panel without an assigned color uses `theme.surface`, so it
-follows theme switches.
+`color` is the background of every control that has one, and `font.color` is
+its text color. Both are inherited from the parent unless set (`parentColor`,
+`parentFont`; setting either one turns the inheritance off). A Panel without an
+assigned color uses `theme.surface`, so it follows theme switches. `font.color`
+lives in the `FontSpec` (alpha 0, the default, means "the theme's text
+color"), so a container's `font.color` is inherited by its children with
+`parentFont`, as in the VCL.
 
-A fixed `textColor` is a fixed color: it stays the same when the theme changes.
-To keep a text color that follows the theme, name it by its role instead:
+What `color` paints, when it is set:
+
+| Control | `color` is |
+|---|---|
+| `Edit`, `Memo`, `CodeEdit`, `SpinEdit` | The field fill (a disabled one fades it). `CodeEdit`'s gutter is a shade of it |
+| `ListBox`, `ListView`, `TreeView`, `StringGrid`/`DrawGrid` | The items area. Hover rows, list headers and fixed grid cells are shades of it; the selection keeps the theme colors |
+| `ComboBox` | The field and the drop-down list |
+| `Button` | The face; hover, pressed and disabled are shades of it |
+| `CheckBox`, `RadioButton`, `GroupBox`, `Frame`, `ScrollBox` | The area behind (nothing is painted without an own color) |
+| `Panel`, `Label` (when not `transparent`), `Form` | The fill |
+| `StatusBar`, `ToolBar` | The bar fill; tool buttons shade it |
+| `PageControl`, `TabControl` | The page body and the selected tab |
+| `ProgressBar`, `TrackBar`, `Bevel` (`bsBox`) | The track, the area behind, the box |
+
+The theme look stays when no color is set. When a control has an own `color`
+and no `font.color`, text uses the theme's text color unless that would not
+read on the fill; then it switches to dark or white, so a dark `Edit` in the
+light theme is still legible. Hover, pressed and disabled looks are derived
+from the control's color, not from the theme. A `font.color` is used as is.
+
+A fixed `font.color` is a fixed color: it stays the same when the theme
+changes. To keep a text color that follows the theme, name it by its role
+instead:
 
 ```nim
 let hint = newLabel(form, "Press F1 for help", 16, 130)
@@ -88,9 +116,13 @@ card.textRole = tcMuted              # Panel captions too
 
 `ThemeColor` is `tcText`, `tcMuted`, `tcAccent`, `tcDanger` or `tcDisabled`.
 The color is looked up every time the control paints, so
-`Application.theme = themeDark()` is enough. Setting `textColor` replaces the
-role and setting a role replaces `textColor`; `resetTextColor()` goes back to
-the plain theme text. In your own controls use `theme.resolve(tcMuted)`.
+`Application.theme = themeDark()` is enough. Setting `font.color` and setting a
+role replace each other; `resetTextColor()` goes back to the plain theme text.
+In your own controls use `theme.resolve(tcMuted)`.
+
+`Label.textColor` and `Panel.textColor` are deprecated aliases of `font.color`.
+In form files the color is written as `font.color = #rrggbb` (only when set);
+an old `textColor = #rrggbb` still loads.
 
 ## HiDPI
 

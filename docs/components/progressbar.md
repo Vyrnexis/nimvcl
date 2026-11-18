@@ -30,6 +30,8 @@ busy.style = pbsMarquee                   # indeterminate
 | `style` | `ProgressStyle` | `pbsNormal` or `pbsMarquee` (sliding block) |
 | `orientation` | `Orientation` | `orHorizontal` or `orVertical` |
 | `fraction` | float32 | `position` as 0..1 (read-only) |
+| `color` | Color | Own background: the track; the bar stays `theme.accent`. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

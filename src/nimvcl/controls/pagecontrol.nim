@@ -313,7 +313,10 @@ method paint*(t: TabBase, c: Canvas) =
   # body
   let bodyH = max(t.height - max(h - 1, 0), 0)
   let body = rectF(0, if t.fPos == tpTop: max(h - 1, 0) else: 0, w, bodyH)
-  if t.fFillBody: c.fillRoundRect(body, th.radius, th.surface)
+  let own = t.ownColor
+  let bodyBg = if own: t.color elif t.fFillBody: th.surface else: th.window
+  let tabBg = if own: t.headerFill(th, bodyBg) else: th.surfaceAlt
+  if own or t.fFillBody: c.fillRoundRect(body, th.radius, bodyBg)
   c.strokeRoundRect(body, th.radius, th.border, th.borderWidth)
   if t.fHideTabs:
     procCall paint(Control(t), c)
@@ -329,22 +332,23 @@ method paint*(t: TabBase, c: Canvas) =
       selR = r
       continue
     c.pushClip(t.place(rectF(r.x - 1, 0, r.w + 2, h)))
-    let fill = if t.fHotTab == i and en: th.hover else: th.surfaceAlt
+    let fill = if t.fHotTab == i and en: t.rowHover(th, tabBg) else: tabBg
     c.fillRoundRect(t.place(rectF(r.x, r.y, r.w, r.h + 6)), th.radius, fill)
     c.strokeRoundRect(t.place(rectF(r.x, r.y, r.w, r.h + 6)), th.radius, th.border, 1)
     c.popClip()
     c.drawMnemonic(t.tabText(i), t.font, t.place(rectF(r.x + 4, r.y, r.w - 8, r.h - 1)),
-                   if en: th.textMuted else: th.textDisabled, t.altHeld,
-                   taCenter, vaCenter)
+                   (if t.hasFontColor: t.ink(th, fill, en)
+                    elif en: legible(th.textMuted, fill) else: th.textDisabled),
+                   t.altHeld, taCenter, vaCenter)
   if selR.w > 0:
     c.pushClip(t.place(rectF(selR.x - 1, 0, selR.w + 2, h)))
     let full = t.place(rectF(selR.x, selR.y, selR.w, selR.h + 6))
-    c.fillRoundRect(full, th.radius, if t.fFillBody: th.surface else: th.window)
+    c.fillRoundRect(full, th.radius, bodyBg)
     c.strokeRoundRect(full, th.radius, th.borderStrong, 1)
     c.popClip()
     c.drawMnemonic(t.tabText(t.fIndex), t.font,
                    t.place(rectF(selR.x + 4, selR.y, selR.w - 8, selR.h)),
-                   if en: th.text else: th.textDisabled, t.altHeld, taCenter, vaCenter)
+                   t.ink(th, bodyBg, en), t.altHeld, taCenter, vaCenter)
     if t.focused:
       drawFocusRing(c, t.place(rectF(selR.x, selR.y, selR.w, selR.h)), th)
   c.popClip()
@@ -355,11 +359,11 @@ method paint*(t: TabBase, c: Canvas) =
         if left: t.fFirst > 0
         else: t.tabsRight > right
       let hot = t.fHotTab == (if left: -2 else: -3) and canGo and en
-      c.fillRoundRect(r, th.radius, if hot: th.hover else: th.surface)
+      c.fillRoundRect(r, th.radius, if hot: t.rowHover(th, bodyBg) else: (if own: bodyBg else: th.surface))
       c.strokeRoundRect(r, th.radius, th.border, 1)
       c.drawArrow(pointF(r.x + r.w / 2, r.y + r.h / 2), 3.5,
                   if left: adLeft else: adRight,
-                  if canGo and en: th.text else: th.textDisabled)
+                  if canGo and en: t.ink(th, bodyBg) else: th.textDisabled)
   procCall paint(Control(t), c)
 
 method padding*(t: TabBase): Spacing =
@@ -405,7 +409,12 @@ proc newTabControl*(parent: Container = nil, tabs: seq[string] = @[],
 
 # ---------------------------------------------------------------- TabSheet
 
-method inheritedColor*(s: TabSheet): Color = s.theme.surface
+method inheritedColor*(s: TabSheet): Color =
+  if s.parent != nil: s.parent.color else: s.theme.surface
+
+method paint*(s: TabSheet, c: Canvas) =
+  if s.ownColor: c.fillRect(s.clientRect, s.color)
+  procCall paint(Control(s), c)
 
 proc `caption=`*(s: TabSheet, v: string) =
   ## Sets the tab text (and repaints the strip of the owning PageControl).

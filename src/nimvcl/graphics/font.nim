@@ -5,6 +5,7 @@
 ## resolves it to a rasterised font at `size * scale` when text is drawn.
 
 import std/[os, tables, sets, strutils]
+import ./color
 
 type
   FontStyle* = enum
@@ -15,6 +16,7 @@ type
     family*: string
     size*: float32            ## logical pixels
     style*: set[FontStyle]
+    color*: Color             ## text colour (VCL `Font.Color`); alpha 0 (the default) means the theme's text colour
 
   FontFiles = object
     regular, bold, italic, boldItalic: string

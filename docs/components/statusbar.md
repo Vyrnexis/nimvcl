@@ -29,6 +29,8 @@ simple.simpleText = "Done"
 | `simplePanel` | bool | Show `simpleText` instead of the panels |
 | `simpleText` | string | The one-line text |
 | `sizeGrip` | bool | Draw the resize grip bottom-right |
+| `color` | Color | Own background: the bar fill; default `theme.surfaceAlt`. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

@@ -1434,14 +1434,23 @@ proc textColorOf(lv: ListView, st: ItemStates, focused: bool): Color =
   let t = lv.theme
   if isDisabled in st: t.textDisabled
   elif isSelected in st and focused: t.selectionText
-  else: t.text
+  elif isSelected in st and not lv.ownColor: lv.ink(t, t.selectionInactive)
+  else: lv.ink(t, lv.fieldFill(t, true))
+
+proc subTextColor(lv: ListView, bg: Color): Color =
+  ## Text of the other columns: softer than the item text.
+  if lv.hasFontColor: mix(lv.font.color, bg, 0.25'f32)
+  else: legible(lv.theme.textMuted, bg)
 
 proc paintHeader(lv: ListView, c: Canvas) =
   let t = lv.theme
   let hr = lv.headerRect
   let vp = lv.viewport
   c.pushClip(hr)
-  c.fillRect(hr, t.surfaceAlt)
+  let bg = lv.fieldFill(t, true)
+  let hbg = lv.headerFill(t, bg)
+  let hink = lv.ink(t, hbg)
+  c.fillRect(hr, hbg)
   var x = vp.x - lv.scrollPos.x
   let bold = lv.font.bold
   for k, col in lv.fColumns:
@@ -1450,15 +1459,15 @@ proc paintHeader(lv: ListView, c: Canvas) =
     if cell.right < vp.x or cell.x > vp.right: continue
     c.pushClip(rectF(max(cell.x, vp.x), cell.y, min(cell.right, vp.right) - max(cell.x, vp.x), cell.h))
     if lv.fHdrDown == k and lv.columnAt(pointF(lv.fMouseX, lv.fMouseY)) == k:
-      c.fillRect(cell, t.pressed)
+      c.fillRect(cell, if lv.ownColor: shade(hbg, 0.14'f32) else: t.pressed)
     elif lv.fHdrHot == k and lv.fHdrDown < 0:
-      c.fillRect(cell, t.hover)
+      c.fillRect(cell, if lv.ownColor: shade(hbg, 0.08'f32) else: t.hover)
     var tr = rectF(cell.x + PadX, cell.y, max(cell.w - 2 * PadX, 0), cell.h)
     if k == lv.fSortCol and lv.fSortOrder != soNone: tr.w = max(tr.w - 14, 0)
-    c.textRect(col.fCaption, bold, tr, t.text, col.alignment, vaCenter)
+    c.textRect(col.fCaption, bold, tr, hink, col.alignment, vaCenter)
     if k == lv.fSortCol and lv.fSortOrder != soNone:
       drawArrow(c, pointF(cell.right - 11, cell.y + cell.h / 2), 3.5,
-                if lv.fSortOrder == soAscending: adUp else: adDown, t.textMuted)
+                if lv.fSortOrder == soAscending: adUp else: adDown, legible(t.textMuted, hbg))
     c.popClip()
     c.fillRect(rectF(cell.right - 1, cell.y + 4, 1, cell.h - 8), t.border)
   c.popClip()
@@ -1490,7 +1499,8 @@ method paint*(lv: ListView, c: Canvas) =
   let t = lv.theme
   let enabled = lv.isEnabled
   let r = lv.clientRect
-  c.fillFrame(r, t, lv.fBorder, if enabled: t.surface else: t.surfaceAlt)
+  let bg = lv.fieldFill(t, enabled)
+  c.fillFrame(r, t, lv.fBorder, bg)
   let vp = lv.viewport
   let focused = lv.focused
   let rad = max(t.radius - 1, 2)
@@ -1513,7 +1523,7 @@ method paint*(lv: ListView, c: Canvas) =
       c.fillRoundRect(box, rad, if focused and enabled: t.selection
                                 else: t.selectionInactive)
     elif isHot in st:
-      c.fillRoundRect(box, rad, t.hover)
+      c.fillRoundRect(box, rad, lv.rowHover(t, bg))
     if isFocused in st and lv.fMulti:
       c.strokeRoundRect(box, rad, t.focusRing, 1)
     var def = true
@@ -1544,7 +1554,7 @@ method paint*(lv: ListView, c: Canvas) =
         let tr = rectF(cr.x + PadX, cr.y, max(cr.w - 2 * PadX, 0), cr.h)
         let sc = if isDisabled in st: t.textDisabled
                  elif isSelected in st and focused: t.selectionText
-                 else: t.textMuted
+                 else: lv.subTextColor(bg)
         c.textRect(item.columnText(k), lv.font, tr, sc, column.alignment, vaCenter)
   if lv.fStyle == vsReport and lv.fGridLines:
     let gc = t.border.withAlpha(150)

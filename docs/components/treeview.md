@@ -32,6 +32,8 @@ TreeView:
 | `indent`, `itemHeight` | float32 | Metrics (`itemHeight` 0 = automatic) |
 | `readOnly` | bool | Disable in-place rename |
 | `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
+| `color` | Color | Own background: the tree background; hover rows are a shade of it. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 TreeNode: `text`, `data` (`RootRef`), `tag`, `imageIndex`, `selectedIndex`, `expanded`,
 `hasChildren`, `checked`, `parent`, `level`, `index`, `children`, `childCount`.

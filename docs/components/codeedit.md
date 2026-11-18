@@ -43,6 +43,8 @@ UTF-8 line (the status bar of an editor shows `line + 1`).
 | `text` | string | All lines joined with `\n`; setting it clears history, markers and scroll |
 | `lineCount` | int | Number of lines (a text ending in a newline has an empty last line) |
 | `lineAt(i)` | string | One line, no terminator |
+| `color` | Color | Own editor background (the gutter is a shade of it); default `theme.surface`. Syntax token colors are kept, made readable on the fill |
+| `font.color` | Color | Color of the plain text (VCL `Font.Color`); alpha 0 uses the theme's text color |
 | `readOnly` | bool | No typing; programmatic edits and `text =` still work |
 | `modified` | bool | Differs from the last `markSaved` / `saveToFile` / `loadFromFile` |
 | `fileName` | string | Remembered name; setting it picks the language (see `autoHighlighter`) |

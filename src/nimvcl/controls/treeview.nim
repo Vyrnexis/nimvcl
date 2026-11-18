@@ -1270,7 +1270,8 @@ method paint*(tv: TreeView, c: Canvas) =
   let t = tv.theme
   let enabled = tv.isEnabled
   let r = tv.clientRect
-  c.fillFrame(r, t, tv.fBorder, if enabled: t.surface else: t.surfaceAlt)
+  let bg = tv.fieldFill(t, enabled)
+  c.fillFrame(r, t, tv.fBorder, bg)
   let vp = tv.viewport
   let ih = tv.itemHeight
   let focused = tv.focused
@@ -1299,7 +1300,7 @@ method paint*(tv: TreeView, c: Canvas) =
       c.fillRoundRect(box, rad, if focused and enabled: t.selection
                                 else: t.selectionInactive)
     elif isHot in st:
-      c.fillRoundRect(box, rad, t.hover)
+      c.fillRoundRect(box, rad, tv.rowHover(t, bg))
     if isFocused in st and tv.fMulti:
       c.strokeRoundRect(box, rad, t.focusRing, 1)
     var def = true
@@ -1309,11 +1310,12 @@ method paint*(tv: TreeView, c: Canvas) =
     if tv.fShowLines: tv.drawLines(c, node, y, ih)
     let col = if isDisabled in st: t.textDisabled
               elif isSelected in st and focused: t.selectionText
-              else: t.text
+              elif isSelected in st and not tv.ownColor: tv.ink(t, t.selectionInactive)
+              else: tv.ink(t, bg)
     if g.expander.w > 0:
       drawChevron(c, pointF(g.expander.x + g.expander.w / 2,
                             g.expander.y + g.expander.h / 2), node.fExpanded,
-                  if isDisabled in st: t.textDisabled else: t.textMuted)
+                  if isDisabled in st: t.textDisabled else: legible(t.textMuted, bg))
     if g.check.w > 0:
       drawCheckGlyph(c, g.check, node.fCheck, t, enabled)
     if g.icon.w > 0:

@@ -30,6 +30,7 @@ object Sample: Form
     top = 80
     font.size = 18
     font.style = [fsBold]
+    font.color = #aa0000
     color = #336699
     caption = 'OK'
     isDefault = true

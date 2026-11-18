@@ -113,6 +113,7 @@ method paint*(b: CheckBox, c: Canvas) =
   let t = b.theme
   let st = b.visualState(b.fHot, b.isPressed)
   let box = indicatorRect(b)
+  if b.ownColor: c.fillRect(b.clientRect, b.color)   # the area behind
   let on = b.fState != cbUnchecked
   let rad = max(t.radius - 1, 2)
   if on:
@@ -132,7 +133,8 @@ method paint*(b: CheckBox, c: Canvas) =
     else:
       c.line(box.x + 4.5, box.y + 8, box.x + 11.5, box.y + 8, mark, w)
       dot(4.5, 8); dot(11.5, 8)
-  c.drawMnemonic(b.caption, b.font, indicatorCaptionRect(b, t), textColorFor(t, st),
+  c.drawMnemonic(b.caption, b.font, indicatorCaptionRect(b, t),
+                 b.ink(t, b.color, st != vsDisabled),
                  b.altHeld, taLeft, vaCenter)
   if b.focused: drawFocusRing(c, box, t, rad, onFilled = on)
   procCall paint(Control(b), c)

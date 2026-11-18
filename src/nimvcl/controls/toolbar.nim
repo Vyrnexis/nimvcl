@@ -178,17 +178,26 @@ method paint*(b: ToolButton, c: Canvas) =
   let st = b.visualState(b.fHot, b.fPressed and b.fHot)
   let flat = b.parent == nil or not (b.parent of ToolBar) or ToolBar(b.parent).fFlat
   let face = r.inflate(-1)
+  let own = b.parent != nil and Control(b.parent).ownColor
+  let bar = if own: b.parent.color else: t.surface     # what the button sits on
   if b.fDown and en:
     c.fillRoundRect(face, t.radius, mix(t.surface, t.accent, 0.18))
     c.strokeRoundRect(face, t.radius, mix(t.border, t.accent, 0.6), 1)
     if st == vsHover: c.fillRoundRect(face, t.radius, t.hover.withAlpha(90))
     if st == vsPressed: c.fillRoundRect(face, t.radius, t.pressed.withAlpha(120))
   else:
-    let fill = faceColor(t, st, flat)
+    let fill =
+      if own:
+        case st
+        of vsNormal: (if flat: clTransparent else: shade(bar, 0.05'f32))
+        of vsHover: shade(bar, 0.10'f32)
+        of vsPressed: shade(bar, 0.18'f32)
+        of vsDisabled: (if flat: clTransparent else: shade(bar, 0.03'f32))
+      else: faceColor(t, st, flat)
     if fill.a > 0: c.fillRoundRect(face, t.radius, fill)
     if not flat or st in {vsHover, vsPressed}:
       c.strokeRoundRect(face, t.radius, t.border, 1)
-  let col = if en: t.text else: t.textDisabled
+  let col = b.ink(t, bar, en)
   let showText = b.fShowCaption and b.caption.len > 0
   let tw = if showText: b.textWidth(b.caption, b.font) else: 0'f32
   let isz = b.iconSize
@@ -274,7 +283,7 @@ method customAlign*(t: ToolBar, child: Control, available: RectF) =
 method paint*(t: ToolBar, c: Canvas) =
   let th = t.theme
   let r = t.clientRect
-  c.fillRect(r, th.surface)
+  c.fillRect(r, if t.ownColor: t.color else: th.surface)
   c.line(0, r.h - 0.5, r.w, r.h - 0.5, th.border, 1)
   procCall paint(Control(t), c)
 

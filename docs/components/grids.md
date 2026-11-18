@@ -50,6 +50,8 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 | `StringGrid.cells[c, r]` | string | Cell text. Also `rows[r]`, `cols[c]` as `seq[string]` |
 | `StringGrid.colAlignments[c]` | `HAlign` | Column text alignment |
 | `StringGrid.sortOnHeaderClick` | bool | Click a header to sort |
+| `color` | Color | Own background: the cell area; fixed (header) cells are a shade of it. Set it and `parentColor` turns off |
+| `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
 ## Events
 

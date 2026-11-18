@@ -27,6 +27,7 @@ form Composite:
   Label big:
     font.size = 22
     font.style = {fsBold}
+    font.color = hex"#336699"
     margins.top = 3
     constraints.minWidth = 40
 
@@ -252,6 +253,7 @@ suite "form macro":
     let f = newComposite()
     check f.big.font.size == 22
     check f.big.font.style == {fsBold}
+    check f.big.font.color == hex"#336699"
     check not f.big.parentFont
     check f.big.margins.top == 3 and f.big.margins.left == 0
     check f.big.constraints.minWidth == 40

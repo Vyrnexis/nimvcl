@@ -79,6 +79,10 @@ method revealControl*(b: ScrollBox, d: Control) =
   let p = b.padding
   b.scrollIntoView(r.offset(o.x - p.left, o.y - p.top))
 
+method paint*(b: ScrollBox, c: Canvas) =
+  if b.ownColor: c.fillRect(b.clientRect, b.color)   # drawn nothing otherwise: it shows its parent
+  procCall paint(ScrollingControl(b), c)
+
 proc initScrollBox*(b: ScrollBox, owner: Component = nil) =
   b.initScrollingControl(owner, scrollsChildren = true)
   b.setBounds(0, 0, 200, 150)
