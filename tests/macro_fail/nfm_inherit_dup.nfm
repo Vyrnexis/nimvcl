@@ -1,0 +1,5 @@
+inherited Bad: Bad
+  ancestor = 'nfm_inherit_anc.nfm'
+  object ok: Label
+  end
+end

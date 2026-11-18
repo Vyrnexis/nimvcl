@@ -1,0 +1,7 @@
+inherited Grand: Grand
+  ancestor = 'derived.nfm'
+  height = 350
+  inherited nameEdit: Edit
+    text = 'grand'
+  end
+end

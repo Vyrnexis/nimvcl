@@ -728,9 +728,15 @@ proc centerInParent*(d: FormDesigner, horizontal, vertical: bool) =
     c.setBounds(x, y, c.width, c.height))
 
 proc deleteSelection*(d: FormDesigner): bool =
-  ## Deletes the selection (not the design root). `onDeleting` can veto.
+  ## Deletes the selection (not the design root). `onDeleting` can veto; a
+  ## selection that holds an inherited component (`Component.inherited`) is
+  ## never deleted.
   let sel = d.sameParentSel()
   if sel.len == 0: return false
+  # a component that comes from the ancestor of an inherited form stays
+  for c in sel:
+    if c.inherited or (c.isTile and NonVisualTile(c).component != nil and
+                       NonVisualTile(c).component.inherited): return false
   var allow = true
   if d.onDeleting != nil: d.onDeleting(d, sel, allow)
   if not allow: return false
@@ -1277,11 +1283,27 @@ proc paintTile(cv: Canvas, tl: NonVisualTile, t: Theme) =
   cv.textRect(tl.name, t.font, rectF(r.x - 24, r.bottom + 2, r.w + 48, 18),
               t.textMuted, taCenter, vaTop)
 
+proc paintInherited(d: FormDesigner, cv: Canvas, c: Container, t: Theme) =
+  ## A small corner flag on every component that comes from the ancestor form.
+  for k in c.children:
+    if k.inherited and not k.isInternal and k.visible:
+      let r = d.boundsOf(k)
+      let f = rectF(r.x, r.y, 9, 9)
+      cv.fillRect(f, t.accent.withAlpha(200))
+      cv.line(f.x + 2, f.y + 7, f.x + 7, f.y + 2, hex"#ffffff", 1)
+      cv.line(f.x + 4, f.y + 2, f.x + 7, f.y + 2, hex"#ffffff", 1)
+      cv.line(f.x + 7, f.y + 2, f.x + 7, f.y + 5, hex"#ffffff", 1)
+    if k of Container: d.paintInherited(cv, Container(k), t)
+
 proc paintOverlay(d: FormDesigner, cv: Canvas) =
   let t = d.scope.theme
+  d.paintInherited(cv, d.scope, t)
   if d.fShowGrid and d.hasGrid: d.paintGrid(cv, t)
   if d.fShowHidden: d.paintHidden(cv, d.scope, t)
-  for tl in d.fTiles: paintTile(cv, tl, t)
+  for tl in d.fTiles:
+    paintTile(cv, tl, t)
+    if tl.component != nil and tl.component.inherited:
+      cv.fillRect(rectF(tl.left, tl.top, 9, 9), t.accent.withAlpha(200))
   let guideCol = hex"#e0359e"
   if d.fTarget != nil:
     let r = d.boundsOf(d.fTarget)

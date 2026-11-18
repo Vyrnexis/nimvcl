@@ -33,6 +33,8 @@ type
     props*: seq[NfmProp]
     children*: seq[NfmNode]
     line*, col*: int
+    inherited*: bool      ## `inherited Name: Class`: the object exists in the ancestor form; `props` holds only what differs from it
+    ancestor*: string     ## root of an inherited form only: the ancestor's `.nfm` file, relative to this one (`ancestor = 'unit1.nfm'`)
 
 # ------------------------------------------------------------------ errors
 
@@ -239,7 +241,7 @@ proc parseValue(lx: var Lexer): NfmValue =
     result.text = t.text
     lx.next()
   of tkIdent:
-    if t.text == "end" or t.text == "object":
+    if t.text == "end" or t.text == "object" or t.text == "inherited":
       lx.fail(t.line, t.col, "expected a value, got `" & t.text & "`")
     if '.' in t.text:
       lx.fail(t.line, t.col, "a value cannot contain `.` (got `" & t.text & "`)")
@@ -285,21 +287,26 @@ proc parseValue(lx: var Lexer): NfmValue =
   of tkEof:
     lx.fail(t.line, t.col, "expected a value, got end of file")
 
-proc parseObject(lx: var Lexer): NfmNode =
-  ## At the `object` keyword.
-  result = NfmNode(line: lx.tok.line, col: lx.tok.col)
+proc parseObject(lx: var Lexer, inheritedTree: bool): NfmNode =
+  ## At the `object` (or, in an inherited form, `inherited`) keyword.
+  result = NfmNode(line: lx.tok.line, col: lx.tok.col,
+                   inherited: lx.tok.isKeyword("inherited"))
+  let kw = lx.tok.text
   lx.next()
   if lx.tok.kind == tkIdent and not lx.tok.isKeyword("end"):
     if '.' in lx.tok.text:
       lx.fail(lx.tok.line, lx.tok.col, "an object name cannot contain `.`")
     result.name = lx.tok.text
     lx.next()
+  if result.inherited and result.name.len == 0:
+    lx.fail(result.line, result.col, "an `inherited` object needs a name (`inherited name: Class`)")
   if not lx.tok.isPunct(":"):
     lx.fail(lx.tok.line, lx.tok.col,
-            "expected `:` and a class name after the object name (`object name: Class`), got " &
+            "expected `:` and a class name after the object name (`" & kw & " name: Class`), got " &
             describe(lx.tok))
   lx.next()
-  if lx.tok.kind != tkIdent or lx.tok.isKeyword("end") or lx.tok.isKeyword("object"):
+  if lx.tok.kind != tkIdent or lx.tok.isKeyword("end") or lx.tok.isKeyword("object") or
+     lx.tok.isKeyword("inherited"):
     lx.fail(lx.tok.line, lx.tok.col, "expected a class name, got " & describe(lx.tok))
   if '.' in lx.tok.text:
     lx.fail(lx.tok.line, lx.tok.col, "a class name cannot contain `.`")
@@ -317,7 +324,12 @@ proc parseObject(lx: var Lexer): NfmNode =
         lx.next()
         return
       elif t.text == "object":
-        result.children.add parseObject(lx)
+        result.children.add parseObject(lx, inheritedTree)
+      elif t.text == "inherited":
+        if not inheritedTree:
+          lx.fail(t.line, t.col, "`inherited` is only allowed in a form that starts " &
+                  "with `inherited Name: Class` (an inherited form)")
+        result.children.add parseObject(lx, inheritedTree)
       else:
         var p = NfmProp(name: t.text, line: t.line, col: t.col)
         lx.next()
@@ -337,10 +349,26 @@ proc parseNfm*(text: string, fileName = ""): NfmNode =
   ## position of the problem (`file:line:col: message`).
   var lx = Lexer(src: text, line: 1, col: 1, fileName: fileName)
   lx.next()
-  if not lx.tok.isKeyword("object"):
+  if not lx.tok.isKeyword("object") and not lx.tok.isKeyword("inherited"):
     lx.fail(lx.tok.line, lx.tok.col,
-            "a form file starts with `object Name: Class`, got " & describe(lx.tok))
-  result = parseObject(lx)
+            "a form file starts with `object Name: Class` (or `inherited Name: Class`), got " &
+            describe(lx.tok))
+  let inh = lx.tok.isKeyword("inherited")
+  result = parseObject(lx, inh)
+  if inh:
+    var found = false
+    for i, p in result.props:
+      if p.name == "ancestor":
+        if p.value.kind != nvString or p.value.text.len == 0:
+          lx.fail(p.value.line, p.value.col, "`ancestor` expects the path of the ancestor " &
+                  "form file, like 'unit1.nfm'")
+        result.ancestor = p.value.text
+        result.props.delete(i)
+        found = true
+        break
+    if not found:
+      lx.fail(result.line, result.col, "an inherited form needs `ancestor = 'file.nfm'` " &
+              "(the form file it inherits from, relative to this one)")
   if lx.tok.kind != tkEof:
     lx.fail(lx.tok.line, lx.tok.col,
             "unexpected " & describe(lx.tok) & " after the end of the root object")
@@ -386,8 +414,10 @@ proc writeProp(o: var string, p: NfmProp, indent: string) =
   o.add '\n'
 
 proc writeNode(o: var string, n: NfmNode, indent: string) =
-  o.add indent & "object" & (if n.name.len > 0: " " & n.name & ": " else: ": ") &
-        n.className & "\n"
+  o.add indent & (if n.inherited: "inherited" else: "object") &
+        (if n.name.len > 0: " " & n.name & ": " else: ": ") & n.className & "\n"
+  if n.ancestor.len > 0:
+    writeProp(o, NfmProp(name: "ancestor", value: NfmValue(kind: nvString, text: n.ancestor)), indent & "  ")
   for p in n.props: writeProp(o, p, indent & "  ")
   for c in n.children: writeNode(o, c, indent & "  ")
   o.add indent & "end\n"

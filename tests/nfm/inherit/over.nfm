@@ -1,0 +1,4 @@
+inherited Over: Over
+  ancestor = 'base.nfm'
+  caption = 'Overrides without saying so'
+end

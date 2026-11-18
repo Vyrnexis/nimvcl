@@ -19,7 +19,7 @@
 ## generated code uses (`core/control`, `core/form`; `controls/flowpanel` for a
 ## `GridPanel`'s `columns`, `controls/menus` for `shortcut`).
 
-import std/[macros, os, sets, strutils]
+import std/[macros, os, sets, strutils, tables]
 import ../graphics/[color, font, image]
 import ../core/component
 import ./nfmsyntax {.all.}
@@ -50,10 +50,11 @@ macro eventClosure*(evType: typedesc, selfExpr: typed, handler: untyped): untype
 
 var declSeen {.compileTime.}: HashSet[string]
 
-macro declHandler*(evType: typedesc, formType: typed, handler: untyped): untyped =
+macro declHandler*(evType: typedesc, formType: typed, handler: untyped,
+                   exported: static[bool] = false): untyped =
   ## Forward-declares `proc handler(self: formType, <event parameters>)`; the
   ## calling module defines it later (`loadForm` uses this for every handler
-  ## named in a form file).
+  ## named in a form file; `exported` when the definition is `proc name*(...)`).
   var impl = evType.getTypeInst[1].getTypeImpl
   while impl.kind == nnkBracketExpr or impl.kind == nnkSym: impl = impl.getTypeImpl
   if impl.kind != nnkProcTy:
@@ -67,7 +68,8 @@ macro declHandler*(evType: typedesc, formType: typed, handler: untyped): untyped
   let key = formType.repr & "." & handler.strVal & "." & sig
   if key in declSeen: return newStmtList()
   declSeen.incl key
-  result = newTree(nnkProcDef, handler, newEmptyNode(), newEmptyNode(),
+  let nameNode = if exported: newTree(nnkPostfix, ident"*", handler) else: handler
+  result = newTree(nnkProcDef, nameNode, newEmptyNode(), newEmptyNode(),
                    newTree(nnkFormalParams, params), newEmptyNode(), newEmptyNode(),
                    newEmptyNode())
 
@@ -101,6 +103,112 @@ proc nfmImage*(data, source: string): Image =
   ## (`staticRead` of the file) with the path the form file named.
   imageFromMemory(data, source)
 
+type AncestorInfo = object
+  ## What a compile-time `loadForm` of an inherited form needs from the chain
+  ## of ancestor files.
+  typeName: string                    ## the Nim type of the direct ancestor (its root name)
+  baseClass: string                   ## class of the first non-inherited root
+  classes: Table[string, string]      ## every named object of the ancestors -> class
+  files: seq[string]                  ## the ancestor files (for `staticRead`)
+  events: seq[tuple[target, className, event, handler: string]]
+    ## every event bound in the ancestor chain (the last binding of an event
+    ## wins); `target` is `self` or `self.<name>`
+
+proc collectAncestors(root: NfmNode, dir, shownFile: string, site: NimNode,
+                      info: var AncestorInfo, depth = 0) =
+  ## Reads the ancestor of the inherited form `root` (and its ancestors).
+  if depth > 16:
+    error("loadForm: the ancestor chain of `" & shownFile & "` is too deep (a cycle?)", site)
+  let apath = if root.ancestor.isAbsolute: root.ancestor else: dir / root.ancestor
+  if not fileExists(apath):
+    error("loadForm: " & nfmPos(shownFile, root.line, root.col) & ": the ancestor form file `" &
+          apath & "` does not exist", site)
+  if apath in info.files:
+    error("loadForm: the ancestor chain of `" & shownFile & "` loops back to `" & apath & "`", site)
+  info.files.add apath
+  var a: NfmNode
+  try: a = parseNfm(readFile(apath), root.ancestor)
+  except NfmError as e: error("loadForm: " & e.msg, site)
+  legacyNames(a)
+  if a.name.len == 0:
+    error("loadForm: the root object of the ancestor `" & root.ancestor &
+          "` has no name (its Nim type is named after it)", site)
+  if depth == 0: info.typeName = a.name
+  if a.inherited:
+    collectAncestors(a, apath.parentDir, root.ancestor, site, info, depth + 1)
+    for n in walk(a):
+      if n.name.len > 0 and not n.inherited: info.classes[n.name] = n.className
+  else:
+    info.baseClass = a.className
+    for n in walk(a):
+      if n.name.len > 0: info.classes[n.name] = n.className
+  # the events this file binds (a later binding of the same event replaces an earlier one)
+  for n in walk(a):
+    let isRoot = n == a
+    if n.name.len == 0 and not isRoot: continue
+    let target = if isRoot: "self" else: "self." & n.name
+    let cls = if isRoot: info.baseClass else: n.className
+    for p in n.props:
+      if p.name.isEventProp and p.value.kind == nvIdent:
+        var found = false
+        for e in info.events.mitems:
+          if e.target == target and e.event == p.name:
+            e.handler = p.value.text
+            found = true
+        if not found:
+          info.events.add (target: target, className: cls, event: p.name, handler: p.value.text)
+
+type HandlerDefs = Table[string, int]
+  ## "name/FormType" -> 1 (defined) or 2 (defined and exported)
+
+proc scanHandlerDefs(src: string): HandlerDefs =
+  ## One pass over `src`: every `proc name(self: T` / `func name*(self: T` at
+  ## the start of a line. Index based, so the VM stays cheap on big units.
+  var i = 0
+  let n = src.len
+  template skipWs() =
+    while i < n and src[i] in {' ', '\t'}: inc i
+  template expect(s: string): bool =
+    (i + s.len <= n and src.continuesWith(s, i))
+  while i < n:
+    let lineEnd = block:
+      var e = i
+      while e < n and src[e] notin {'\n', '\r'}: inc e
+      e
+    skipWs()
+    if expect("proc ") or expect("func "):
+      i += 5
+      skipWs()
+      let s0 = i
+      while i < lineEnd and (isIdentChar(src[i]) or src[i] == '`'): inc i
+      let name = src[s0 ..< i]
+      var exp = false
+      if i < lineEnd and src[i] == '*':
+        exp = true
+        inc i
+      skipWs()
+      if name.len > 0 and i < lineEnd and src[i] == '(':
+        inc i
+        skipWs()
+        if expect("self") and i + 4 < lineEnd and not isIdentChar(src[i + 4]):
+          i += 4
+          skipWs()
+          if i < lineEnd and src[i] == ':':
+            inc i
+            skipWs()
+            let t0 = i
+            while i < lineEnd and isIdentChar(src[i]): inc i
+            if i > t0:
+              let key = name & "/" & src[t0 ..< i]
+              result[key] = max(result.getOrDefault(key), if exp: 2 else: 1)
+    i = lineEnd
+    while i < n and src[i] in {'\n', '\r'}: inc i
+
+proc handlerDef(defs: HandlerDefs, name, formType: string): int =
+  ## 0: no `proc name(self: formType, ...)` (or `func`) at the start of a
+  ## line; 1: there is one; 2: it is exported (`name*`).
+  defs.getOrDefault(name & "/" & formType)
+
 macro loadForm*(name: untyped, path: static[string]): untyped =
   ## Reads the form file `path` (relative to the calling module) at compile time
   ## and declares the typed form `name`, like the `form` macro would for the
@@ -118,6 +226,23 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
   ## `proc name(self: MainForm, <the event's parameters>)`; a missing one is a
   ## compile error. Parse errors are reported as `file:line:col: message` at the
   ## `loadForm` line.
+  ##
+  ## A form file that starts with `inherited Form2: Form2` and names its ancestor
+  ## (`ancestor = 'unit1.nfm'`) declares `type Form2* = ref object of Form1`,
+  ## where `Form1` is the root name of the ancestor file (the calling module
+  ## imports the unit that declares it). The ancestor's fields and handlers are
+  ## inherited; `initForm2` runs `initForm1`, then applies the `inherited`
+  ## blocks (changed properties of ancestor objects, reached as `self.button1`)
+  ## and creates the new objects. A handler named in the descendant is
+  ## `proc name(self: Form2, ...)` and overrides the ancestor's for that event.
+  ## So does a `proc name(self: Form2, ...)` in the calling module for a handler
+  ## that the ancestor chain binds (the usual case: both forms have a
+  ## `Button1Click`): `initForm2` re-binds those events to the descendant's proc
+  ## after `initForm1`, like a Delphi override. Call the ancestor's version with
+  ## `name(Form1(self), ...)` (it must be exported with `*` to be seen from
+  ## another module). The calling module's source is scanned for the
+  ## definitions, so they must be written out in that file (not `include`d or
+  ## generated by a macro).
   let site = name        # carries the position of the `loadForm` line
   if name.kind != nnkIdent:
     error("loadForm: expected `loadForm Name, \"file.nfm\"`", name)
@@ -133,22 +258,38 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
   except NfmError as e: error("loadForm: " & e.msg, site)
   legacyNames(root)
   let file = path
+  let callerSrc = if fileExists(srcFile): readFile(srcFile) else: ""
+  let callerDefs = scanHandlerDefs(callerSrc)
+
+  var anc: AncestorInfo
+  if root.inherited:
+    collectAncestors(root, nfmDir, file, site, anc)
 
   var names = initHashSet[string]()
+  for k in anc.classes.keys: names.incl k
   for n in walk(root):
     if n.name.len == 0: continue
+    if n.inherited and n != root:
+      if n.name notin anc.classes:
+        error("loadForm: " & nfmPos(file, n.line, n.col) & ": `inherited " & n.name &
+              "`: the ancestor form has no object of that name", site)
+      if anc.classes[n.name] != n.className:
+        error("loadForm: " & nfmPos(file, n.line, n.col) & ": `" & n.name &
+              "` is a `" & anc.classes[n.name] & "` in the ancestor, not a `" &
+              n.className & "`", site)
+      continue
     if n.name in reservedNames and n != root:
       error("loadForm: " & nfmPos(file, n.line, n.col) & ": `" & n.name &
             "` is reserved in `" & formName & "`: it is a field or property of " &
             "Component/Control/Form, so an object cannot use that name", site)
-    if n.name in names:
+    if n.name in names and n != root:
       error("loadForm: " & nfmPos(file, n.line, n.col) & ": duplicate object name `" &
             n.name & "`", site)
     names.incl n.name
 
-  var fields, creates, assigns, decls, classChecks: seq[string]
+  var fields, creates, assigns, decls, classChecks, rebinds: seq[string]
   var counter = 0
-  let isFrame = root.className == "Frame"
+  let isFrame = (if root.inherited: anc.baseClass else: root.className) == "Frame"
 
   proc errStmt(msg: string): string = "{.error: " & nimStr(msg) & ".}"
 
@@ -161,7 +302,8 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
         let ev = target & "." & p.name
         decls.add "when compiles(typeof(" & n.className & "(nil)." & p.name & ")):\n" &
                   "  declHandler(typeof(" & n.className & "(nil)." & p.name & "), " &
-                  formName & ", " & p.value.text & ")"
+                  formName & ", " & p.value.text & ", " &
+                  $(handlerDef(callerDefs, p.value.text, formName) == 2) & ")"
         assigns.add "when compiles(typeof(" & ev & ")):\n  " & ev &
           " = eventClosure(typeof(" & ev & "), self, " & p.value.text & ")\n  nfmNote(" &
           target & ", " & nimStr(p.name) & ", " & nimStr(p.value.text) & ")\nelse:\n  " &
@@ -203,6 +345,10 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
       assigns.add "self.name = " & nimStr(n.name)
     genProps(n, target)
     for c in n.children:
+      if c.inherited:
+        # an object of the ancestor: a field the base type already has
+        genNode(c, "self." & c.name, false)
+        continue
       inc counter
       let sym = "ch" & $counter
       let ctor = "new" & c.className
@@ -224,21 +370,34 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
         creates.add sym & ".name = " & nimStr(c.name)
       genNode(c, sym, false)
   genNode(root, "self", true)
+  if root.inherited:
+    for e in anc.events:
+      let def = handlerDef(callerDefs, e.handler, formName)
+      if def == 0: continue
+      let ev = e.target & "." & e.event
+      decls.add "when compiles(typeof(" & e.className & "(nil)." & e.event & ")):\n" &
+                "  declHandler(typeof(" & e.className & "(nil)." & e.event & "), " &
+                formName & ", " & e.handler & ", " & $(def == 2) & ")"
+      rebinds.add "when compiles(typeof(" & ev & ")):\n  " & ev &
+        " = eventClosure(typeof(" & ev & "), self, " & e.handler & ")\n  nfmNote(" &
+        e.target & ", " & nimStr(e.event) & ", " & nimStr(e.handler) & ")"
   # `genNode` appends a node's own properties before its children's: assigns are
   # in file order (properties of an object, then of its children), as in `form`.
 
   var src = ""
   for c in classChecks: src.add c & "\n"
-  src.add "type " & formName & "* = ref object of " & root.className & "\n"
+  let baseType = if root.inherited: anc.typeName else: root.className
+  src.add "type " & formName & "* = ref object of " & baseType & "\n"
   for f in fields: src.add f & "\n"
   src.add "\n"
   for d in decls: src.add d & "\n"
-  let baseInit = "init" & root.className
+  let baseInit = "init" & baseType
   src.add "proc init" & formName & "*(self: " & formName & ", owner: Component = nil) =\n"
   src.add "  when compiles(" & baseInit & "(self, owner)):\n    " & baseInit &
           "(self, owner)\n  else:\n    " & baseInit & "(self)\n"
   proc indentBlock(s: string): string =
     for line in s.splitLines: result.add "  " & line & "\n"
+  for r in rebinds: src.add indentBlock(r)
   for c in creates: src.add indentBlock(c)
   for a in assigns: src.add indentBlock(a)
   if isFrame:
@@ -250,6 +409,7 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
     src.add "proc new" & formName & "*(owner: Component = nil): " & formName & " =\n" &
             "  new result\n  result.init" & formName & "(owner)\n"
   src.add "static: discard staticRead(" & nimStr(nfmPath) & ")\n"
+  for f in anc.files: src.add "static: discard staticRead(" & nimStr(f) & ")\n"
   when defined(nfmDump): echo src
   result = parseStmt(src)
   setLineInfoRec(result, site)

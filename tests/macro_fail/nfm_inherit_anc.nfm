@@ -1,0 +1,4 @@
+object Anc: Form
+  object ok: Button
+  end
+end

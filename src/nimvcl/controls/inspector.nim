@@ -455,6 +455,10 @@ proc isBold*(ins: ObjectInspector, name: string): bool =
 
 proc vetoed(ins: ObjectInspector, t: Obj, name: string, v: PropValue): bool =
   ## Asks `onPropertyChanging`; true (and `lastError` set) when it refuses.
+  if name == "name" and t of Component and Component(t).inherited:
+    ins.fError = "`" & Component(t).name & "` comes from the ancestor form and cannot be renamed"
+    ins.invalidate()
+    return true
   if ins.onPropertyChanging == nil: return false
   var accept = true
   var msg = ""
@@ -815,7 +819,9 @@ method paint*(ins: ObjectInspector, c: Canvas) =
   if ins.fTargets.len == 1:
     let ci = classOf(ins.fTargets[0])
     title = (let n = objectName(ins.fTargets[0]); if n.len > 0: n else: "(unnamed)") &
-            ": " & (if ci != nil: ci.name else: "?")
+            ": " & (if ci != nil: ci.name else: "?") &
+            (if ins.fTargets[0] of Component and Component(ins.fTargets[0]).inherited:
+               " (inherited)" else: "")
   elif ins.fTargets.len > 1:
     title = $ins.fTargets.len & " objects selected"
   c.fillRect(rectF(1, 1, r.w - 2, TitleH - 1), t.surfaceAlt)

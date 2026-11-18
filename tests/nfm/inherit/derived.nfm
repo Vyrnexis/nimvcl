@@ -1,0 +1,22 @@
+inherited Derived: Derived
+  ancestor = 'base.nfm'
+  caption = 'Derived form'
+  inherited panel1: Panel
+    width = 300
+    inherited okButton: Button
+      caption = 'Fine'
+      onClick = okClick
+    end
+    object extraButton: Button
+      left = 100
+      top = 5
+      caption = 'Extra'
+      onClick = extraClick
+    end
+  end
+  object extraLabel: Label
+    left = 10
+    top = 200
+    caption = 'Added'
+  end
+end

@@ -346,6 +346,85 @@ through the registry. For a file in canonical form, `formToNfm(loadNfm(text)) ==
 text`. `parseNfm(text)` gives the syntax tree (`NfmNode`: `name`, `className`,
 `props`, `children`, positions) and `writeNfm(node)` writes it back.
 
+## Form inheritance
+
+A form can inherit from another one, as in Delphi: the descendant has everything
+the ancestor has, can change properties of the inherited objects and can add
+objects of its own. Changing the ancestor changes every descendant the next time
+it is built; there are no copies.
+
+```
+inherited Form2: Form2
+  ancestor = 'unit1.nfm'
+  caption = 'Details'
+  inherited okButton: Button
+    caption = 'Save'
+    onClick = okClick
+  end
+  object cancelButton: Button
+    caption = 'Cancel'
+    onClick = cancelClick
+  end
+end
+```
+
+* The file starts with `inherited Name: Name` instead of `object`. The class is
+  the form's own name, like `TForm2` in Delphi.
+* `ancestor = '...'` is the first property: the ancestor's `.nfm`, relative to
+  this file. The file is the single place that names the ancestor, so `loadForm`,
+  `loadNfm`, the IDE and `formToNfm` all find it the same way (Delphi reads it
+  from the Pascal class declaration; here the form file is the declaration).
+  `loadForm Form2, "unit2.nfm"` needs no extra argument.
+* `inherited Button1: Button` selects an object of the ancestor (found by name,
+  at any depth; nest the blocks the way the ancestor does). It lists only the
+  properties that differ from the ancestor. `object` blocks are new objects
+  (inside an inherited block they are children of that inherited object).
+  Objects nothing changed in are not written. `inherited` is only allowed in a
+  file whose root is `inherited`.
+
+**`loadForm`.** `Form2` becomes `ref object of Form1`, where `Form1` is the root
+name of the ancestor file; the unit declaring it must be imported. The
+ancestor's fields and handlers are inherited, so `self.okButton` works in
+`Form2` handlers. `initForm2` calls `initForm1`, then applies the differences
+and creates the new objects, so the ancestor's file is applied first. Handlers
+are looked up like in any form, as `proc name(self: Form2, ...)`. A handler the
+ancestor chain binds (`onClick = okClick` in `Form1`) is overridden by writing a
+`proc okClick(self: Form2, ...)` in the descendant's module: `initForm2` runs
+`initForm1` and then re-binds every such event to the descendant's proc (the
+overload with the more specific `self` wins), like a Delphi override. The
+descendant's file need not mention the event; naming it (`onClick = okClick` in
+an `inherited` block) works too and also binds a handler of another name. Call
+the ancestor's version with `okClick(Form1(self), sender)`; export it with
+`proc okClick*(self: Form1, ...)` so another module sees it. The calling
+module's source is scanned for the `proc name(self: Form2` lines, so write the
+overrides out in that file (an `include`d or macro-generated one is not seen).
+(The ancestor's own code keeps calling the ancestor's proc, as it is bound at
+compile time.) Like all `loadForm` output, none of this
+uses the registry.
+
+**`loadNfm`.** The ancestor file is resolved relative to the descendant's file
+(`loadNfmFile`, or the `fileName` argument of `loadNfm`) and built first; the
+returned form has the descendant's name. Components that come from an ancestor
+have `inherited = true` (`Component.inherited`), and the root has `ancestorFile`
+and `ancestorPath`. A missing or looping ancestor chain is an `NfmError`. Handlers are found by
+name only, so the same name in both forms is one handler; to give the
+descendant its own, set `NfmOptions.overrideHandlers`, a second resolver that is
+asked after the ancestor is built for every handler name the ancestor bound and
+whose answer replaces that binding.
+
+**`formToNfm`** writes a descendant as the difference to a freshly built
+ancestor, so a file in this form loads and saves back byte for byte. A property
+set back to the ancestor's value disappears from the file; one the ancestor sets
+and the descendant clears is written with the default value. A handler the
+descendant binds again is kept (`Component.handlerOverrides`) even when the name
+equals the ancestor's (an override that exists only as a proc in the module is
+not in the form file at all).
+
+**Designer.** `FormDesigner` and `ObjectInspector` treat inherited components
+as Delphi does: they carry a small flag, the inspector title says `(inherited)`,
+they can be moved, resized and edited but not deleted (`deleteSelection` refuses)
+or renamed. New components can be added anywhere.
+
 ## Converting to the `form` macro
 
 `nfmToFormMacro(text)` returns the `form` macro source for a file:

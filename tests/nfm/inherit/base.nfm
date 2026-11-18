@@ -1,0 +1,22 @@
+object Base: Form
+  caption = 'Base form'
+  width = 400
+  height = 300
+  object panel1: Panel
+    left = 10
+    top = 10
+    width = 380
+    height = 100
+    object okButton: Button
+      left = 5
+      top = 5
+      caption = 'OK'
+      onClick = okClick
+    end
+  end
+  object nameEdit: Edit
+    left = 10
+    top = 130
+    text = 'base'
+  end
+end

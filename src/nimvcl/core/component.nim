@@ -22,6 +22,18 @@ type
       ## Where a non-visual component's tile sits on the design surface (like
       ## Delphi's `DesignInfo`). Ignored at run time. A form file stores the
       ## pair only when it is not (0, 0).
+    inherited*: bool
+      ## Set by the run-time form loader on a component that comes from the
+      ## ancestor form of an inherited form (it cannot be deleted or renamed in
+      ## the designer). Plain `loadForm` code never sets it.
+    handlerOverrides*: seq[string]
+      ## Events of an inherited component that the descendant's form file binds
+      ## again, even to the same handler name as the ancestor (the descendant
+      ## then means its own `proc name(self: Descendant, ...)`). Written back
+      ## by `formToNfm`; run-time only.
+    ancestorFile*, ancestorPath*: string
+      ## On the root of an inherited form loaded at run time: the `ancestor`
+      ## path as the form file wrote it, and the resolved path it was read from.
 
 proc hash*(c: Component): Hash =
   ## Identity hash, so `Table`/`HashSet` keyed by any component or control work.

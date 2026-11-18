@@ -74,3 +74,10 @@ suite "loadForm errors (.nfm files)":
 
   test "missing file":
     expectError("nfm_missing_file.nim", "cannot read", 4)
+
+  test "inherited object the ancestor does not have":
+    expectError("nfm_inherit_ghost.nim",
+                "nfm_inherit_ghost.nfm:3:3: `inherited ghost`: the ancestor form has no object of that name", 5)
+
+  test "new object named like an ancestor's":
+    expectError("nfm_inherit_dup.nim", "nfm_inherit_dup.nfm:3:3: duplicate object name `ok`", 5)

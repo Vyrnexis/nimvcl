@@ -88,6 +88,11 @@ type
     ## How `loadNfm` treats problems and handlers.
     strict*: bool                 ## true: unknown classes/properties/handlers raise `NfmError`; false: they are skipped and listed in `warnings`
     baseDir*: string              ## image paths of the file (`picture = 'images/a.png'`) are relative to this folder; "" = the folder of the form file (or the current one)
+    overrideHandlers*: HandlerResolver
+      ## Inherited forms: asked, after the ancestor is built, for the descendant's
+      ## version of every handler the ancestor chain bound (by the same name; the
+      ## usual `Button1Click` in both forms). A box it returns replaces the
+      ## ancestor's binding of that event; nil keeps the ancestor's.
     handlers*: HandlerResolver    ## binds `onXxx = name` to code; nil: names are only recorded
     warnings*: seq[string]        ## problems found while `strict` is false; also images that could not be loaded (a missing image never raises: a blank 1x1 image that keeps the path stands in, so saving the form does not lose it)
 
@@ -246,6 +251,9 @@ proc applyProps(b: Built, file: string, opt: NfmOptions,
           raise nfmError(file, p.value.line, p.value.col,
                          "`" & p.name & "` expects a handler name")
         info.set(b.obj, pvEvent(p.value.text))
+        if b.node.inherited and b.obj of Component and
+           p.name notin Component(b.obj).handlerOverrides:
+          Component(b.obj).handlerOverrides.add p.name
         if opt.handlers != nil:
           let box = opt.handlers(p.value.text, info.typeName)
           if box == nil or not info.bindHandler(b.obj, box):
@@ -257,22 +265,115 @@ proc applyProps(b: Built, file: string, opt: NfmOptions,
     except PropError as e:
       raise nfmError(file, p.line, p.col, "property `" & p.name & "`: " & e.msg)
 
+proc hash(o: Obj): Hash = hash(cast[pointer](o))
+
+proc markInherited(o: Obj, seen: var HashSet[Obj]) =
+  if seen.containsOrIncl(o): return
+  if o of Component:
+    Component(o).inherited = true
+    Component(o).handlerOverrides.setLen 0    # the ancestor's own re-bindings are its business
+  for k in kidsOf(o): markInherited(k, seen)
+  if o of Component:
+    for x in Component(o).components: markInherited(Obj(x), seen)
+
+proc overlay(n: NfmNode, o: Obj, fileName: string, owner: Component, opt: NfmOptions,
+             byName: var Table[string, Obj], built: var seq[Built]) =
+  ## Inherited blocks select an existing object (their properties are applied
+  ## later); `object` blocks create new ones.
+  for c in n.children:
+    if c.inherited:
+      if not byName.hasKey(c.name):
+        opt.problem(fileName, c.line, c.col,
+                    "`inherited " & c.name & "`: the ancestor form has no object of that name")
+        continue
+      let co = byName[c.name]
+      let ci = classOf(co)
+      let want = classByName(c.className)
+      if ci == nil or want == nil or not ci.isA(want):
+        opt.problem(fileName, c.line, c.col,
+                    "`" & c.name & "` is a `" & (if ci == nil: "?" else: ci.name) &
+                    "` in the ancestor, not a `" & c.className & "`")
+        continue
+      built.add Built(node: c, obj: co, ci: ci)
+      overlay(c, co, fileName, owner, opt, byName, built)
+    else:
+      buildTree(c, o, Obj(owner), fileName, opt, byName, built)
+
+proc buildNfmImpl(root: NfmNode, owner: Component, opt: NfmOptions,
+                  fileName: string, byName: var Table[string, Obj],
+                  chain: seq[string]): Obj =
+  let baseDir = if opt.baseDir.len > 0: opt.baseDir
+                elif fileName.len > 0: fileName.parentDir
+                else: ""
+  var built: seq[Built]
+  if not root.inherited:
+    buildTree(root, nil, Obj(owner), fileName, opt, byName, built)
+    if built.len == 0: return nil
+    for b in built: applyProps(b, fileName, opt, byName, baseDir)
+    return built[0].obj
+  # an inherited form: build the ancestor first, then lay the differences over it
+  let dir = if fileName.len > 0: fileName.parentDir else: baseDir
+  let apath = if root.ancestor.isAbsolute: root.ancestor
+              elif dir.len > 0: dir / root.ancestor
+              else: root.ancestor
+  let key = absolutePath(apath)
+  if key in chain or chain.len > 16:
+    raise nfmError(fileName, root.line, root.col,
+                   "the ancestor chain of `" & root.name & "` loops back to `" & root.ancestor & "`")
+  if not fileExists(apath):
+    raise nfmError(fileName, root.line, root.col,
+                   "the ancestor form file `" & apath & "` does not exist")
+  let aroot = parseNfm(readFile(apath), apath)
+  legacyNames(aroot)
+  let aobj = buildNfmImpl(aroot, owner, opt, apath, byName, chain & @[absolutePath(fileName)])
+  if aobj == nil:
+    raise nfmError(fileName, root.line, root.col, "the ancestor `" & root.ancestor &
+                   "` did not build a form")
+  var seen = initHashSet[Obj]()
+  markInherited(aobj, seen)
+  if aobj of Component:
+    let c = Component(aobj)
+    c.ancestorFile = root.ancestor
+    c.ancestorPath = apath
+    if root.name.len > 0:
+      byName.del c.name
+      c.name = root.name
+      byName[root.name] = aobj
+  if opt.overrideHandlers != nil:
+    var seenO = initHashSet[Obj]()
+    var todo = @[aobj]
+    while todo.len > 0:
+      let o = todo.pop()
+      if seenO.containsOrIncl(o): continue
+      for k in kidsOf(o): todo.add k
+      if o of Component:
+        for x in Component(o).components: todo.add Obj(x)
+        let ci = classOf(o)
+        if ci == nil: continue
+        for (ev, h) in Component(o).handlerNames:
+          let info = ci.findProp(ev)
+          if info == nil or info.kind != pkEvent: continue
+          let box = opt.overrideHandlers(h, info.typeName)
+          if box != nil: discard info.bindHandler(o, box)
+  built.add Built(node: root, obj: aobj, ci: classOf(aobj))
+  overlay(root, aobj, fileName, owner, opt, byName, built)
+  for b in built: applyProps(b, fileName, opt, byName, baseDir)
+  aobj
+
 proc buildNfm*(root: NfmNode, owner: Component = nil, options: NfmOptions = nil,
                fileName = ""): Obj =
   ## Builds the object tree described by `root` through the registry and
   ## returns the root object. Children are created first (top-down), then the
   ## properties are applied in file order (so a property may refer to any named
   ## object of the file), exactly like the `form` macro.
+  ##
+  ## For an inherited form (`inherited Form2: Form2` with an `ancestor`), the
+  ## ancestor file (relative to `fileName`) is built first and the descendant's
+  ## `inherited` blocks and new objects are applied on top; the objects that
+  ## come from the ancestor have `inherited` set.
   let opt = if options == nil: newNfmOptions() else: options
   var byName: Table[string, Obj]
-  var built: seq[Built]
-  buildTree(root, nil, Obj(owner), fileName, opt, byName, built)
-  if built.len == 0: return nil
-  let baseDir = if opt.baseDir.len > 0: opt.baseDir
-                elif fileName.len > 0: fileName.parentDir
-                else: ""
-  for b in built: applyProps(b, fileName, opt, byName, baseDir)
-  built[0].obj
+  buildNfmImpl(root, owner, opt, fileName, byName, @[absolutePath(fileName)])
 
 proc loadNfm*(text: string, owner: Component = nil, options: NfmOptions = nil,
               fileName = ""): Form =
@@ -297,10 +398,10 @@ proc loadNfmFile*(path: string, owner: Component = nil,
 
 # ------------------------------------------------------------------ saving
 
-proc hash(o: Obj): Hash = hash(cast[pointer](o))
-
 type SaveCtx = object
   nested: HashSet[Obj]    ## objects that are written as the child of another one
+  ancestors: Table[string, Obj]  ## inherited form: the named objects of a fresh ancestor
+  inheriting: bool
 
 proc needsParent(ci: ClassInfo): bool =
   ## Classes created through `attach` (menu items) cannot stand alone.
@@ -334,16 +435,17 @@ proc newSaveCtx(root: Obj): SaveCtx =
   for o in all:
     for k in kidsOf(o): result.nested.incl k
 
-proc nodeOf(o: Obj, ctx: SaveCtx, nameOverride = ""): NfmNode =
+proc sameValue(a, b: NfmValue): bool =
+  a.kind == b.kind and a.text == b.text and a.items == b.items
+
+proc ownProps(o: Obj): seq[NfmProp] =
+  ## The properties of `o` that differ from a fresh instance, in registry order.
   let ci = classOf(o)
-  if ci == nil: return nil
-  result = NfmNode(className: ci.name,
-                   name: if nameOverride.len > 0: nameOverride else: objectName(o))
   if o of Component:
     let c = Component(o)
     if c.designLeft != 0 or c.designTop != 0:
-      result.props.add NfmProp(name: "designLeft", value: nfmInt(c.designLeft))
-      result.props.add NfmProp(name: "designTop", value: nfmInt(c.designTop))
+      result.add NfmProp(name: "designLeft", value: nfmInt(c.designLeft))
+      result.add NfmProp(name: "designTop", value: nfmInt(c.designTop))
   var ordered: seq[PropInfo]
   for p in ci.propsOf:
     if p.kind != pkEvent: ordered.add p
@@ -356,35 +458,81 @@ proc nodeOf(o: Obj, ctx: SaveCtx, nameOverride = ""): NfmNode =
     of pkImage:
       let v = p.get(o)
       if v.image != nil and v.image.source.len > 0:
-        result.props.add NfmProp(name: p.name, value: toNfmValue(p, v))
+        result.add NfmProp(name: p.name, value: toNfmValue(p, v))
     of pkImages:
       let v = p.get(o)
       if v.imgs.len > 0:
-        result.props.add NfmProp(name: p.name, value: toNfmValue(p, v))
+        result.add NfmProp(name: p.name, value: toNfmValue(p, v))
     of pkFont, pkSpacing, pkConstraints:
       for s in subProps(p):
         if not isDefault(o, s):
-          result.props.add NfmProp(name: s.name, value: toNfmValue(s, s.get(o)))
+          result.add NfmProp(name: s.name, value: toNfmValue(s, s.get(o)))
     of pkEvent:
       let h = handlerNameOf(o, p.name)
-      if h.len > 0: result.props.add NfmProp(name: p.name, value: nfmIdent(h))
+      if h.len > 0: result.add NfmProp(name: p.name, value: nfmIdent(h))
     of pkObject:
       if not isDefault(o, p):
         let v = p.get(o)
         if v.obj == nil or objectName(v.obj).len > 0:
-          result.props.add NfmProp(name: p.name, value: toNfmValue(p, v))
+          result.add NfmProp(name: p.name, value: toNfmValue(p, v))
     else:
       if not isDefault(o, p):
-        result.props.add NfmProp(name: p.name, value: toNfmValue(p, p.get(o)))
-  for k in kidsOf(o):
-    let n = nodeOf(k, ctx)
-    if n != nil: result.children.add n
-  if o of Component:
+        result.add NfmProp(name: p.name, value: toNfmValue(p, p.get(o)))
+
+proc diffProps(o, anc: Obj): seq[NfmProp] =
+  ## What `o` sets differently from its ancestor's counterpart `anc`: changed or
+  ## new values, plus the default value of a property the ancestor sets and `o`
+  ## does not (an event cannot be unset, so it is skipped).
+  let mine = ownProps(o)
+  let theirs = ownProps(anc)
+  var theirIdx = initTable[string, int]()
+  for i, p in theirs: theirIdx[p.name] = i
+  var mineNames = initHashSet[string]()
+  for p in mine:
+    mineNames.incl p.name
+    if theirIdx.hasKey(p.name) and sameValue(theirs[theirIdx[p.name]].value, p.value) and
+       not (o of Component and p.name in Component(o).handlerOverrides): continue
+    result.add p
+  let ci = classOf(o)
+  for p in theirs:
+    if p.name in mineNames: continue
+    if p.name == "designLeft" or p.name == "designTop":
+      result.add NfmProp(name: p.name, value: nfmInt(0))
+      continue
+    let info = ci.findProp(p.name)
+    if info == nil or info.kind == pkEvent: continue
+    case info.kind
+    of pkImage: result.add NfmProp(name: p.name, value: nfmString(""))
+    of pkImages: result.add NfmProp(name: p.name, value: NfmValue(kind: nvList))
+    else:
+      try: result.add NfmProp(name: p.name, value: toNfmValue(info, ci.defaultOf(info)))
+      except PropError: discard
+
+proc nodeOf(o: Obj, ctx: SaveCtx, nameOverride = "", anc: Obj = nil,
+            kidList: seq[Obj] = @[], useKidList = false): NfmNode =
+  let ci = classOf(o)
+  if ci == nil: return nil
+  result = NfmNode(className: ci.name,
+                   name: if nameOverride.len > 0: nameOverride else: objectName(o))
+  if anc != nil:
+    result.inherited = true
+    result.props = diffProps(o, anc)
+  else:
+    result.props = ownProps(o)
+  var kids = if useKidList: kidList else: kidsOf(o)
+  if o of Component and not useKidList:
     # non-visual components owned by this one, as Delphi writes them
     for x in Component(o).components:
-      if x.isStandalone and Obj(x) notin ctx.nested:
-        let n = nodeOf(x, ctx)
-        if n != nil: result.children.add n
+      if x.isStandalone and Obj(x) notin ctx.nested: kids.add Obj(x)
+  for k in kids:
+    var a: Obj
+    if ctx.inheriting:
+      let nm = objectName(k)
+      if nm.len > 0: a = ctx.ancestors.getOrDefault(nm)
+    let n = nodeOf(k, ctx, "", a)
+    # an inherited object nothing changed in is not written
+    if n != nil and not (n.inherited and n.props.len == 0 and n.children.len == 0):
+      result.children.add n
 
 proc objectToNfmNode*(o: Obj, rootName = ""): NfmNode =
   ## The syntax tree of an object and its children: only properties that
@@ -397,11 +545,52 @@ proc objectToNfm*(o: Obj, rootName = ""): string =
   if n == nil: raise newException(PropError, "object is not of a registered class")
   writeNfm(n)
 
+proc formToNfmNode*(f: Form, kids: openArray[Obj], rootName = ""): NfmNode =
+  ## The syntax tree `formToNfm` writes, for a form whose children are not
+  ## where the form keeps them (a designer that shows them in a panel of its
+  ## own): the root's own properties are the form's, its children are `kids`
+  ## (controls and non-visual components, in file order). For an inherited form
+  ## (`ancestorPath` is set) the tree holds only the differences from a freshly
+  ## built ancestor, see `formToNfm`.
+  let n = f.name
+  let nm = if n.len > 0: n else: (if rootName.len > 0: rootName else: "Form1")
+  var ctx: SaveCtx
+  for k in kids:
+    for x in newSaveCtx(k).nested: ctx.nested.incl x
+  var anc: Obj
+  if f.ancestorPath.len > 0:
+    anc = loadNfmFile(f.ancestorPath, nil, newNfmOptions(strict = false))
+    ctx.inheriting = true
+    var all: seq[Obj]
+    var seen: HashSet[Obj]
+    gatherAll(anc, all, seen)
+    for o in all:
+      let nmo = objectName(o)
+      if nmo.len > 0: ctx.ancestors[nmo] = o
+  result = nodeOf(f, ctx, nm, anc, @kids, true)
+  if anc != nil:
+    result.inherited = true
+    result.className = nm
+    result.ancestor = f.ancestorFile
+
 proc formToNfm*(f: Form, rootName = ""): string =
   ## Serialises a live form through the registry; this is what a designer
   ## saves. `rootName` names the root when the form has no `name`.
-  let n = f.name
-  objectToNfm(f, if n.len > 0: "" else: (if rootName.len > 0: rootName else: "Form1"))
+  ##
+  ## An inherited form (one `loadNfm` built from a file that starts with
+  ## `inherited`; `ancestorPath` is set) is written as the difference from a
+  ## freshly built ancestor: `inherited` blocks with only the changed
+  ## properties, `object` blocks for new components, and nothing for ancestor
+  ## components that were left alone.
+  if f.ancestorPath.len == 0:
+    let n = f.name
+    return objectToNfm(f, if n.len > 0: "" else: (if rootName.len > 0: rootName else: "Form1"))
+  var kids: seq[Obj]
+  var ctxAll = newSaveCtx(f)
+  for k in kidsOf(f): kids.add k
+  for x in f.components:
+    if x.isStandalone and Obj(x) notin ctxAll.nested: kids.add Obj(x)
+  writeNfm(formToNfmNode(f, kids, rootName))
 
 # --------------------------------------------------------- form-macro source
 
@@ -414,6 +603,9 @@ proc nfmToFormMacro*(text: string, fileName = ""): string =
   ## supports that form).
   let root = parseNfm(text, fileName)
   legacyNames(root)
+  if root.inherited:
+    raise nfmError(fileName, root.line, root.col,
+                   "the `form` macro has no inherited forms; use `loadForm` with the file")
   var names = initHashSet[string]()
   for n in walk(root):
     if n.name.len > 0: names.incl n.name
