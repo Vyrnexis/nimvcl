@@ -471,6 +471,38 @@ suite "main menu":
     check chainLen(x.f) == 1
     closeAllPopups(x.f)
 
+  test "attachPopupMenu leaves the control's event fields alone":
+    let x = build()
+    let pm = newPopupMenu(x.f)
+    pm.addItem("&Paste", mk("ppaste"))
+    let panel = newPanel(x.f, "ctx", 20, 80, 200, 150)
+    attachPopupMenu(panel, pm)
+    check panel.onMouseDown == nil and panel.onMouseUp == nil
+    check panel.onKeyDown == nil and panel.onEnter == nil
+    x.f.win.click(60, 120, mbRight)
+    check chainLen(x.f) == 1                       # still served
+    closeAllPopups(x.f)
+    check panel.onMouseDown == nil and panel.onMouseUp == nil and panel.onEnter == nil
+
+  test "a handler assigned after attachPopupMenu: both run":
+    let x = build()
+    let pm = newPopupMenu(x.f)
+    pm.addItem("&Paste", mk("ppaste"))
+    let panel = newPanel(x.f, "ctx", 20, 80, 200, 150)
+    attachPopupMenu(panel, pm)
+    var ups = 0
+    panel.onMouseUp = proc(s: Control, b: MouseButton, sh: ShiftState, mx, my: float32) =
+      inc ups
+    x.f.win.click(60, 120, mbRight)
+    check ups == 1
+    check chainLen(x.f) == 1
+    closeAllPopups(x.f)
+    # a child control without a menu of its own: the ancestor's menu serves it
+    let b = newButton(panel, "b", 10, 10, 80, 28)
+    x.f.win.click(60, 110, mbRight)
+    check chainLen(x.f) == 1
+    closeAllPopups(x.f)
+
   test "PopupMenu.close closes only its own popup (review 11)":
     let x = build()
     let pm = newPopupMenu(x.f)                      # not attached to any control

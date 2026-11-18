@@ -68,4 +68,10 @@ TreeNode: `text`, `data` (`RootRef`), `tag`, `imageIndex`, `selectedIndex`, `exp
 * Keep your own object in `node.data` (derive from `RootObj`) or an int in `tag`.
 * Keys: arrows, Left/Right to collapse and expand, Space, type-ahead, F2 to rename.
 
+## At design time
+
+`items` is a string list holding an outline: one node per line, indented by two
+spaces per level (`nodeLines` / `nodeLines =` in code). Node images, check
+state and expansion are not stored in a form file.
+
 [Back to the index](../README.md)

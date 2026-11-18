@@ -86,6 +86,17 @@ suite "registry":
         p.set(o, v)
         check p.get(o) == v
 
+  test "a collection property reports its item count and ignores a set":
+    let sb = newStatusBar(nil)
+    sb.addPanel("a")
+    let p = classByName("StatusBar").findProp("panels")
+    check p.kind == pkCollection and not p.stored
+    check p.get(sb) == PropValue(kind: pkCollection, i: 1)
+    p.set(sb, p.get(sb))
+    check sb.panels.len == 1
+    expect PropError:
+      p.set(sb, pvInt(3))
+
   test "kinds: bool int float string":
     let b = newButton(nil, "x")
     setProp(b, "isDefault", pvBool(true))

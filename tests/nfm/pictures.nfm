@@ -1,0 +1,22 @@
+object Pics: Form
+  width = 300
+  height = 200
+  object logo: ImageControl
+    stretch = true
+    picture = 'images/red.png'
+  end
+  object icons: ImageList
+    width = 24
+    height = 24
+    images = (
+      'images/blue.png'
+      'images/green.png'
+    )
+  end
+  object bar: ToolBar
+    images = icons
+    object b1: ToolButton
+      imageIndex = 1
+    end
+  end
+end

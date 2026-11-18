@@ -201,6 +201,18 @@ like a control and appears in selections as a `NonVisualTile` (its `component`
 field is the component). `nonVisuals` lists the tiles and `removeNonVisual`
 removes one.
 
+## Properties that need a dialog
+
+The inspector's "..." buttons (string lists, pictures, image lists, collections
+of columns, panels, pages, buttons and menu items) are implemented by
+`nimvcl/controls/propeditors`: `attachEditors(inspector, host)` is all a
+designer needs, with a `PropEditorHost` that says where picture files live
+(`baseDir`, `imagesDir`) and gets `onChanged` / `onItemAdded` notifications. An
+object-reference drop-down (`images`, `popupMenu`, `action`) lists the components
+of the *designed* form: a designer must set `inspector.onGetChoices`, because the
+design surface sits inside the designer's own window. See
+[ObjectInspector](../components/inspector.md#property-editor-dialogs).
+
 ## Hidden controls
 
 With `showHidden = true`, controls with `visible = false` are selectable and

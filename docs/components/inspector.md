@@ -56,7 +56,7 @@ Click a value (or select the row and press Enter):
 | enum, bool | a drop-down `ComboBox`; a double click cycles to the next value |
 | colour | an editable combo: type `#rrggbb` or a palette name, or pick from the palette list |
 | reference to another object (`Label.focusControl`, `images`) | a combo of the named objects of the same form |
-| string list (`items`, `lines`), image | a "..." button that calls `onEditExtra`; the application opens its own dialog |
+| string list (`items`, `lines`, `tabs`), image (`picture`), image list (`ImageList.images`), collection (`columns`, `panels`, `pages`, `buttons`, menu `items`) | a "..." button that calls `onEditExtra`; `attachEditors` (below) opens ready-made dialogs. Delete on an image row clears it |
 | set element (`anchors.akLeft`) | a check box; one click toggles it |
 | event | an editable combo of handler names; a double click on an empty row asks `onCreateHandler` for a new name |
 
@@ -76,6 +76,41 @@ Keyboard: Up, Down, PageUp, PageDown, Home, End move the selection; Enter edits;
 Esc cancels; Tab applies and edits the next row (Shift+Tab: the previous one);
 Left and Right collapse and expand; Space toggles a check box.
 
+## Property editor dialogs
+
+`import nimvcl/controls/propeditors` has the dialogs behind the "..." button:
+
+```nim
+let host = newPropEditorHost(baseDir = projectDir, imagesDir = projectDir / "images")
+host.onChanged = proc(target: Obj, prop: string) = markModified()
+host.onItemAdded = proc(parent, item: Obj) = item.name = freshName()   # a new collection item
+attachEditors(inspector, host)          # sets inspector.onEditExtra
+```
+
+| Property kind | Dialog | What it does |
+|---|---|---|
+| `seq[string]` | `StringListDlgForm` (`editStringList`) | A memo, one entry per line |
+| `Image` | `PictureDlgForm` | Preview, Load... (a file dialog for PNG/JPG/BMP), Clear, OK, Cancel |
+| `ImageList.images` | `ImageListDlgForm` | Thumbnails; Add... (several files), Delete, Up, Down |
+| collection (`pkCollection`) | `CollectionDlgForm` | The items with Add, Delete, Up, Down, and an inspector for the selected item (which offers these editors again, so menu items nest) |
+
+A picked picture goes through `host.importFile`: a file inside `host.baseDir`
+is stored relative to it, any other file is copied into `host.imagesDir`
+(default `baseDir/images`; a number is appended when another file has the name)
+and its relative path is stored. `loadPicture(host, path)` does the same without
+a dialog.
+
+The dialogs are plain forms (`newPictureDlg(host, image)`, `newImageListDlg`,
+`newStringListDlg`, `newCollectionDlg`) whose procs (`loadFile`, `clearPicture`,
+`addFiles`, `moveSelected`, `addItem`, `deleteItem`, `moveItem`, ...) tests call
+directly; `host.runModal` (default `showModal`) is what `attachEditors` uses to
+run them, so a test replaces it to drive a dialog without showing anything.
+Collections are registered with `addCollection(classInfo, name, childClass,
+CollectionOps(...))` (`props_std` does it for `ListView.columns`,
+`StatusBar.panels`, `PageControl.pages`, `ToolBar.buttons`, and `items` of
+`MainMenu`, `PopupMenu` and `MenuItem`); the property is never stored, the items
+are the object's child nodes in the form file.
+
 ## Properties
 
 | Name | Type | Description |
@@ -94,7 +129,8 @@ Left and Right collapse and expand; Space toggles a check box.
 | `onPropertyChanging(sender, target: Obj, prop: string, newValue: PropValue, accept: var bool, message: var string)` | Before a value is applied, for each target. Set `accept = false` to refuse: nothing changes (with several targets one refusal stops the whole edit), `message` (or a default text) becomes `lastError` and shows in the error line, and a typed edit stays open. Also asked before a handler name is created by double click. `prop` is the dotted name (`font.size`) |
 | `onPropertyChanged(sender, target: Obj, prop: string)` | A value was changed by the user (after it was applied) |
 | `onCreateHandler(sender, target: Obj, event: string): string` | Double click on an event row without a handler: return the name of a new handler (the application writes the stub), or "" to do nothing. When nil, `<Name><Event>` is used |
-| `onEditExtra(sender, target: Obj, prop: string)` | The "..." button of a string list or image was pressed |
+| `onEditExtra(sender, target: Obj, prop: string)` | The "..." button of a string list, image, image list or collection was pressed |
+| `onGetChoices(sender, target: Obj, prop: string): seq[Obj]` | The objects an object-reference property offers (filtered by the property's class). When nil, the named objects of the target's form are found by walking up from the target; set it when the target lives inside a design surface |
 | `onGetHandlers(sender, target: Obj, event: string): seq[string]` | More handler names for the event editor, besides `knownHandlers` |
 | `onSelectionChanged` | The selected row changed |
 

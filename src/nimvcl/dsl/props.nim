@@ -59,7 +59,8 @@ type
 
   PropKind* = enum
     pkBool, pkInt, pkFloat, pkString, pkEnum, pkSet, pkColor, pkFont,
-    pkSpacing, pkConstraints, pkObject, pkImage, pkStrings, pkEvent
+    pkSpacing, pkConstraints, pkObject, pkImage, pkImages, pkStrings,
+    pkCollection, pkEvent
 
   PropCategory* = enum
     pcLayout, pcAppearance, pcBehaviour, pcData, pcEvents
@@ -67,7 +68,7 @@ type
   PropValue* = object
     case kind*: PropKind
     of pkBool: b*: bool
-    of pkInt, pkEnum: i*: int            ## number, or enum ordinal
+    of pkInt, pkEnum, pkCollection: i*: int   ## number, enum ordinal, or the item count of a collection
     of pkFloat: f*: float
     of pkString: s*: string
     of pkSet: bits*: int64               ## bit `ord(e)` set when `e` is in the set
@@ -79,6 +80,7 @@ type
       obj*: Obj                          ## referenced object (nil: none)
       objName*: string                   ## its name when read from text
     of pkImage: image*: Image
+    of pkImages: imgs*: seq[Image]
     of pkStrings: strs*: seq[string]
     of pkEvent: handler*: string         ## handler name ("" none)
 
@@ -98,6 +100,16 @@ type
     name*: string                        ## `sender`
     typeName*: string                    ## `Control`, `var CloseAction`
 
+  CollectionOps* = ref object
+    ## How a `pkCollection` property (the owned children a designer lists in a
+    ## collection editor: columns, panels, menu items, pages, tool buttons)
+    ## is read and changed.
+    childClass*: string                  ## class of the items (`"ListColumn"`)
+    items*: proc(o: Obj): seq[Obj] {.closure.}
+    add*: proc(o: Obj): Obj {.closure.}  ## creates, attaches and returns a new item
+    remove*: proc(o: Obj, child: Obj) {.closure.}
+    move*: proc(o: Obj, child: Obj, newIndex: int) {.closure.}   ## nil: items cannot be reordered
+
   PropInfo* = ref object
     name*: string                        ## `"caption"`; a sub-property is `"font.size"`
     kind*: PropKind
@@ -115,6 +127,7 @@ type
     isAssigned*: proc(o: Obj): bool {.closure.}                  ## events: a handler is set
     bindHandler*: proc(o: Obj, h: RootRef): bool {.closure.}     ## events
     clearHandler*: proc(o: Obj) {.closure.}                      ## events
+    coll*: CollectionOps                 ## pkCollection: the operations
     subs: seq[PropInfo]
 
   ClassInfo* = ref object
@@ -158,7 +171,7 @@ func `==`*(a, b: PropValue): bool =
   if a.kind != b.kind: return false
   case a.kind
   of pkBool: a.b == b.b
-  of pkInt, pkEnum: a.i == b.i
+  of pkInt, pkEnum, pkCollection: a.i == b.i
   of pkFloat: a.f == b.f
   of pkString: a.s == b.s
   of pkSet: a.bits == b.bits
@@ -169,6 +182,7 @@ func `==`*(a, b: PropValue): bool =
   of pkConstraints: a.cons == b.cons
   of pkObject: a.obj == b.obj
   of pkImage: a.image == b.image
+  of pkImages: a.imgs == b.imgs
   of pkStrings: a.strs == b.strs
   of pkEvent: a.handler == b.handler
 
@@ -207,6 +221,7 @@ template kindOfType*(T: typedesc): PropKind =
   elif T is string: pkString
   elif T is seq[string]: pkStrings
   elif T is Image: pkImage
+  elif T is seq[Image]: pkImages
   elif T is enum: pkEnum
   elif T is set: pkSet
   elif T is SomeInteger: pkInt
@@ -227,6 +242,7 @@ proc toPV*[T](x: T): PropValue =
   elif T is string: pvString(x)
   elif T is seq[string]: pvStrings(x)
   elif T is Image: PropValue(kind: pkImage, image: x)
+  elif T is seq[Image]: PropValue(kind: pkImages, imgs: x)
   elif T is enum: pvEnum(ord(x))
   elif T is set: pvSet(setToBits(x))
   elif T is SomeInteger: pvInt(int(x))
@@ -262,6 +278,9 @@ proc fromPV*[T](v: PropValue, t: typedesc[T]): T =
   elif T is Image:
     if v.kind != pkImage: raise kindError("an image", v)
     v.image
+  elif T is seq[Image]:
+    if v.kind != pkImages: raise kindError("an image list", v)
+    v.imgs
   elif T is enum:
     if v.kind != pkEnum: raise kindError("an enum value", v)
     if v.i < ord(low(T)) or v.i > ord(high(T)):
@@ -355,6 +374,21 @@ proc propInfo*[C, V](name: string, cat: PropCategory, typeName: string,
 
 proc eventTypeOf*(p: PropInfo): string = p.typeName
 
+proc collectionProp*(name, childClass: string, ops: CollectionOps,
+                     cat = pcData): PropInfo =
+  ## A read-only property standing for the owned items of an object: its value
+  ## is the item count, it is never stored (the items are the object's child
+  ## nodes in a form file) and the inspector offers a "..." button for it.
+  ops.childClass = childClass
+  result = PropInfo(name: name, category: cat, typeName: childClass,
+                    kind: pkCollection, stored: false, coll: ops)
+  result.get = proc(o: Obj): PropValue =
+    PropValue(kind: pkCollection, i: ops.items(o).len)
+  result.set = proc(o: Obj, v: PropValue) =
+    ## the items are changed through `ops`; setting the count it already has is a no-op
+    if v.kind != pkCollection:
+      raise kindError("a collection", v)
+
 # ---------------------------------------------------------------- registry
 
 proc newClassInfo*(name, nimType: string, parent: ClassInfo): ClassInfo =
@@ -378,6 +412,10 @@ proc classByName*(name: string): ClassInfo =
   ## also works); nil when unknown.
   if classTable.hasKey(name): return classTable[name]
   if aliasTable.hasKey(name): return classTable.getOrDefault(aliasTable[name])
+
+proc addCollection*(ci: ClassInfo, name, childClass: string, ops: CollectionOps,
+                    cat = pcData) =
+  ci.addProp collectionProp(name, childClass, ops, cat)
 
 proc allClasses*(): seq[ClassInfo] = classList
 
@@ -540,7 +578,8 @@ proc subProps*(p: PropInfo): seq[PropInfo] =
   ## `"font.size"`, `"margins.left"`, `"anchors.akLeft"` (one bool per element
   ## of a set). Their getters and setters read and write through `p`.
   if p.subs.len > 0 or p.kind in {pkBool, pkInt, pkFloat, pkString, pkEnum, pkColor,
-                                  pkObject, pkImage, pkStrings, pkEvent}:
+                                  pkObject, pkImage, pkImages, pkStrings,
+                                  pkCollection, pkEvent}:
     return p.subs
   if p.kind == pkSet:
     for i, en in p.enumNames: p.subs.add makeBitSub(p, i, en)

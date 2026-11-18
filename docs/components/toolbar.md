@@ -69,4 +69,9 @@ ToolButton:
 * `glyph` is `proc(c: Canvas, r: RectF, color: Color)`: draw a vector icon in the
   given color so it follows the theme.
 
+## At design time
+
+`buttons` opens the collection editor for the `ToolButton`s (kind, caption,
+`imageIndex`, `image`). `images` is a drop-down of the ImageLists of the form.
+
 [Back to the index](../README.md)

@@ -1,0 +1,18 @@
+object Refs: Form
+  object acts: ActionList
+    object doIt: Action
+      caption = 'Do it'
+    end
+  end
+  object pm: PopupMenu
+    object miA: MenuItem
+      caption = 'A'
+      action = doIt
+    end
+  end
+  object btn: Button
+    caption = 'Go'
+    action = doIt
+    popupMenu = pm
+  end
+end

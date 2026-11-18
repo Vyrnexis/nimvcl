@@ -75,4 +75,9 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 * When tabs do not fit, small arrows appear to scroll the strip (at the bottom edge with `tpBottom`).
 * `tabRect(i)` and `tabAt(x, y)` work in client coordinates for both positions.
 
+## At design time
+
+`pages` opens the collection editor: Add creates a `TabSheet` (a child of the
+control, as in a form file), Up/Down reorder the tabs, Delete frees the sheet.
+
 [Back to the index](../README.md)

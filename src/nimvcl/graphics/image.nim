@@ -16,6 +16,7 @@ type
     surface: ptr Surface
     id: uint64
     generation: uint32
+    fSource: string
 
   Image* = ref ImageObj
     ## Pixel image. `width`/`height` are in pixels (not logical units).
@@ -40,15 +41,32 @@ proc wrap(surf: ptr Surface, what: string): Image =
   inc nextImageId
   Image(surface: s, id: nextImageId, generation: 0)
 
+func source*(img: Image): string = img.fSource
+  ## Where the image came from: the path it was loaded with (`loadImage`), or
+  ## the project-relative path a form file stores for it ("" for an image made
+  ## in memory). The form file writer saves this path for `picture` properties.
+
+proc `source=`*(img: Image, v: string) = img.fSource = v
+
 proc loadImage*(path: string): Image =
-  ## Loads PNG, JPEG, BMP, ... through SDL_image. Raises `ImageError`.
-  wrap(sdl3_image.load(path.cstring), "loadImage " & path)
+  ## Loads PNG, JPEG, BMP, ... through SDL_image. Raises `ImageError`. The
+  ## image's `source` is `path`.
+  result = wrap(sdl3_image.load(path.cstring), "loadImage " & path)
+  result.source = path
 
 proc imageFromMemory*(data: openArray[byte]): Image =
   ## Decodes an encoded image held in memory. Raises `ImageError`.
   if data.len == 0: raise newException(ImageError, "imageFromMemory: empty data")
   let io = ioFromConstMem(unsafeAddr data[0], data.len.csize_t)
   wrap(sdl3_image.loadIO(io, true), "imageFromMemory")
+
+proc imageFromMemory*(data: string, source = ""): Image =
+  ## Decodes the bytes of an encoded image file held in a string (what
+  ## `staticRead` returns) and records `source` (see `source`).
+  if data.len == 0: raise newException(ImageError, "imageFromMemory: empty data")
+  let io = ioFromConstMem(unsafeAddr data[0], data.len.csize_t)
+  result = wrap(sdl3_image.loadIO(io, true), "imageFromMemory " & source)
+  result.source = source
 
 proc newImage*(width, height: int, fill = Color()): Image =
   ## Blank image (transparent by default).

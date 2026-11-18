@@ -3,8 +3,10 @@
 ## Importing this module is enough; `nfm.nim` and the object inspector import it.
 ##
 ## Not registered (they have no sensible text form): `DockSite` and its panels
-## (their layout is saved with `saveLayout`), tree and list data (`TreeView`
-## nodes, `ListView` items, grid cells), owner-draw and virtual-mode hooks.
+## (their layout is saved with `saveLayout`), grid cells, owner-draw and
+## virtual-mode hooks. `TreeView.items` (an indented outline) and
+## `ListView.items` (tab-separated cells) are string lists: the item images,
+## check state and expansion are not stored.
 
 import std/strutils
 import ../graphics/[color, font, image, canvas]
@@ -28,6 +30,10 @@ proc getItems(c: ComboBox): seq[string] =
 proc setItems(c: ComboBox, v: seq[string]) = c.items = v
 proc getTabs(c: TabControl): seq[string] = c.tabs
 proc setTabs(c: TabControl, v: seq[string]) = c.tabs = v
+proc getLvItems(c: ListView): seq[string] = c.itemLines
+proc setLvItems(c: ListView, v: seq[string]) = c.itemLines = v
+proc getTvItems(c: TreeView): seq[string] = c.nodeLines
+proc setTvItems(c: TreeView, v: seq[string]) = c.nodeLines = v
 proc getLines(m: Memo): seq[string] = m.text.splitLines
 proc setLines(m: Memo, v: seq[string]) = m.text = v.join("\n")
 
@@ -126,6 +132,8 @@ registerClass(Control, parent = Component, abstract = true):
     tabOrder: int
     tabStop: bool
     tag: int
+    popupMenu: PopupMenu
+    action: Action
   category Events:
     onClick: NotifyEvent
     onDblClick: NotifyEvent
@@ -186,6 +194,7 @@ registerClass(Label, parent = Control):
     wordWrap: bool
     transparent: bool
     muted: bool
+    textColor: Color
   category Behaviour:
     focusControl: Control
 
@@ -224,6 +233,7 @@ registerClass(Panel, parent = Container):
     caption: string
     borderStyle: PanelBorder
     alignment: HAlign
+    textColor: Color
 
 registerClass(GroupBox, parent = Container):
   category Appearance:
@@ -456,6 +466,7 @@ registerClass(TreeView, parent = ScrollingControl, kids = noKids()):
     extendedSelect: bool
     propagateChecks: bool
   category Data:
+    prop items, seq[string], getTvItems, setTvItems
     images: ImageList
   category Events:
     onChange: TreeNodeEvent
@@ -485,6 +496,7 @@ registerClass(ListView, parent = ScrollingControl,
     sortColumn: int
     sortOrder: SortOrder
   category Data:
+    prop items, seq[string], getLvItems, setLvItems
     smallImages: ImageList
     largeImages: ImageList
   category Events:
@@ -574,6 +586,8 @@ registerClass(ImageList, parent = Component,
   category Appearance:
     width: float32
     height: float32
+  category Data:
+    images: seq[Image]
 
 registerClass(MainMenu, parent = Control, kids = menuKids(self.items)):
   category Data:
@@ -593,6 +607,7 @@ registerClass(MenuItem, parent = Component,
     caption: string
     imageIndex: int
     prop shortcut, string, getShortcut, setShortcut
+    action: Action
   category Behaviour:
     enabled: bool
     visible: bool
@@ -626,3 +641,82 @@ registerClass(Action, parent = Component, create = newActionOf(owner, parent)):
   category Events:
     onExecute: ActionEvent
     onUpdate: ActionEvent
+
+# ------------------------------------------------------------- collections
+# The owned items a designer edits in a collection editor (Delphi's `Columns`,
+# `Panels`, `Items`, pages, tool buttons). They are written to a form file as
+# child objects; the `pkCollection` property only gives the inspector a "..."
+# button and the editor the operations.
+
+proc controlItems[T: Control](o: Obj): seq[Obj] =
+  for c in Container(o).children:
+    if c of T: result.add Obj(c)
+
+proc controlOps[T: Control](cls: string): CollectionOps =
+  CollectionOps(
+    items: proc(o: Obj): seq[Obj] = controlItems[T](o),
+    add: proc(o: Obj): Obj = classByName(cls).createObject(Component(o), o),
+    remove: proc(o, child: Obj) = Control(child).free(),
+    move: proc(o, child: Obj, newIndex: int) =
+      let c = Container(o)
+      let kids = controlItems[T](o)
+      let old = kids.find(child)
+      if old < 0 or newIndex notin 0 ..< kids.len or old == newIndex: return
+      let target = Control(kids[newIndex])
+      c.removeControl(Control(child))
+      c.insertControl(Control(child), c.children.find(target) + (if newIndex > old: 1 else: 0)))
+
+proc menuRootOf(o: Obj): MenuItem =
+  if o of MenuItem: MenuItem(o)
+  elif o of MainMenu: MainMenu(o).items
+  else: PopupMenu(o).items
+
+proc menuOps(): CollectionOps =
+  CollectionOps(
+    items: proc(o: Obj): seq[Obj] = menuKids(menuRootOf(o)),
+    add: proc(o: Obj): Obj = classByName("MenuItem").createObject(Component(o), o),
+    remove: proc(o, child: Obj) =
+      let it = MenuItem(child)
+      let par = it.parent
+      if par != nil: par.delete(par.indexOf(it))
+      if it.owner != nil: it.owner.removeComponent(it),
+    move: proc(o, child: Obj, newIndex: int) =
+      let par = MenuItem(child).parent
+      if par != nil and newIndex in 0 ..< par.count: par.insert(MenuItem(child), newIndex))
+
+proc panelOps(): CollectionOps =
+  CollectionOps(
+    items: proc(o: Obj): seq[Obj] = toObjs(StatusBar(o).panels),
+    add: proc(o: Obj): Obj = classByName("StatusPanel").createObject(Component(o), o),
+    remove: proc(o, child: Obj) =
+      let b = StatusBar(o)
+      b.deletePanel(b.panels.find(StatusPanel(child))),
+    move: proc(o, child: Obj, newIndex: int) =
+      let b = StatusBar(o)
+      b.movePanel(b.panels.find(StatusPanel(child)), newIndex))
+
+proc columnOps(): CollectionOps =
+  CollectionOps(
+    items: proc(o: Obj): seq[Obj] = columnKids(ListView(o)),
+    add: proc(o: Obj): Obj = classByName("ListColumn").createObject(Component(o), o),
+    remove: proc(o, child: Obj) = ListView(o).columns.delete(ListColumn(child).index),
+    move: proc(o, child: Obj, newIndex: int) =
+      ListView(o).columns.move(ListColumn(child).index, newIndex))
+
+proc actionOps(): CollectionOps =
+  CollectionOps(
+    items: proc(o: Obj): seq[Obj] = actionKids(ActionList(o)),
+    add: proc(o: Obj): Obj = classByName("Action").createObject(Component(o), o),
+    remove: proc(o, child: Obj) = Action(child).free())
+
+proc addColl(cls, name, childClass: string, ops: CollectionOps) =
+  classByName(cls).addCollection(name, childClass, ops)
+
+addColl "ListView", "columns", "ListColumn", columnOps()
+addColl "StatusBar", "panels", "StatusPanel", panelOps()
+addColl "MainMenu", "items", "MenuItem", menuOps()
+addColl "PopupMenu", "items", "MenuItem", menuOps()
+addColl "MenuItem", "items", "MenuItem", menuOps()
+addColl "PageControl", "pages", "TabSheet", controlOps[TabSheet]("TabSheet")
+addColl "ActionList", "actions", "Action", actionOps()
+addColl "ToolBar", "buttons", "ToolButton", controlOps[ToolButton]("ToolButton")

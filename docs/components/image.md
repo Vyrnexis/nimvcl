@@ -34,12 +34,38 @@ pic.picture = gradient
 | Function | Description |
 |---|---|
 | `loadImage(path)` | Load PNG, JPG and others via SDL3_image; raises `ImageError` |
-| `imageFromMemory(bytes)` | Decode from memory |
+| `imageFromMemory(bytes)` | Decode from memory (`bytes` can also be a string, as `staticRead` returns, with the `source` to record) |
+| `img.source` | The file path the image came from (what a form file stores) |
 | `newImage(width, height, fill)` | Blank image |
 | `imageFromRgba(w, h, pixels)` | From raw RGBA bytes |
 | `img.setPixel(x, y, color)`, `getPixel(x, y)` | Edit pixels |
 | `img.touch()` | Tell the renderer the pixels changed |
 | `img.width`, `img.height` | Size in pixels |
+
+## In a form file
+
+`picture` is stored as the path of the image file, relative to the folder of
+the `.nfm`:
+
+```
+object logo: ImageControl
+  stretch = true
+  picture = 'images/logo.png'
+end
+```
+
+* `loadNfm` / `loadNfmFile` read the file from disk (relative to the `.nfm`, or
+  to `NfmOptions.baseDir`). A file that is missing does not stop loading: a
+  blank 1x1 image that keeps the path stands in, and a line is added to
+  `NfmOptions.warnings`, so saving the form again does not lose the path.
+* `loadForm` **embeds** the file bytes in the program at compile time
+  (`staticRead`) and decodes them from memory, so a shipped binary needs no
+  image files. The file must exist when the program is compiled.
+* `formToNfm` writes `picture` from `img.source`. `loadImage(path)` sets it
+  to `path`; an image made in memory has no source and is not written.
+* In the Object Inspector the `picture` row has a "..." button
+  ([property editors](inspector.md#property-editor-dialogs)): a picture dialog
+  with the preview, Load..., Clear, OK and Cancel; Delete on the row clears it.
 
 ## Events
 

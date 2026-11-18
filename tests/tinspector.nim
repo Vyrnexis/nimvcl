@@ -91,7 +91,7 @@ suite "ObjectInspector":
     let r = rig()
     r.ins.inspect(r.mkButton())
     r.ins.sortedFlat = true
-    check r.ins.rowName(0) == "align"
+    check r.ins.rowName(0) == "action"
     var prev = ""
     for i in 0 ..< r.ins.rowCount:
       let n = r.ins.rowName(i)

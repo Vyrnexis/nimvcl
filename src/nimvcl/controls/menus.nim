@@ -676,39 +676,15 @@ proc resolveMenu(m: PopupMenu, c: Control) =
 
 proc attachPopupMenu*(c: Control, m: PopupMenu) =
   ## Makes `m` the context menu of `c`: right click (on release, after the
-  ## control's own `onMouseUp`), Shift+F10 and the Menu key while `c` or a
+  ## control's own `onMouseUp`, which is left untouched), Shift+F10 and the Menu key while `c` or a
   ## control inside it has the focus. Also registers the menu's shortcuts in
   ## the form. A control can have several menus; the last attached wins.
   ## `c` need not be in a form yet: the menu registers itself with the form the
   ## first time `c` is entered, clicked or gets a key (and right away when `c`
   ## is already in a form).
   m.fTargets.add c
+  c.popupMenuRef = m
   m.resolveMenu c
-  let mm = m
-  let oldEnter = c.onEnter
-  c.onEnter = proc(sender: Control) =
-    mm.resolveMenu sender
-    if oldEnter != nil: oldEnter(sender)
-  let oldDown = c.onMouseDown
-  c.onMouseDown = proc(sender: Control, button: MouseButton, shift: ShiftState,
-                       x, y: float32) =
-    mm.resolveMenu sender
-    if oldDown != nil: oldDown(sender, button, shift, x, y)
-  let oldKey = c.onKeyDown
-  c.onKeyDown = proc(sender: Control, key: var Key, shift: ShiftState) =
-    mm.resolveMenu sender
-    if oldKey != nil: oldKey(sender, key, shift)
-  let old = c.onMouseUp
-  c.onMouseUp = proc(sender: Control, button: MouseButton, shift: ShiftState,
-                     x, y: float32) =
-    if old != nil: old(sender, button, shift, x, y)
-    if button == mbRight and mm.fTargets.find(sender) >= 0:
-      mm.resolveMenu sender
-      if mm == popupMenuOfControl(sender.menuForm, sender):
-        let fm = sender.menuForm
-        if fm != nil:
-          let p = sender.clientToForm(pointF(x, y))
-          mm.popup(fm, p.x, p.y)
 
 proc popupMenuOfControl(f: Form, c: Control): PopupMenu =
   ## The (last attached) popup menu of `c` or its nearest ancestor with one.
@@ -721,6 +697,40 @@ proc popupMenuOfControl(f: Form, c: Control): PopupMenu =
     x = Control(x.parent)
 
 proc popupMenuOf*(c: Control): PopupMenu = popupMenuOfControl(c.menuForm, c)
+
+proc serveContextMenus(c: Control, kind: PopupHookKind, button: MouseButton,
+                       p: PointF) {.nimcall.} =
+  ## The library's own path for context menus (see `input.popupHook`): the
+  ## nearest control up the parent chain with a menu registers it with the
+  ## form (so its shortcuts and Shift+F10 / Menu key work), and a right-button
+  ## release shows it. The control's event fields are not involved.
+  var x = c
+  while x != nil and x.popupMenuRef == nil: x = Control(x.parent)
+  if x == nil: return
+  let f = c.menuForm
+  if f == nil: return
+  PopupMenu(x.popupMenuRef).resolveMenu x
+  if kind == phMouseUp and button == mbRight:
+    let pm = popupMenuOfControl(f, c)
+    if pm != nil: pm.popup(f, p.x, p.y)
+
+popupHook = serveContextMenus
+
+proc popupMenu*(c: Control): PopupMenu =
+  ## The menu attached to `c` itself (`popupMenu = m`, `attachPopupMenu`); nil
+  ## when none. (`popupMenuOf` also looks at the ancestors, in a form.)
+  if c.popupMenuRef == nil: nil else: PopupMenu(c.popupMenuRef)
+
+proc `popupMenu=`*(c: Control, m: PopupMenu) =
+  ## Designer property: the context menu of `c` (nil removes it). Equivalent
+  ## to `attachPopupMenu` (the old menu stops serving `c`).
+  let old = c.popupMenu
+  if old == m: return
+  if old != nil:
+    let i = old.fTargets.find(c)
+    if i >= 0: old.fTargets.delete(i)
+    c.popupMenuRef = nil
+  if m != nil: c.attachPopupMenu(m)
 
 # --------------------------------------------------------------- MainMenu
 

@@ -25,7 +25,7 @@
 ## * the `loadForm` macro.
 
 import std/[strutils, tables, macros, os, sets, hashes]
-import ../graphics/color
+import ../graphics/[color, image]
 import ../core/[component, control, form]
 import ../controls/[menus, statusbar, listview, actions]
 import ./props_std
@@ -479,6 +479,12 @@ proc nimExpr(cls, prop: string, v: NfmValue,
     if cls == "Memo" and prop == "lines":
       result.prop = "text"
       result.expr = nimStr(v.items.join("\n"))
+    elif (cls == "ListView" or cls == "TreeView") and prop == "items":
+      # not the Nim `items` (an object): the outline/row text accessors
+      result.prop = if cls == "ListView": "itemLines" else: "nodeLines"
+      var parts: seq[string]
+      for s in v.items: parts.add nimStr(s)
+      result.expr = "@[" & parts.join(", ") & "]"
     else:
       var parts: seq[string]
       for s in v.items: parts.add nimStr(s)
@@ -515,15 +521,26 @@ proc toNfmValue*(info: PropInfo, v: PropValue): NfmValue =
     else: nfmIdent(objectName(v.obj))
   of pkStrings: NfmValue(kind: nvList, items: v.strs)
   of pkEvent: nfmIdent(v.handler)
-  of pkImage, pkFont, pkSpacing, pkConstraints:
+  of pkImage:
+    if v.image == nil or v.image.source.len == 0:
+      raise newException(PropError, "property `" & info.name &
+                         "` has an image without a file path (nothing to save)")
+    nfmString(v.image.source)
+  of pkImages:
+    var r = NfmValue(kind: nvList)
+    for img in v.imgs:
+      if img != nil and img.source.len > 0: r.items.add img.source
+    r
+  of pkFont, pkSpacing, pkConstraints, pkCollection:
     raise newException(PropError, "property `" & info.name & "` has no text form")
 
 type
   NfmOptions* = ref object
     ## How `loadNfm` treats problems and handlers.
     strict*: bool                 ## true: unknown classes/properties/handlers raise `NfmError`; false: they are skipped and listed in `warnings`
+    baseDir*: string              ## image paths of the file (`picture = 'images/a.png'`) are relative to this folder; "" = the folder of the form file (or the current one)
     handlers*: HandlerResolver    ## binds `onXxx = name` to code; nil: names are only recorded
-    warnings*: seq[string]        ## problems found while `strict` is false
+    warnings*: seq[string]        ## problems found while `strict` is false; also images that could not be loaded (a missing image never raises: a blank 1x1 image that keeps the path stands in, so saving the form does not lose it)
 
 proc newNfmOptions*(strict = true, handlers: HandlerResolver = nil): NfmOptions =
   NfmOptions(strict: strict, handlers: handlers)
@@ -544,8 +561,22 @@ proc enumList(info: PropInfo): string =
   for n in info.enumNames: parts.add n
   parts.join(", ")
 
+proc loadPicture(opt: NfmOptions, baseDir, file: string, v: NfmValue,
+                 path: string): Image =
+  ## The image of a form file path; a blank stand-in (with the path) and a
+  ## warning when the file cannot be read.
+  let full = if path.isAbsolute: path else: baseDir / path
+  try:
+    result = loadImage(full)
+  except CatchableError as e:
+    result = newImage(1, 1)
+    opt.warnings.add (if file.len > 0: file & ":" else: "") & $v.line & ":" & $v.col &
+                     ": cannot load image `" & path & "`: " & e.msg
+  result.source = path
+
 proc convertValue(info: PropInfo, v: NfmValue, file: string,
-                  byName: Table[string, Obj]): PropValue =
+                  byName: Table[string, Obj], opt: NfmOptions,
+                  baseDir: string): PropValue =
   ## Raises `NfmError` (at the value's position) when `v` does not fit `info`.
   template bad(msg: string) = raise nfmError(file, v.line, v.col, msg)
   case info.kind
@@ -594,7 +625,17 @@ proc convertValue(info: PropInfo, v: NfmValue, file: string,
   of pkEvent:
     if v.kind != nvIdent: bad("`" & info.name & "` expects a handler name")
     pvEvent(v.text)
-  of pkImage: bad("`" & info.name & "` cannot be set from a form file")
+  of pkImage:
+    if v.kind != nvString: bad("`" & info.name & "` expects the path of an image file, like 'images/logo.png'")
+    if v.text.len == 0: PropValue(kind: pkImage, image: nil)
+    else: PropValue(kind: pkImage, image: loadPicture(opt, baseDir, file, v, v.text))
+  of pkImages:
+    if v.kind != nvList: bad("`" & info.name & "` expects a list of image paths like ( 'a.png' 'b.png' )")
+    var imgs: seq[Image]
+    for p in v.items: imgs.add loadPicture(opt, baseDir, file, v, p)
+    PropValue(kind: pkImages, imgs: imgs)
+  of pkCollection:
+    bad("`" & info.name & "` is made of child objects (`object name: Class ... end`)")
   of pkFont, pkSpacing, pkConstraints:
     bad("`" & info.name & "` is set through its parts, e.g. `" & info.name & "." &
         subNames(info.kind)[0] & " = ...`")
@@ -630,7 +671,7 @@ proc buildTree(node: NfmNode, parent, rootOwner: Obj, file: string, opt: NfmOpti
     buildTree(c, obj, rootOwner, file, opt, byName, built)
 
 proc applyProps(b: Built, file: string, opt: NfmOptions,
-                byName: Table[string, Obj]) =
+                byName: Table[string, Obj], baseDir: string) =
   for p in b.node.props:
     if p.name == "designLeft" or p.name == "designTop":
       # the design position of a non-visual component (Component.designLeft/Top)
@@ -663,7 +704,7 @@ proc applyProps(b: Built, file: string, opt: NfmOptions,
                         "no handler `" & p.value.text & "` for the event `" & p.name &
                         "` (" & info.typeName & ")")
       else:
-        info.set(b.obj, convertValue(info, p.value, file, byName))
+        info.set(b.obj, convertValue(info, p.value, file, byName, opt, baseDir))
     except PropError as e:
       raise nfmError(file, p.line, p.col, "property `" & p.name & "`: " & e.msg)
 
@@ -678,7 +719,10 @@ proc buildNfm*(root: NfmNode, owner: Component = nil, options: NfmOptions = nil,
   var built: seq[Built]
   buildTree(root, nil, Obj(owner), fileName, opt, byName, built)
   if built.len == 0: return nil
-  for b in built: applyProps(b, fileName, opt, byName)
+  let baseDir = if opt.baseDir.len > 0: opt.baseDir
+                elif fileName.len > 0: fileName.parentDir
+                else: ""
+  for b in built: applyProps(b, fileName, opt, byName, baseDir)
   built[0].obj
 
 proc loadNfm*(text: string, owner: Component = nil, options: NfmOptions = nil,
@@ -758,7 +802,15 @@ proc nodeOf(o: Obj, ctx: SaveCtx, nameOverride = ""): NfmNode =
   for p in ordered:
     if p.name == "name" or not p.stored: continue
     case p.kind
-    of pkImage: continue
+    of pkCollection: continue
+    of pkImage:
+      let v = p.get(o)
+      if v.image != nil and v.image.source.len > 0:
+        result.props.add NfmProp(name: p.name, value: toNfmValue(p, v))
+    of pkImages:
+      let v = p.get(o)
+      if v.imgs.len > 0:
+        result.props.add NfmProp(name: p.name, value: toNfmValue(p, v))
     of pkFont, pkSpacing, pkConstraints:
       for s in subProps(p):
         if not isDefault(o, s):
@@ -841,7 +893,15 @@ proc nfmToFormMacro*(text: string, fileName = ""): string =
         let (_, e) = nimExpr(n.className, p.name[dot + 1 .. ^1], p.value, names)
         o.add ind & p.name & " = " & e & "\n"
       else:
-        let (pn, e) = nimExpr(n.className, p.name, p.value, names)
+        var (pn, e) = nimExpr(n.className, p.name, p.value, names)
+        let ci = classByName(n.className)
+        let info = if ci != nil: ci.findProp(p.name) else: nil
+        if info != nil and info.kind == pkImage and p.value.kind == nvString:
+          e = "loadImage(" & nimStr(p.value.text) & ")"   # read from disk at run time
+        elif info != nil and info.kind == pkImages and p.value.kind == nvList:
+          var parts: seq[string]
+          for it in p.value.items: parts.add "loadImage(" & nimStr(it) & ")"
+          e = "@[" & parts.join(", ") & "]"
         o.add ind & pn & " = " & e & "\n"
     for c in n.children:
       if c.name.len > 0: o.add ind & c.className & " " & c.name & ":\n"
@@ -937,6 +997,20 @@ proc setLineInfoRec(n, src: NimNode) =
 proc nfmPos(file: string, line, col: int): string =
   file & ":" & $line & ":" & $col
 
+template nfmIsImage*(T: typedesc): bool = T is Image
+  ## `loadForm` uses these to tell an image property from a string one.
+template nfmIsImages*(T: typedesc): bool = T is seq[Image]
+
+template nfmEmbed*(path: static[string]): string =
+  ## The bytes of a file, read at compile time (`loadForm` embeds pictures).
+  const data = staticRead(path)
+  data
+
+proc nfmImage*(data, source: string): Image =
+  ## An image decoded from the bytes `loadForm` embedded at compile time
+  ## (`staticRead` of the file) with the path the form file named.
+  imageFromMemory(data, source)
+
 macro loadForm*(name: untyped, path: static[string]): untyped =
   ## Reads the form file `path` (relative to the calling module) at compile time
   ## and declares the typed form `name`, like the `form` macro would for the
@@ -960,6 +1034,7 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
   let formName = name.strVal
   let srcFile = site.lineInfoObj.filename
   let nfmPath = if path.isAbsolute: path else: srcFile.parentDir / path
+  let nfmDir = nfmPath.parentDir
   if not fileExists(nfmPath):
     error("loadForm: cannot read `" & nfmPath & "` (the path is relative to the calling module)", site)
   let text = readFile(nfmPath)
@@ -1012,7 +1087,21 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
       else:
         let (pn, e) = nimExpr(n.className, p.name, p.value, names)
         let access = target & "." & pn
-        assigns.add "when compiles(" & access & "):\n  when compiles((" & access & " = " & e &
+        # image properties: the file bytes are embedded in the program
+        var imgBranch = ""
+        proc embed(rel: string): string =
+          "nfmImage(nfmEmbed(" & nimStr(nfmDir / rel) & "), " & nimStr(rel) & ")"
+        if p.value.kind == nvString and p.value.text.len > 0:
+          imgBranch = "  when nfmIsImage(typeof(" & access & ")):\n    " & access & " = " &
+                      embed(p.value.text) & "\n  el"
+        elif p.value.kind == nvList and p.value.items.len > 0:
+          var parts: seq[string]
+          for it in p.value.items: parts.add embed(it)
+          imgBranch = "  when nfmIsImages(typeof(" & access & ")):\n    " & access &
+                      " = @[" & parts.join(", ") & "]\n  el"
+        assigns.add "when compiles(" & access & "):\n" &
+          (if imgBranch.len > 0: imgBranch & "if" else: "  when") &
+          " compiles((" & access & " = " & e &
           ")):\n    " & access & " = " & e & "\n  else:\n    " &
           errStmt(pos & ": the value of `" & p.name & "` does not fit its type in `" &
                   n.className & "`") & "\nelse:\n  " &

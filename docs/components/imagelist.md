@@ -26,6 +26,37 @@ root.addChild("main.nim").imageIndex = file
 | `version` | int | Goes up with every change (a cheap "did it change?" check) |
 | `listenerCount` | int | How many change listeners are subscribed |
 
+## In a form file and in the designer
+
+The `images` property of the list holds the image files, stored as paths
+relative to the `.nfm` (like `ImageControl.picture`):
+
+```
+object icons: ImageList
+  width = 24
+  height = 24
+  images = (
+    'images/open.png'
+    'images/save.png'
+  )
+end
+object bar: ToolBar
+  images = icons
+end
+```
+
+`loadNfm` reads the files, `loadForm` embeds them. `il.images` / `il.images = v`
+read and replace all images at once, `il.move(from, to)` reorders. Every image
+is drawn stretched into `width` x `height`.
+
+The Object Inspector's "..." button on `images` opens the image list dialog
+(`ImageListDlgForm`, see [property editors](inspector.md#property-editor-dialogs)):
+a list with thumbnails and Add (several files at once), Delete, Up and Down.
+The controls that take a list (`ToolBar.images`, `TreeView.images`,
+`ListView.smallImages` / `largeImages`, `MainMenu.images`, `PopupMenu.images`,
+`ActionList.images`) have a drop-down of the ImageLists of the form; the link is
+saved as the list's name. `imageIndex` is a plain number property.
+
 ## Events
 
 An ImageList has no event fields. Instead it tells anyone who is interested

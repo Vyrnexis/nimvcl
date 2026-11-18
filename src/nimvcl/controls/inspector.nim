@@ -17,8 +17,10 @@
 ## * colours: an editable combo with a colour palette (hex text works too);
 ## * references to other objects (`focusControl`, `images`): a combo of the
 ##   objects of the same form;
-## * string lists and images: a "..." button calls `onEditExtra` (the
-##   application opens its own dialog);
+## * string lists, images, image lists and collections (columns, panels, menu
+##   items...): a "..." button calls `onEditExtra` (the application opens its
+##   own dialog; `controls/propeditors.nim` has ready-made ones). Delete on an
+##   image row clears it;
 ## * events: an editable combo of the existing handler names; double click
 ##   calls `onCreateHandler(target, event)` for a new handler name.
 ##
@@ -42,6 +44,7 @@
 import std/[strutils, algorithm, sets]
 import ./common, ./scrolling, ./edit, ./combobox, ./listbox, ./viewsupport
 import ../core/form
+import ../graphics/image
 import ../dsl/props_std
 export props_std
 
@@ -68,6 +71,7 @@ type
   CreateHandlerEvent* = proc(sender: Control, target: Obj, event: string): string
   ExtraEditorEvent* = proc(sender: Control, target: Obj, prop: string)
   HandlerListEvent* = proc(sender: Control, target: Obj, event: string): seq[string]
+  ChoicesEvent* = proc(sender: Control, target: Obj, prop: string): seq[Obj]
 
   ObjectInspector* = ref object of ScrollingControl
     fTargets: seq[Obj]
@@ -100,13 +104,22 @@ type
       ## Double click on an event row without a handler: returns the name of a
       ## new handler (""): nothing happens. When nil, `<Name><Event>` is used.
     onEditExtra*: ExtraEditorEvent
-      ## The "..." button of a string list or image property was pressed.
+      ## The "..." button of a string list, image, image list or collection
+      ## property was pressed (`setValue` applies the result).
     onGetHandlers*: HandlerListEvent
       ## Handler names offered for an event (besides `knownHandlers`).
     onSelectionChanged*: NotifyEvent
       ## The selected row changed.
+    onGetChoices*: ChoicesEvent
+      ## The objects offered by an object reference property (`images`,
+      ## `popupMenu`, `focusControl`...); only those of the property's class are
+      ## shown. When nil the named objects of the target's form are offered
+      ## (found by walking up from the target), which is wrong for a target
+      ## shown inside a design surface: a designer supplies its form's objects.
 
 const
+  ExtraKinds = {pkStrings, pkImage, pkImages, pkCollection}
+    ## values edited in a dialog the application opens (`onEditExtra`)
   TitleH = 24'f32
   TabsH = 28'f32
   TopH = TitleH + TabsH
@@ -220,7 +233,18 @@ proc valueText(info: PropInfo, v: PropValue): string =
     "(" & fmtNum(float(v.cons.minWidth)) & ", " & fmtNum(float(v.cons.minHeight)) & ", " &
       fmtNum(float(v.cons.maxWidth)) & ", " & fmtNum(float(v.cons.maxHeight)) & ")"
   of pkObject: objName(v.obj)
-  of pkImage: (if v.image == nil: "(none)" else: "(image)")
+  of pkImage:
+    if v.image == nil: "(none)"
+    elif v.image.source.len > 0: v.image.source
+    else: "(image)"
+  of pkImages:
+    if v.imgs.len == 0: "(none)"
+    elif v.imgs.len == 1: "(1 image)"
+    else: "(" & $v.imgs.len & " images)"
+  of pkCollection:
+    if v.i == 0: "(empty)"
+    elif v.i == 1: "(1 item)"
+    else: "(" & $v.i & " items)"
   of pkStrings:
     if v.strs.len == 0: "(empty)"
     elif v.strs.len == 1: "(1 line)"
@@ -566,6 +590,14 @@ proc visitObjects(o: Obj, want: ClassInfo, seen, found: var seq[Obj]) =
 proc choicesFor(ins: ObjectInspector, info: PropInfo): seq[Obj] =
   ## Named objects of the form of the first target that can be assigned to `info`.
   if ins.fTargets.len == 0: return
+  if ins.onGetChoices != nil:
+    let want = classByName(info.typeName)
+    for o in ins.onGetChoices(ins, ins.fTargets[0], info.name):
+      let ci = classOf(o)
+      if o != nil and ci != nil and objectName(o).len > 0 and (want == nil or ci.isA(want)) and
+         o notin result:
+        result.add o
+    return
   var top: Obj = ins.fTargets[0]
   while top != nil and top of Control and Control(top).parent != nil:
     top = Control(top).parent
@@ -595,7 +627,7 @@ proc beginEdit*(ins: ObjectInspector, row: int, openList = true): bool {.discard
     return false
   if isSetElement(r.info):
     return ins.applyValue(r, pvBool(not (v.kind == pkBool and v.b)))
-  if r.info.kind in {pkStrings, pkImage}:
+  if r.info.kind in ExtraKinds:
     if ins.onEditExtra != nil: ins.onEditExtra(ins, ins.fTargets[0], r.info.name)
     return false
   ins.fEditRow = row
@@ -670,7 +702,7 @@ proc nextEditable(ins: ObjectInspector, from0, step: int): int =
   while i in 0 ..< ins.fRows.len:
     let r = ins.fRows[i]
     if r.kind == rkProp and not r.expandable and
-       r.info.kind notin {pkStrings, pkImage} and not isSetElement(r.info):
+       r.info.kind notin ExtraKinds and not isSetElement(r.info):
       return i
     i += step
   -1
@@ -789,13 +821,13 @@ method paint*(ins: ObjectInspector, c: Canvas) =
             drawCheckGlyph(c, rectF(tx, vr.y + (vr.h - CheckSize) / 2, CheckSize, CheckSize),
                            if v.b: cbChecked else: cbUnchecked, t, enabled)
             tx += CheckSize + 6
-          let extra = row.info.kind in {pkStrings, pkImage}
+          let extra = row.info.kind in ExtraKinds
           let txt = if isSetElement(row.info): (if v.b: "true" else: "false")
                     else: valueText(row.info, v)
           c.textRect(txt, vf, rectF(tx, vr.y, max(vr.right - tx - (if extra: 28 else: 4), 0), vr.h),
-                     if row.info.kind in {pkStrings, pkImage} and txt.startsWith("("): t.textMuted
+                     if row.info.kind in ExtraKinds and txt.startsWith("("): t.textMuted
                      else: t.text, taLeft, vaCenter)
-        if row.info.kind in {pkStrings, pkImage}:
+        if row.info.kind in ExtraKinds:
           let br = rectF(vr.right - 24, vr.y + 3, 20, vr.h - 6)
           c.fillRoundRect(br, 3, t.hover)
           c.textRect("...", fnt, br, t.text, taCenter, vaCenter)
@@ -864,7 +896,7 @@ method doMouseDown*(ins: ObjectInspector, button: MouseButton, shift: ShiftState
           ins.setExpanded(r.key, not r.expanded)
         elif x >= ins.fSplit:
           let vr = ins.valueRect(i)
-          if r.info.kind in {pkStrings, pkImage}:
+          if r.info.kind in ExtraKinds:
             if x >= vr.right - 28: ins.beginEdit(i)
           elif ssDouble in shift and r.info.kind in {pkBool, pkEnum, pkEvent}:
             ins.handleDouble(i)
@@ -943,6 +975,13 @@ method doKeyDown*(ins: ObjectInspector, key: var Key, shift: ShiftState) =
     ins.selectRow min(ins.fSel + max(int(ins.viewport.h / RowH) - 1, 1), n - 1)
   elif key == keyPageUp:
     ins.selectRow max(ins.fSel - max(int(ins.viewport.h / RowH) - 1, 1), 0)
+  elif key == keyDelete and ins.fSel in 0 ..< n and
+       ins.fRows[ins.fSel].kind == rkProp and
+       ins.fRows[ins.fSel].info.kind in {pkImage, pkImages}:
+    # Delete clears a picture / an image list
+    let r = ins.fRows[ins.fSel]
+    discard ins.applyValue(r, if r.info.kind == pkImage: PropValue(kind: pkImage, image: nil)
+                              else: PropValue(kind: pkImages, imgs: @[]))
   elif key == keyEnter or key == keySpace:
     if ins.fSel in 0 ..< n:
       let r = ins.fRows[ins.fSel]

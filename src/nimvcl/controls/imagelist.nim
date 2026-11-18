@@ -97,6 +97,24 @@ proc clear*(l: ImageList) =
   l.fImages.setLen(0)
   l.changed()
 
+func images*(l: ImageList): seq[Image] = l.fImages
+  ## A copy of the image sequence (the `Image` objects are shared).
+
+proc `images=`*(l: ImageList, v: seq[Image]) =
+  ## Replaces all images at once (one change notification).
+  if v == l.fImages: return
+  l.fImages = v
+  l.changed()
+
+proc move*(l: ImageList, from0, to0: int) =
+  ## Moves image `from0` to index `to0`.
+  if from0 notin 0 ..< l.fImages.len or to0 notin 0 ..< l.fImages.len or from0 == to0:
+    return
+  let img = l.fImages[from0]
+  l.fImages.delete(from0)
+  l.fImages.insert(img, to0)
+  l.changed()
+
 proc image*(l: ImageList, index: int): Image =
   ## The image at `index`; nil when out of range.
   if index in 0 ..< l.fImages.len: l.fImages[index] else: nil

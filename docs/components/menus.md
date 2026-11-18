@@ -65,4 +65,15 @@ attachPopupMenu(area, ctx)                    # right click, Shift+F10, Menu key
 
 More details: [Popups and menus](../popups-menus.md).
 
+## At design time
+
+The Object Inspector's `items` property of a `MainMenu`, a `PopupMenu` or a
+`MenuItem` opens the collection editor (Add, Delete, Up, Down and an inspector
+for the selected item; sub-items open another editor). `Control.popupMenu` (`c.popupMenu = pm`, nil
+removes it) is the property form of `attachPopupMenu` and is saved in the form
+file as `popupMenu = pm`. Context menus are handled by the library itself (the
+nearest control up the parent chain with a menu serves the right click, Shift+F10 and
+the Menu key), so the control's own `onMouseUp`, `onKeyDown`... stay yours. `MenuItem.action`
+and `Control.action` link an `Action` by name.
+
 [Back to the index](../README.md)

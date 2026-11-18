@@ -77,13 +77,16 @@ end
 | set | brackets, comma separated | `anchors = [akLeft, akTop]`, `anchors = []` |
 | colour | `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa` | `color = #336699` |
 | string list | parentheses, one string per entry | see below |
-| object reference | the other object's name, or `nil` | `focusControl = user` |
+| object reference | the other object's name, or `nil` | `focusControl = user`, `images = icons`, `popupMenu = menu1`, `action = saveAct` |
+| image | the file path as a string, relative to the `.nfm` | `picture = 'images/logo.png'` |
+| image list | parentheses, one path per entry | `images = ( 'a.png' 'b.png' )` |
 | event | the handler's name | `onClick = okClick` |
 
 String escapes: `\\` `\'` `\n` `\r` `\t` `\0` and `\xHH`. A string ends on its
 line, so write `\n` for a line break; non-ASCII text stays as it is (UTF-8).
 
-String lists (`ComboBox.items`, `ListBox.items`, `Memo.lines`, `TabControl.tabs`):
+String lists (`ComboBox.items`, `ListBox.items`, `Memo.lines`, `TabControl.tabs`,
+and the rows of `ListView.items` / the outline of `TreeView.items`, see below):
 
 ```
 items = (
@@ -91,6 +94,21 @@ items = (
   'Editor'
 )
 ```
+
+### Pictures
+
+`ImageControl.picture`, `ToolButton.image` and `ImageList.images` are written
+as paths relative to the folder of the `.nfm` (forward slashes). `loadNfm` reads
+them from disk (relative to the `.nfm`, or to `NfmOptions.baseDir`); `loadForm`
+embeds the file bytes in the program (`staticRead`) so a shipped binary needs no
+image files, and fails to compile when a file is missing. A file that is missing
+at run time gives a warning in `NfmOptions.warnings` and a blank image that keeps
+the path. An image made in code has no path (`img.source` is ""): it is not
+written. `loadImage(path)` records its path.
+
+`ListView.items` is one string per row, the cells separated by a tab
+character; `TreeView.items` is an outline, one node per entry, indented by two
+spaces per level. Item images, check states and expansion are not stored.
 
 ### Sub-properties
 
@@ -176,9 +194,10 @@ class, in registry order: ancestors' properties first (`left`, `top`, `width`,
 `height`, `align`, ...), then the class's own, and events last. `name` is not a
 property line (it is in the `object` line). Properties that are implied by
 others (`parentFont`, `parentColor`, `CheckBox.checked`) are not written, and a
-`ComboBox.text` is left out while an item is selected. Images, data of a
-`TreeView`, the cells of a grid and the items of a `ListView` have no text form;
-`DockSite` layouts are saved with `saveLayout` instead.
+`ComboBox.text` is left out while an item is selected. The cells of a grid have
+no text form; `DockSite` layouts are saved with `saveLayout` instead. A
+`popupMenu` is an ordinary object reference (`popupMenu = menu1`); context menus
+are served by the library's own event path, so the control's event fields stay free.
 
 ## `loadForm` (compile time)
 
@@ -261,7 +280,8 @@ classes, and the result is the same tree `loadForm` builds.
 |---|---|
 | `strict` | `true` (default): an unknown class, property or handler raises `NfmError` with `file:line:col`. `false`: the item is skipped and a line is added to `warnings` |
 | `handlers` | A `HandlerResolver` that binds `onXxx = name`. `nil`: names are only recorded (a designer's view of the form). With a resolver an unknown name is a problem |
-| `warnings` | Collected problems when not strict |
+| `baseDir` | The folder image paths are relative to (default: the folder of the form file given to `loadNfm`, else the current folder) |
+| `warnings` | Collected problems when not strict; also pictures that could not be loaded (those never raise) |
 
 `notifyHandlers(table)` is a resolver for `NotifyEvent`s. A resolver for other
 event types receives the event's type name and returns a `HandlerBox[T]`:
@@ -412,13 +432,16 @@ instance that measures defaults).
 
 ## Limitations
 
-* The registry covers the stock controls. `DockSite`, tree nodes, list items and
-  grid cells are not registered (they are data, not design).
+* The registry covers the stock controls. `DockSite` and grid cells are not
+  registered (they are data, not design); `TreeView` / `ListView` items are text
+  lists without images.
 * `GridPanel` cell positions of children are not stored (no property for them
-  yet), and a `Control` has no `popupMenu` property: attach menus in code.
+  yet).
 * A handler named in a file is bound at run time only for event types whose
   resolver you provide (`NotifyEvent` through a table).
 * `loadForm` cannot see the registry (it runs in the compiler), so it relies on
   the compiler to resolve classes, properties and enum names; a property of a
   custom class needs a plain Nim setter, or one of the special cases of the
-  macro (`shortcut`, `GridPanel.columns`/`rows`, `Memo.lines`).
+  macro (`shortcut`, `GridPanel.columns`/`rows`, `Memo.lines`,
+  `ListView.items`/`TreeView.items`, and string values for `Image` /
+  `seq[Image]` properties, which are embedded).

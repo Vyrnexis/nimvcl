@@ -98,4 +98,11 @@ ListItem: `caption`, `subItems`, `imageIndex`, `checked`, `selected`, `data`, `t
 * Drag the right edge of a column header to resize it. (Dragging headers to
   reorder columns is not supported; the grids have `goColMoving`.)
 
+## At design time
+
+`columns` opens the collection editor (caption, width, alignment...). `items` is
+a string list: one row per line, the cells separated by a tab character
+(`itemLines` / `itemLines =` in code). Item images and check states are not
+stored in a form file.
+
 [Back to the index](../README.md)

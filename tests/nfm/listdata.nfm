@@ -1,0 +1,15 @@
+object Lists: Form
+  object tv: TreeView
+    items = (
+      'Root'
+      '  Child'
+      'Second'
+    )
+  end
+  object lv: ListView
+    items = (
+      'a	1'
+      'b	2'
+    )
+  end
+end

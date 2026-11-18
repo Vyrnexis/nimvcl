@@ -102,6 +102,15 @@ const
   MaxDirtyRects = 6              ## more regions than this collapse to their bounding box
   FullRepaintShare = 0.85'f32    ## dirty area above this share of the form: repaint it all
 
+type PopupHookKind* = enum
+  phRegister     ## the control is about to get keys / mouse (focus, press, key)
+  phMouseUp      ## a button was released over it (`p`: form coordinates)
+
+var popupHook*: proc(c: Control, kind: PopupHookKind, button: MouseButton,
+                     p: PointF) {.nimcall.}
+  ## Set by controls/menus.nim: context menus (`Control.popupMenu`) are served
+  ## from here, so the control's own event fields stay untouched.
+
 var debugDirty = -1              # NIMVCL_DEBUG_DIRTY=1: outline the repainted regions
 proc debugDirtyOn(): bool =
   if debugDirty < 0: debugDirty = (if getEnv("NIMVCL_DEBUG_DIRTY") == "1": 1 else: 0)
@@ -248,6 +257,7 @@ proc focusControl*(ui: UiRoot, target: Control) =
     old.doExit()
   if c != nil and ui.fFocused == c:
     c.invalidate()
+    if popupHook != nil: popupHook(c, phRegister, mbLeft, pointF(0, 0))
     c.doEnter()
   ui.updateTextInput()
   if c != nil and ui.fFocused == c and ui.revealOnFocus:
@@ -449,6 +459,7 @@ proc mouseDown(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState,
      not target.isEnabled:
     return true
   let lp = target.formToClient(p)
+  if popupHook != nil: popupHook(target, phRegister, button, p)
   target.doMouseDown(button, sh, lp.x, lp.y)
   if dbl: target.doDblClick()
   true
@@ -469,6 +480,8 @@ proc mouseUp(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState): boo
   let pressed = ui.fPressed
   if button == mbLeft: ui.fPressed = nil
   t.doMouseUp(button, shift + ui.buttonShift, lp.x, lp.y)
+  if button == mbRight and popupHook != nil and t.root == Control(ui.root):
+    popupHook(t, phMouseUp, button, p)
   if button == mbLeft and pressed == t and t.isVisible and t.isEnabled and
      t.clientRect.contains(t.formToClient(p)):
     t.doClick()
@@ -577,6 +590,7 @@ proc keyDown(ui: UiRoot, key: Key, shift: ShiftState, repeat = false): bool =
   if ui.keyPreview and target != Control(ui.root):
     ui.root.doKeyDown(k, shift)
     if k == Key(0): return true
+  if popupHook != nil: popupHook(target, phRegister, mbLeft, pointF(0, 0))
   target.doKeyDown(k, shift)
   if k == Key(0): return true
   if k == keyTab and shift * {ssCtrl, ssAlt} == {}:

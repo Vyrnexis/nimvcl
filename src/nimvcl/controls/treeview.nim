@@ -1367,3 +1367,30 @@ proc newTreeView*(parent: Container = nil, left = 0'f32, top = 0'f32,
   new result
   result.initTreeView(parent)
   result.placeControl(parent, left, top, width, height)
+
+# --------------------------------------------------- design-time text form
+
+proc nodeLines*(tv: TreeView): seq[string] =
+  ## The nodes as an outline, one line per node in tree order, indented by
+  ## two spaces per level (what a form file stores for `items`).
+  proc walk(n: TreeNode, acc: var seq[string]) =
+    for k in n.children:
+      acc.add repeat("  ", k.level) & k.text
+      walk(k, acc)
+  walk(tv.fRoot, result)
+
+proc `nodeLines=`*(tv: TreeView, v: seq[string]) =
+  ## Replaces all nodes by the outline `v` (see `nodeLines`); a line indented
+  ## deeper than its predecessor allows becomes a child of that predecessor.
+  tv.beginUpdate()
+  tv.items.clear()
+  var stack: seq[TreeNode]
+  for l in v:
+    var depth = 0
+    while depth * 2 + 1 < l.len and l[depth * 2] == ' ' and l[depth * 2 + 1] == ' ': inc depth
+    let text = l[depth * 2 .. ^1]
+    depth = min(depth, stack.len)
+    stack.setLen(depth)
+    let n = if depth == 0: tv.items.addChild(nil, text) else: stack[depth - 1].addChild(text)
+    stack.add n
+  tv.endUpdate()

@@ -965,6 +965,16 @@ proc delete*(l: ListColumns, i: int) =
     if l.lv.fSortCol == i: l.lv.fSortCol = -1
     elif l.lv.fSortCol > i: dec l.lv.fSortCol
     l.lv.refresh()
+proc move*(l: ListColumns, from0, to0: int) =
+  ## Moves column `from0` to index `to0` (the sort column follows).
+  let n = l.lv.fColumns.len
+  if from0 notin 0 ..< n or to0 notin 0 ..< n or from0 == to0: return
+  let sc = if l.lv.fSortCol >= 0 and l.lv.fSortCol < n: l.lv.fColumns[l.lv.fSortCol] else: nil
+  let c = l.lv.fColumns[from0]
+  l.lv.fColumns.delete(from0)
+  l.lv.fColumns.insert(c, to0)
+  if sc != nil: l.lv.fSortCol = l.lv.fColumns.find(sc)
+  l.lv.refresh()
 proc clear*(l: ListColumns) =
   for c in l.lv.fColumns: c.fView = nil
   l.lv.fColumns.setLen(0)
@@ -1593,3 +1603,24 @@ proc newListView*(parent: Container = nil, left = 0'f32, top = 0'f32,
   new result
   result.initListView(parent)
   result.placeControl(parent, left, top, width, height)
+
+# --------------------------------------------------- design-time text form
+
+proc itemLines*(lv: ListView): seq[string] =
+  ## The items as text, one line per item: the caption, then the sub-items,
+  ## separated by tab characters (what a form file stores for `items`). Empty
+  ## in owner-data mode.
+  if lv.fOwnerData: return
+  for i in 0 ..< lv.count:
+    let it = lv.getItem(i)
+    var line = it.caption
+    for s in it.subItems: line.add '\t' & s
+    result.add line
+
+proc `itemLines=`*(lv: ListView, v: seq[string]) =
+  ## Replaces all items by the lines of `v` (see `itemLines`).
+  if lv.fOwnerData: return
+  lv.items.clear()
+  for l in v:
+    let p = l.split('\t')
+    lv.items.add(p[0], p[1 .. ^1])

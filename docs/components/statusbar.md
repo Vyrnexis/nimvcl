@@ -48,4 +48,9 @@ Only the common ones (`onClick`, mouse events).
 * Keep the `StatusPanel` returned by `addPanel`; setting its `text` is enough to update.
 * Setting `simpleText` (or passing it to `newStatusBar`) switches to simple mode.
 
+## At design time
+
+`panels` opens the collection editor (text, width, alignment). In code
+`deletePanel(i)` and `movePanel(from, to)` change the panel list.
+
 [Back to the index](../README.md)

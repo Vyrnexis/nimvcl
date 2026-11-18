@@ -44,6 +44,7 @@ export types, component, theme
 
 type
   Control* = ref object of Component
+    popupMenuRef*: RootRef       ## the `PopupMenu` attached with `attachPopupMenu` (controls/menus.nim)
     # geometry (parent's client coordinates)
     fLeft, fTop, fWidth, fHeight: float32
     fAlign: Align

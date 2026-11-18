@@ -65,6 +65,21 @@ proc addPanel*(b: StatusBar, text = "", width = 100'f32,
   b.fPanels.add result
   b.invalidate()
 
+proc deletePanel*(b: StatusBar, i: int) =
+  ## Removes panel `i`.
+  if i in 0 ..< b.fPanels.len:
+    b.fPanels[i].bar = nil
+    b.fPanels.delete(i)
+    b.invalidate()
+
+proc movePanel*(b: StatusBar, from0, to0: int) =
+  ## Moves panel `from0` to index `to0`.
+  if from0 in 0 ..< b.fPanels.len and to0 in 0 ..< b.fPanels.len and from0 != to0:
+    let p = b.fPanels[from0]
+    b.fPanels.delete(from0)
+    b.fPanels.insert(p, to0)
+    b.invalidate()
+
 proc clearPanels*(b: StatusBar) =
   b.fPanels.setLen 0
   b.invalidate()
