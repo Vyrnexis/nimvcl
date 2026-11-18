@@ -22,3 +22,6 @@ jobs:
         run: nimble examples
       - name: Test
         run: nimble test
+      - name: Show failed test logs
+        if: failure()
+        run: for f in build/tests/run-*/*.log; do echo "=== $f"; tail -n 60 "$f"; done

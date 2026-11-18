@@ -41,6 +41,7 @@ suite "loadForm applications stay light":
     putEnv("SDL_RENDER_DRIVER", "software")
     let (output, code) = execCmdEx(nimCmd("c", "-r"))
     check code == 0
+    if code != 0: echo output
     check "light ok" in output
 
 removeDir cache($getCurrentProcessId())
