@@ -5,6 +5,15 @@ All notable changes to nimvcl are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0 the API can still change
 between minor versions.
 
+## [0.1.2] - 2026-11-19
+
+### Added
+
+- `nimvcl/prelude`: the modules handler code needs without importing a
+  component (core control/form/application, `controls/common`, the standard
+  dialogs, `core/timer`, colours and fonts). `scripts/prelude_cost.sh` measures
+  its compile cost.
+
 ## [0.1.1] - 2026-11-18
 
 ### Fixed
@@ -68,5 +77,6 @@ First release. There are no earlier versions.
   each component, a gallery and demo programs, and a headless test suite
   (`nimble test`).
 
+[0.1.2]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.0

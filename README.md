@@ -92,7 +92,9 @@ Application.run(form)
 ```
 
 `import nimvcl` brings in everything. Single modules can be imported instead
-(`nimvcl/controls/listbox`, ...).
+(`nimvcl/controls/listbox`, ...) for faster builds; `nimvcl/prelude` is the
+small set that handler code needs (forms, dialogs, colours, timers, clipboard),
+see [Imports and the prelude](docs/guide/imports.md).
 
 ## Requirements
 

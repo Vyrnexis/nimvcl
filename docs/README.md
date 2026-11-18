@@ -24,6 +24,7 @@ properties, events and methods.
 |---|---|
 | [Getting started](getting-started.md) | Install, a first window, building and running tests |
 | [Application and forms](guide/application-and-forms.md) | `Application.run`, forms, modal forms, host mode |
+| [Imports and the prelude](guide/imports.md) | `import nimvcl` vs single modules, what `nimvcl/prelude` holds, its cost |
 | [Forms and frames](forms.md) | The `form` and `frame` macros (a typed `.dfm`) |
 | [Form files](guide/form-files.md) | `.nfm` text forms, `loadForm`, `loadNfm`, the property registry |
 | [Layout](guide/layout.md) | `align`, `anchors`, margins, padding, constraints, autoSize |
