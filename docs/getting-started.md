@@ -97,7 +97,8 @@ scripts/test.sh -d:release   # extra nim flags are passed through
 nimble test                  # same as scripts/test.sh
 ```
 
-Logs land in `build/tests/<name>.log`.
+Each run builds into `build/tests/run-<pid>/`; that folder is removed when all
+tests pass, and keeps the per-test logs (`<name>.log`) when one fails.
 
 ## Next steps
 

@@ -4,7 +4,11 @@ A Delphi VCL-style UI library for Nim 2.2, drawn entirely with SDL3 (Linux
 first). Forms, `Align` and `Anchors`, `onClick` events, actions, menus, and a
 `form` macro that works like a `.dfm` checked by the compiler.
 
-**Status:** early. The API can still change.
+**Status:** 0.1.0, the first release. The API can still change before 1.0; see
+the [changelog](CHANGELOG.md).
+
+The companion IDE, a visual form designer built on nimvcl, lives in
+[nimvcl-ide](https://github.com/Vyrnexis/nimvcl-ide).
 
 ![The nimvcl showcase: buttons and choices](docs/images/showcase-buttons.png)
 
@@ -24,6 +28,13 @@ Run the gallery yourself: `nim c -r examples/showcase.nim`.
   window manager resizes the window first.
 - Flat light and dark themes, HiDPI and fractional scaling, one SDL3 window per
   `Form`, modal forms, multiple windows.
+- Delphi colour model: `color` is a control's background and `font.color` its
+  text, both inherited from the parent (`parentColor`, `parentFont`); text
+  colours can also follow the theme by role (`textRole`, `muted`).
+- Fonts: Noto Sans and Noto Sans Mono are embedded in the executable, so an app
+  needs no font files. Any `font.family` can also be a system font (fontconfig)
+  or a project font registered from bytes, and CJK text finds a system fallback
+  font automatically.
 - Host mode: embed the UI in an existing SDL3 application.
 - Controls: Label, Button, CheckBox, RadioButton, Panel, GroupBox, Edit, Memo,
   SpinEdit, ComboBox, ListBox, ListView, TreeView, DrawGrid and StringGrid,
@@ -34,6 +45,8 @@ Run the gallery yourself: `nim c -r examples/showcase.nim`.
   breakpoint and bookmark icons), Nim syntax highlighting that follows the
   theme, code folding, bracket matching, a find and replace bar, auto-indent
   and a buffer that opens a 100 MB file in about a second.
+- Docking: `DockSite` and `DockPanel` with split, tab and floating panels, drop
+  guides, and layouts you can save and load.
 - Main menu, popup menus, hints, `&` mnemonics, shortcuts.
 - `ActionList` / `Action`: one command shared by menu items, tool buttons,
   buttons, check boxes and shortcuts.
@@ -41,6 +54,14 @@ Run the gallery yourself: `nim c -r examples/showcase.nim`.
   folder dialogs.
 - `Timer`, `ImageList`, and a thread-safe `Application.queue` / `runOnUi`.
 - A `form` macro that declares a form with typed fields for its controls.
+- Form files: `.nfm` text forms (a `.dfm` for nimvcl). `loadForm` turns one into
+  a typed form at compile time without pulling in the property registry;
+  `loadNfm` builds it at run time. Forms can inherit from other forms, as in
+  Delphi.
+- Tooling for IDEs: a property registry (nimvcl's RTTI), an `ObjectInspector`
+  with editors for colours, fonts, pictures, image lists, string lists and
+  collections, and `FormDesigner` for selecting, moving, resizing, creating and
+  undoing on a design surface.
 
 ## Example
 
@@ -94,7 +115,8 @@ Start at the [documentation index](docs/README.md).
   [threads and timers](docs/guide/threads-and-timers.md),
   [painting](docs/guide/painting.md), [theming](docs/guide/theming.md),
   [the form macro](docs/forms.md),
-  [form files and the property registry](docs/guide/form-files.md).
+  [form files and the property registry](docs/guide/form-files.md),
+  [docking](docs/guide/docking.md), [design mode](docs/guide/designer.md).
 - Components: one page each, from [Label](docs/components/label.md) to
   [TreeView](docs/components/treeview.md); see the
   [component list](docs/README.md#components).
@@ -116,6 +138,9 @@ nim c -r examples/views_demo.nim      # TreeView and ListView
 nim c -r examples/editor_demo.nim     # a text editor: file tree, CodeEdit tabs, find bar
 nim c -r examples/inspector_demo.nim  # the object inspector bound to a small form, .nfm save and reload
 nim c -r examples/nfm_demo.nim        # a form loaded from a .nfm file at compile time
+nim c -r examples/designer_demo.nim   # design mode on a form
+nim c -r examples/dock_demo.nim       # docking: split, tab and float panels
+nim c -r examples/showcase.nim        # the component gallery
 ```
 
 (`nimble install -d` first; `nim.cfg` already puts `src` on the path.)

@@ -303,6 +303,8 @@ The syntax errors name what was expected: `expected `=` after the property name
 ## Loading at run time
 
 ```nim
+import std/tables
+import nimvcl
 import nimvcl/dsl/nfm
 
 var handlers: Table[string, NotifyEvent]
