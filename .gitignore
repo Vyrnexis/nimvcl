@@ -13,6 +13,10 @@ outputGotten.txt
 !/tests/golden/
 !/tests/macro_fail/
 !/tests/nfm/
+!/tests/lightapp/
+/tests/lightapp/*
+!/tests/lightapp/*.nim
+!/tests/lightapp/*.nfm
 
 # planning notes (kept local)
 /PLAN.md

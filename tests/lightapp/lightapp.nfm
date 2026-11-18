@@ -1,0 +1,36 @@
+object Light: Form
+  width = 320
+  height = 200
+  caption = 'Light'
+  object label1: Label
+    left = 8
+    top = 8
+    caption = 'Name:'
+    font.color = #336699
+  end
+  object edit1: Edit
+    left = 8
+    top = 32
+    width = 200
+    text = 'hello'
+  end
+  object button1: Button
+    left = 8
+    top = 64
+    caption = 'OK'
+    onClick = button1Click
+  end
+  object icons: ImageList
+    width = 24
+    height = 24
+    images = (
+      '../nfm/images/red.png'
+    )
+  end
+  object mainMenu1: MainMenu
+    object fileMenu: MenuItem
+      caption = 'File'
+      shortcut = 'Ctrl+Q'
+    end
+  end
+end
