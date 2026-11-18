@@ -63,8 +63,8 @@ const
   # SDL_ttf TTF_STYLE_* values
   TtfBold = 0x01'u32
   TtfItalic = 0x02'u32
-  # font.nim lives in src/nimvcl/graphics; the assets are four levels up.
-  CompiledAssetsDir = currentSourcePath().parentDir.parentDir.parentDir.parentDir / "assets"
+  # font.nim lives in src/nimvcl/graphics; the assets ship inside the package.
+  CompiledAssetsDir = currentSourcePath().parentDir.parentDir / "assets"
   EmbeddedPrefix* = "embedded:"   ## `ResolvedFont.path` prefix of a font held in the binary
 
 # The bundled fonts live in the binary (about 2.4 MB). Build with

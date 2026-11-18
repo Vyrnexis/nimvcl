@@ -5,6 +5,13 @@ All notable changes to nimvcl are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0 the API can still change
 between minor versions.
 
+## [0.1.1] - 2026-11-18
+
+### Fixed
+
+- The bundled fonts now ship inside the nimble package (`src/nimvcl/assets`),
+  so a project that installs nimvcl with nimble compiles.
+
 ## [0.1.0] - 2026-11-18
 
 First release. There are no earlier versions.
@@ -61,4 +68,5 @@ First release. There are no earlier versions.
   each component, a gallery and demo programs, and a headless test suite
   (`nimble test`).
 
+[0.1.1]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.0

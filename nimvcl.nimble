@@ -2,7 +2,7 @@ import std/strutils
 
 # Package
 
-version       = "0.1.0"
+version       = "0.1.1"
 author        = "Vyrnexis"
 description   = "Delphi VCL-style UI library for Nim, drawn with SDL3"
 license       = "MIT"

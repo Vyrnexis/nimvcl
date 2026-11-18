@@ -40,7 +40,7 @@ The bundled fonts are Noto Sans (regular, bold, italic) and Noto Sans Mono.
 They are **embedded in the executable** at compile time and opened from memory,
 so a built app needs no font files next to it. This adds about 2.4 MB to the
 binary; build with `-d:nimvclNoEmbedFonts` to skip it and load the files from
-the `assets` folder instead. Overrides: if `NIMVCL_ASSETS` names a folder with
+the package's `src/nimvcl/assets` folder instead. Overrides: if `NIMVCL_ASSETS` names a folder with
 `fonts/<file>.ttf`, that file is loaded from disk instead of the embedded copy,
 and `registerFontFamily("sans", ...)` replaces a bundled family.
 `fontSource(font("sans"))` reports "embedded", "disk", "registered" or "system". For glyphs they lack,

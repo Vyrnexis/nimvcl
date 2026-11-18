@@ -5,7 +5,7 @@ import sdl3 except Color
 import nimvcl
 import nimvcl/controls/inspector
 
-const CompiledFonts = currentSourcePath().parentDir.parentDir / "assets" / "fonts"
+const CompiledFonts = currentSourcePath().parentDir.parentDir / "src" / "nimvcl" / "assets" / "fonts"
 
 putEnv("NIMVCL_ASSETS", "/nonexistent/nimvcl-assets")   # bundled fonts must come from the binary
 
