@@ -449,3 +449,9 @@ block:
   menus.menuOpening = proc() =
     if prev != nil: prev()
     updateActions()
+
+# `loadForm` (dsl/formload) builds objects that are not `newT(parent: Container)`
+# controls with `nfmMake(T, parent)`, found in the scope of the calling module.
+
+proc nfmMake*(T: typedesc[Action], parent: ActionList): Action =
+  newAction(parent)

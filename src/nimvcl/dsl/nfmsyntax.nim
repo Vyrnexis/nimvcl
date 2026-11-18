@@ -1,0 +1,473 @@
+## The `.nfm` text form format: syntax tree, lexer, parser, writer and the
+## compile-time helpers shared by `loadForm` (`formload.nim`) and the converters
+## in `nfm.nim`. No dependency beyond `std`, so it also runs inside macros and
+## costs a program that only uses `loadForm` almost nothing to compile.
+## See docs/guide/form-files.md for the format.
+
+import std/[strutils, sets]
+
+
+type
+  NfmError* = object of CatchableError
+    ## A syntax or load error. `line`/`col` are 1-based (0: no position).
+    fileName*: string
+    line*, col*: int
+
+  NfmValueKind* = enum
+    nvInt, nvFloat, nvBool, nvString, nvIdent, nvColor, nvSet, nvList
+
+  NfmValue* = object
+    kind*: NfmValueKind
+    text*: string         ## literal text (numbers, colour), decoded string, identifier
+    items*: seq[string]   ## nvSet: element names; nvList: decoded strings
+    line*, col*: int
+
+  NfmProp* = object
+    name*: string         ## `caption`, or a dotted path `font.size`
+    value*: NfmValue
+    line*, col*: int
+
+  NfmNode* = ref object
+    name*: string         ## "" for an unnamed object
+    className*: string
+    props*: seq[NfmProp]
+    children*: seq[NfmNode]
+    line*, col*: int
+
+# ------------------------------------------------------------------ errors
+
+proc nfmError(fileName: string, line, col: int, msg: string): ref NfmError =
+  result = newException(NfmError,
+    (if fileName.len > 0: fileName & ":" else: "") &
+    (if line > 0: $line & ":" & $col & ": " else: "") & msg)
+  result.fileName = fileName
+  result.line = line
+  result.col = col
+
+# ------------------------------------------------------------------- lexer
+
+type
+  TokKind = enum
+    tkEof, tkIdent, tkInt, tkFloat, tkString, tkColor, tkPunct
+
+  Token = object
+    kind: TokKind
+    text: string          # identifier, number text, decoded string, "#hex", punctuation
+    line, col: int
+
+  Lexer = object
+    src: string
+    pos, line, col: int
+    fileName: string
+    tok: Token
+
+proc fail(lx: Lexer, line, col: int, msg: string) {.noreturn.} =
+  raise nfmError(lx.fileName, line, col, msg)
+
+proc isIdentStart(c: char): bool = c in {'a'..'z', 'A'..'Z', '_'}
+proc isIdentChar(c: char): bool = c in {'a'..'z', 'A'..'Z', '_', '0'..'9'}
+
+proc cur(lx: Lexer): char =
+  if lx.pos < lx.src.len: lx.src[lx.pos] else: '\0'
+
+proc peekc(lx: Lexer, n = 1): char =
+  if lx.pos + n < lx.src.len: lx.src[lx.pos + n] else: '\0'
+
+proc advance(lx: var Lexer) =
+  if lx.pos < lx.src.len:
+    if lx.src[lx.pos] == '\n':
+      inc lx.line
+      lx.col = 1
+    else:
+      inc lx.col
+    inc lx.pos
+
+proc hexVal(c: char): int =
+  case c
+  of '0'..'9': ord(c) - ord('0')
+  of 'a'..'f': ord(c) - ord('a') + 10
+  of 'A'..'F': ord(c) - ord('A') + 10
+  else: -1
+
+proc readString(lx: var Lexer): string =
+  ## At the opening quote. Escapes: \\ \' \n \r \t \0 \xHH.
+  let l0 = lx.line
+  let c0 = lx.col
+  lx.advance()
+  while true:
+    let c = lx.cur
+    if lx.pos >= lx.src.len:
+      lx.fail(l0, c0, "unterminated string (missing closing ')")
+    if c == '\n':
+      lx.fail(l0, c0, "unterminated string (a string ends on its line; use \\n for a line break)")
+    if c == '\'':
+      lx.advance()
+      return
+    if c == '\\':
+      let el = lx.line
+      let ec = lx.col
+      lx.advance()
+      let e = lx.cur
+      case e
+      of '\\': result.add '\\'
+      of '\'': result.add '\''
+      of 'n': result.add '\n'
+      of 'r': result.add '\r'
+      of 't': result.add '\t'
+      of '0': result.add '\0'
+      of 'x':
+        let h1 = hexVal(lx.peekc(1))
+        let h2 = hexVal(lx.peekc(2))
+        if h1 < 0 or h2 < 0:
+          lx.fail(el, ec, "bad escape \\x: two hex digits expected")
+        result.add char(h1 * 16 + h2)
+        lx.advance()
+        lx.advance()
+      else:
+        lx.fail(el, ec, "unknown escape \\" & (if e == '\0': "" else: $e) &
+                " (use \\\\ \\' \\n \\r \\t \\0 or \\xHH)")
+      lx.advance()
+    else:
+      result.add c
+      lx.advance()
+
+proc next(lx: var Lexer) =
+  # skip white space and // comments
+  while true:
+    let c = lx.cur
+    if lx.pos >= lx.src.len: break
+    if c in {' ', '\t', '\r', '\n'}: lx.advance()
+    elif c == '/' and lx.peekc() == '/':
+      while lx.pos < lx.src.len and lx.cur != '\n': lx.advance()
+    else: break
+  var t = Token(line: lx.line, col: lx.col)
+  if lx.pos >= lx.src.len:
+    t.kind = tkEof
+    lx.tok = t
+    return
+  let c = lx.cur
+  if isIdentStart(c):
+    t.kind = tkIdent
+    while true:
+      while isIdentChar(lx.cur):
+        t.text.add lx.cur
+        lx.advance()
+      if lx.cur == '.' and isIdentStart(lx.peekc()):
+        t.text.add '.'
+        lx.advance()
+      else: break
+  elif c in {'0'..'9'} or (c == '-' and lx.peekc() in {'0'..'9'}):
+    t.kind = tkInt
+    if c == '-':
+      t.text.add c
+      lx.advance()
+    while lx.cur in {'0'..'9'}:
+      t.text.add lx.cur
+      lx.advance()
+    if lx.cur == '.' and lx.peekc() in {'0'..'9'}:
+      t.kind = tkFloat
+      t.text.add '.'
+      lx.advance()
+      while lx.cur in {'0'..'9'}:
+        t.text.add lx.cur
+        lx.advance()
+    if lx.cur in {'e', 'E'} and
+       (lx.peekc() in {'0'..'9'} or (lx.peekc() in {'+', '-'} and lx.peekc(2) in {'0'..'9'})):
+      t.kind = tkFloat
+      t.text.add lx.cur
+      lx.advance()
+      if lx.cur in {'+', '-'}:
+        t.text.add lx.cur
+        lx.advance()
+      while lx.cur in {'0'..'9'}:
+        t.text.add lx.cur
+        lx.advance()
+  elif c == '\'':
+    t.kind = tkString
+    t.text = lx.readString()
+  elif c == '#':
+    t.kind = tkColor
+    t.text.add '#'
+    lx.advance()
+    while hexVal(lx.cur) >= 0:
+      t.text.add lx.cur
+      lx.advance()
+    if t.text.len notin [4, 5, 7, 9]:
+      lx.fail(t.line, t.col, "bad colour `" & t.text &
+              "`: expected #rgb, #rgba, #rrggbb or #rrggbbaa")
+  elif c in {'=', ':', '[', ']', '(', ')', ','}:
+    t.kind = tkPunct
+    t.text = $c
+    lx.advance()
+  else:
+    lx.fail(t.line, t.col, "unexpected character `" &
+            (if ord(c) < 32 or ord(c) > 126: "\\x" & toHex(ord(c), 2) else: $c) & "`")
+  lx.tok = t
+
+proc describe(t: Token): string =
+  case t.kind
+  of tkEof: "end of file"
+  of tkIdent: "`" & t.text & "`"
+  of tkInt, tkFloat, tkColor: "`" & t.text & "`"
+  of tkString: "a string"
+  of tkPunct: "`" & t.text & "`"
+
+# ------------------------------------------------------------------ parser
+
+proc isPunct(t: Token, p: string): bool = t.kind == tkPunct and t.text == p
+proc isKeyword(t: Token, k: string): bool = t.kind == tkIdent and t.text == k
+
+proc parseValue(lx: var Lexer): NfmValue =
+  let t = lx.tok
+  result.line = t.line
+  result.col = t.col
+  case t.kind
+  of tkInt:
+    result.kind = nvInt
+    result.text = t.text
+    lx.next()
+  of tkFloat:
+    result.kind = nvFloat
+    result.text = t.text
+    lx.next()
+  of tkString:
+    result.kind = nvString
+    result.text = t.text
+    lx.next()
+  of tkColor:
+    result.kind = nvColor
+    result.text = t.text
+    lx.next()
+  of tkIdent:
+    if t.text == "end" or t.text == "object":
+      lx.fail(t.line, t.col, "expected a value, got `" & t.text & "`")
+    if '.' in t.text:
+      lx.fail(t.line, t.col, "a value cannot contain `.` (got `" & t.text & "`)")
+    if t.text == "true" or t.text == "false":
+      result.kind = nvBool
+    else:
+      result.kind = nvIdent
+    result.text = t.text
+    lx.next()
+  of tkPunct:
+    if t.text == "[":
+      result.kind = nvSet
+      lx.next()
+      if lx.tok.isPunct("]"):
+        lx.next()
+        return
+      while true:
+        if lx.tok.kind != tkIdent or '.' in lx.tok.text:
+          lx.fail(lx.tok.line, lx.tok.col,
+                  "expected a set element, got " & describe(lx.tok))
+        result.items.add lx.tok.text
+        lx.next()
+        if lx.tok.isPunct(","):
+          lx.next()
+        elif lx.tok.isPunct("]"):
+          lx.next()
+          break
+        else:
+          lx.fail(lx.tok.line, lx.tok.col,
+                  "expected `,` or `]` in a set, got " & describe(lx.tok))
+    elif t.text == "(":
+      result.kind = nvList
+      lx.next()
+      while not lx.tok.isPunct(")"):
+        if lx.tok.kind != tkString:
+          lx.fail(lx.tok.line, lx.tok.col,
+                  "expected a string or `)` in a list, got " & describe(lx.tok))
+        result.items.add lx.tok.text
+        lx.next()
+      lx.next()
+    else:
+      lx.fail(t.line, t.col, "expected a value, got " & describe(t))
+  of tkEof:
+    lx.fail(t.line, t.col, "expected a value, got end of file")
+
+proc parseObject(lx: var Lexer): NfmNode =
+  ## At the `object` keyword.
+  result = NfmNode(line: lx.tok.line, col: lx.tok.col)
+  lx.next()
+  if lx.tok.kind == tkIdent and not lx.tok.isKeyword("end"):
+    if '.' in lx.tok.text:
+      lx.fail(lx.tok.line, lx.tok.col, "an object name cannot contain `.`")
+    result.name = lx.tok.text
+    lx.next()
+  if not lx.tok.isPunct(":"):
+    lx.fail(lx.tok.line, lx.tok.col,
+            "expected `:` and a class name after the object name (`object name: Class`), got " &
+            describe(lx.tok))
+  lx.next()
+  if lx.tok.kind != tkIdent or lx.tok.isKeyword("end") or lx.tok.isKeyword("object"):
+    lx.fail(lx.tok.line, lx.tok.col, "expected a class name, got " & describe(lx.tok))
+  if '.' in lx.tok.text:
+    lx.fail(lx.tok.line, lx.tok.col, "a class name cannot contain `.`")
+  result.className = lx.tok.text
+  lx.next()
+  while true:
+    let t = lx.tok
+    case t.kind
+    of tkEof:
+      lx.fail(t.line, t.col, "missing `end` for the object " &
+              (if result.name.len > 0: "`" & result.name & "`" else: "of class `" & result.className & "`") &
+              " opened at " & $result.line & ":" & $result.col)
+    of tkIdent:
+      if t.text == "end":
+        lx.next()
+        return
+      elif t.text == "object":
+        result.children.add parseObject(lx)
+      else:
+        var p = NfmProp(name: t.text, line: t.line, col: t.col)
+        lx.next()
+        if not lx.tok.isPunct("="):
+          lx.fail(lx.tok.line, lx.tok.col,
+                  "expected `=` after the property name `" & p.name & "`, got " &
+                  describe(lx.tok))
+        lx.next()
+        p.value = parseValue(lx)
+        result.props.add p
+    else:
+      lx.fail(t.line, t.col,
+              "expected a property, `object` or `end`, got " & describe(t))
+
+proc parseNfm*(text: string, fileName = ""): NfmNode =
+  ## Parses a form file into its root object. Raises `NfmError` with the
+  ## position of the problem (`file:line:col: message`).
+  var lx = Lexer(src: text, line: 1, col: 1, fileName: fileName)
+  lx.next()
+  if not lx.tok.isKeyword("object"):
+    lx.fail(lx.tok.line, lx.tok.col,
+            "a form file starts with `object Name: Class`, got " & describe(lx.tok))
+  result = parseObject(lx)
+  if lx.tok.kind != tkEof:
+    lx.fail(lx.tok.line, lx.tok.col,
+            "unexpected " & describe(lx.tok) & " after the end of the root object")
+
+proc legacyNames(n: NfmNode) =
+  ## Older files wrote the text colour of a label or panel as `textColor`; it
+  ## is now `font.color`.
+  for p in n.props.mitems:
+    if p.name == "textColor": p.name = "font.color"
+  for c in n.children: legacyNames(c)
+
+# ------------------------------------------------------------------ writer
+
+proc quoteNfm*(s: string): string =
+  ## `s` as a single-quoted `.nfm` string.
+  result = "'"
+  for c in s:
+    case c
+    of '\\': result.add "\\\\"
+    of '\'': result.add "\\'"
+    of '\n': result.add "\\n"
+    of '\r': result.add "\\r"
+    of '\t': result.add "\\t"
+    of '\0': result.add "\\0"
+    of '\x01'..'\x08', '\x0b', '\x0c', '\x0e'..'\x1f', '\x7f':
+      result.add "\\x" & toHex(ord(c), 2).toLowerAscii
+    else: result.add c
+  result.add '\''
+
+proc writeProp(o: var string, p: NfmProp, indent: string) =
+  o.add indent & p.name & " = "
+  let v = p.value
+  case v.kind
+  of nvInt, nvFloat, nvBool, nvIdent, nvColor: o.add v.text
+  of nvString: o.add quoteNfm(v.text)
+  of nvSet: o.add "[" & v.items.join(", ") & "]"
+  of nvList:
+    if v.items.len == 0: o.add "()"
+    else:
+      o.add "(\n"
+      for s in v.items: o.add indent & "  " & quoteNfm(s) & "\n"
+      o.add indent & ")"
+  o.add '\n'
+
+proc writeNode(o: var string, n: NfmNode, indent: string) =
+  o.add indent & "object" & (if n.name.len > 0: " " & n.name & ": " else: ": ") &
+        n.className & "\n"
+  for p in n.props: writeProp(o, p, indent & "  ")
+  for c in n.children: writeNode(o, c, indent & "  ")
+  o.add indent & "end\n"
+
+proc writeNfm*(n: NfmNode): string =
+  ## Canonical text of a tree: two spaces per level, properties before child
+  ## objects, one property per line. `writeNfm(parseNfm(x)) == x` for a file
+  ## already in that form.
+  writeNode(result, n, "")
+
+proc `$`*(n: NfmNode): string = writeNfm(n)
+
+proc newNfmNode*(name, className: string): NfmNode =
+  NfmNode(name: name, className: className)
+
+proc add*(n: NfmNode, name: string, v: NfmValue) =
+  n.props.add NfmProp(name: name, value: v)
+
+func nfmInt*(i: int64): NfmValue = NfmValue(kind: nvInt, text: $i)
+func nfmString*(s: string): NfmValue = NfmValue(kind: nvString, text: s)
+func nfmIdent*(s: string): NfmValue = NfmValue(kind: nvIdent, text: s)
+func nfmBool*(b: bool): NfmValue = NfmValue(kind: nvBool, text: (if b: "true" else: "false"))
+
+iterator walk*(n: NfmNode): NfmNode =
+  ## The node and all its descendants, parents first.
+  var stack = @[n]
+  while stack.len > 0:
+    let x = stack.pop()
+    yield x
+    for i in countdown(x.children.high, 0): stack.add x.children[i]
+
+# ============================================================ shared helpers
+
+proc nimStr(s: string): string =
+  ## `s` as a Nim string literal (UTF-8 stays as it is).
+  result = "\""
+  for c in s:
+    case c
+    of '"': result.add "\\\""
+    of '\\': result.add "\\\\"
+    of '\n': result.add "\\n"
+    of '\r': result.add "\\r"
+    of '\t': result.add "\\t"
+    of '\0'..'\x08', '\x0b', '\x0c', '\x0e'..'\x1f', '\x7f':
+      result.add "\\x" & toHex(ord(c), 2)
+    else: result.add c
+  result.add '"'
+
+proc isEventProp(name: string): bool =
+  name.len > 2 and name.startsWith("on") and name[2] in {'A'..'Z'}
+
+proc nimExpr(cls, prop: string, v: NfmValue,
+             names: HashSet[string]): tuple[prop, expr: string] =
+  ## The Nim expression for a property value, and the (possibly renamed)
+  ## property it is assigned to. A few properties have a text form that is not
+  ## their Nim type: `shortcut`, `columns`/`rows` of a `GridPanel`, `lines` of a
+  ## `Memo`.
+  result.prop = prop
+  case v.kind
+  of nvInt, nvFloat, nvBool: result.expr = v.text
+  of nvString:
+    if prop == "shortcut": result.expr = "shortcut(" & nimStr(v.text) & ")"
+    elif cls == "GridPanel" and (prop == "columns" or prop == "rows"):
+      result.expr = "parseGridSizes(" & nimStr(v.text) & ")"
+    else: result.expr = nimStr(v.text)
+  of nvIdent:
+    result.expr = if v.text in names: "self." & v.text else: v.text
+  of nvColor: result.expr = "hex(" & nimStr(v.text) & ")"
+  of nvSet: result.expr = "{" & v.items.join(", ") & "}"
+  of nvList:
+    if cls == "Memo" and prop == "lines":
+      result.prop = "text"
+      result.expr = nimStr(v.items.join("\n"))
+    elif (cls == "ListView" or cls == "TreeView") and prop == "items":
+      # not the Nim `items` (an object): the outline/row text accessors
+      result.prop = if cls == "ListView": "itemLines" else: "nodeLines"
+      var parts: seq[string]
+      for s in v.items: parts.add nimStr(s)
+      result.expr = "@[" & parts.join(", ") & "]"
+    else:
+      var parts: seq[string]
+      for s in v.items: parts.add nimStr(s)
+      result.expr = "@[" & parts.join(", ") & "]"

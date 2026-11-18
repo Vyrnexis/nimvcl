@@ -1634,3 +1634,9 @@ proc `itemLines=`*(lv: ListView, v: seq[string]) =
   for l in v:
     let p = l.split('\t')
     lv.items.add(p[0], p[1 .. ^1])
+
+# `loadForm` (dsl/formload) builds objects that are not `newT(parent: Container)`
+# controls with `nfmMake(T, parent)`, found in the scope of the calling module.
+
+proc nfmMake*(T: typedesc[ListColumn], parent: ListView): ListColumn =
+  parent.columns.add()

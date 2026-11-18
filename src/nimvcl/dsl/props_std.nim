@@ -37,25 +37,6 @@ proc setTvItems(c: TreeView, v: seq[string]) = c.nodeLines = v
 proc getLines(m: Memo): seq[string] = m.text.splitLines
 proc setLines(m: Memo, v: seq[string]) = m.text = v.join("\n")
 
-proc gridSizesToText*(v: seq[GridSize]): string =
-  ## `"100, 50%, auto"`: absolute pixels, percent, or `auto`.
-  var parts: seq[string]
-  for g in v:
-    case g.kind
-    of gkAbsolute: parts.add $g.value
-    of gkPercent: parts.add $g.value & "%"
-    of gkAuto: parts.add "auto"
-  parts.join(", ")
-
-proc parseGridSizes*(s: string): seq[GridSize] =
-  ## Inverse of `gridSizesToText`. Raises `ValueError` for a malformed entry.
-  for part in s.split(','):
-    let p = part.strip()
-    if p.len == 0: continue
-    if p == "auto": result.add gsAuto()
-    elif p.endsWith("%"): result.add gsPercent(float32(parseFloat(p[0 ..< ^1])))
-    else: result.add gsAbsolute(float32(parseFloat(p)))
-
 proc getCols(g: GridPanel): string = gridSizesToText(g.columns)
 proc setCols(g: GridPanel, v: string) = g.columns = parseGridSizes(v)
 proc getRows(g: GridPanel): string = gridSizesToText(g.rows)

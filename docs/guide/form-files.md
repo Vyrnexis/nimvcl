@@ -8,8 +8,8 @@ from the file's text. Both are built on the **property registry**, nimvcl's
 answer to Delphi's RTTI.
 
 ```nim
-import nimvcl
-import nimvcl/dsl/nfm            # not part of `import nimvcl`: it pulls in the registry
+import nimvcl                    # or only the modules the form uses, see below
+import nimvcl/dsl/formload       # `loadForm`; light (no registry)
 
 loadForm LoginForm, "LoginForm.nfm"          # path relative to this module
 
@@ -204,6 +204,7 @@ are served by the library's own event path, so the control's event fields stay f
 ## `loadForm` (compile time)
 
 ```nim
+import nimvcl/dsl/formload
 loadForm MainForm, "MainForm.nfm"
 ```
 
@@ -223,6 +224,45 @@ property may refer to any named object, also one further down. A root of class
 `Frame` produces a `Frame` subtype with the usual `newX(parent, left, top, width,
 height)`. A root of another class uses `initThatClass(self, owner)` as the `form`
 macro does for `form Name of Base`.
+
+### What `loadForm` imports
+
+`loadForm` lives in `nimvcl/dsl/formload`, which needs only the `.nfm` syntax
+(`nimvcl/dsl/nfmsyntax`, plain `std`) and the small `graphics/color`,
+`graphics/font`, `graphics/image` and `core/component` modules. It does **not**
+import the property registry (`props`, `props_std`), the object inspector and
+its editors, or the run-time loader: the macro reads the class names and
+values from the file and emits plain assignments, and the compiler resolves
+them. An application that uses `loadForm` therefore compiles quickly: a small form
+(label, edit, button, image list) builds in under 2 s warm instead of about 5 s
+with `import nimvcl` plus `dsl/nfm`.
+
+The calling module imports what the generated code uses:
+
+* `nimvcl/core/[control, form]` (the base classes; `core/application` to run it);
+* the module of every class the file names, e.g. `nimvcl/controls/button` for a
+  `Button`, `nimvcl/controls/menus` for `MainMenu` / `MenuItem` (a missing one
+  is reported as `unknown class` at the `loadForm` line);
+* `nimvcl/controls/common` when a property uses one of the shared value types
+  (`Orientation`, `HAlign`, ...): it re-exports the geometry, colour, canvas and
+  theme modules.
+
+`formload` itself re-exports `graphics/color` (colour literals) and
+`graphics/font` (`font.size = 12`). `GridPanel.columns` needs
+`controls/flowpanel` (the class's module) and `shortcut = '...'` needs
+`controls/menus` (`MenuItem` and `Action` modules bring it in).
+Objects that are not `newT(parent: Container)` controls (menu items, list
+columns, status panels, actions) are created by an `nfmMake(T, parent)` that
+their own module defines, so importing the class's module is enough.
+
+`import nimvcl` plus `import nimvcl/dsl/formload` also works, with the
+compile-time cost of the umbrella module. `import nimvcl/dsl/nfm` is the full
+module for tools and run-time loading (`loadNfm`, `formToNfm`,
+`nfmToFormMacro`); it re-exports `formload`, so existing code that imports it
+keeps working.
+
+The IDE generates form units that import exactly the control modules of the
+classes on the form (see the IDE's user guide).
 
 ### Handlers
 
@@ -335,7 +375,7 @@ The registry (`nimvcl/dsl/props`) knows each registered class with its parent,
 factory and **published properties**: name, kind, category, getter, setter. It is
 what `loadNfm`, `formToNfm`, the [object inspector](../components/inspector.md)
 and a designer use. `nimvcl/dsl/props_std` registers every stock control
-(`import nimvcl/dsl/nfm` imports it for you).
+(`import nimvcl/dsl/nfm` imports it for you; `loadForm` does not need it).
 
 | Kind (`PropKind`) | Nim types | `PropValue` field |
 |---|---|---|
@@ -441,7 +481,7 @@ instance that measures defaults).
   yet).
 * A handler named in a file is bound at run time only for event types whose
   resolver you provide (`NotifyEvent` through a table).
-* `loadForm` cannot see the registry (it runs in the compiler), so it relies on
+* `loadForm` does not use the registry (see "What `loadForm` imports"), so it relies on
   the compiler to resolve classes, properties and enum names; a property of a
   custom class needs a plain Nim setter, or one of the special cases of the
   macro (`shortcut`, `GridPanel.columns`/`rows`, `Memo.lines`,

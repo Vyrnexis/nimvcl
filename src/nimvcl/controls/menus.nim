@@ -954,3 +954,18 @@ proc newMainMenu*(parent: Container = nil): MainMenu {.discardable.} =
   result.initMainMenu(parent)
   if parent != nil and parent of Form: Form(parent).menu = result
   elif parent != nil: parent.insertControl result
+
+# `loadForm` (dsl/formload) builds objects that are not `newT(parent: Container)`
+# controls with `nfmMake(T, parent)`, found in the scope of the calling module.
+
+proc nfmMake*(T: typedesc[MenuItem], parent: MenuItem): MenuItem =
+  result = newMenuItem(owner = parent)
+  parent.add result
+
+proc nfmMake*(T: typedesc[MenuItem], parent: MainMenu): MenuItem =
+  result = newMenuItem(owner = parent)
+  parent.add result
+
+proc nfmMake*(T: typedesc[MenuItem], parent: PopupMenu): MenuItem =
+  result = newMenuItem(owner = parent)
+  parent.add result

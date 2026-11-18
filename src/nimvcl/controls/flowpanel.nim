@@ -25,7 +25,7 @@
 ## rectangle. Children of both panels keep their `autoSize` sizing (computed
 ## before the panel arranges them; a grid then stretches them to their cell).
 
-import std/[tables, hashes]
+import std/[tables, hashes, strutils]
 import ./[common, panel]
 export panel
 
@@ -51,6 +51,25 @@ type
 func gsAbsolute*(v: float32): GridSize = GridSize(kind: gkAbsolute, value: v)
 func gsPercent*(v: float32): GridSize = GridSize(kind: gkPercent, value: v)
 func gsAuto*(): GridSize = GridSize(kind: gkAuto)
+
+proc gridSizesToText*(v: seq[GridSize]): string =
+  ## `"100, 50%, auto"`: absolute pixels, percent, or `auto`.
+  var parts: seq[string]
+  for g in v:
+    case g.kind
+    of gkAbsolute: parts.add $g.value
+    of gkPercent: parts.add $g.value & "%"
+    of gkAuto: parts.add "auto"
+  parts.join(", ")
+
+proc parseGridSizes*(s: string): seq[GridSize] =
+  ## Inverse of `gridSizesToText`. Raises `ValueError` for a malformed entry.
+  for part in s.split(','):
+    let p = part.strip()
+    if p.len == 0: continue
+    if p == "auto": result.add gsAuto()
+    elif p.endsWith("%"): result.add gsPercent(float32(parseFloat(p[0 ..< ^1])))
+    else: result.add gsAbsolute(float32(parseFloat(p)))
 
 # --------------------------------------------------------------- FlowPanel
 

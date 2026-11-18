@@ -132,3 +132,9 @@ proc newStatusBar*(parent: Container = nil, simpleText = "",
   result.initStatusBar(parent)
   if simpleText.len > 0: result.simpleText = simpleText
   result.placeControl(parent, left, top, width, height)
+
+# `loadForm` (dsl/formload) builds objects that are not `newT(parent: Container)`
+# controls with `nfmMake(T, parent)`, found in the scope of the calling module.
+
+proc nfmMake*(T: typedesc[StatusPanel], parent: StatusBar): StatusPanel =
+  parent.addPanel()
