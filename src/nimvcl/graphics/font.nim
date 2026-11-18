@@ -4,7 +4,7 @@
 ## logical size and a style. It holds no SDL handle; the `RenderContext`
 ## resolves it to a rasterised font at `size * scale` when text is drawn.
 
-import std/[os, tables, sets, strutils]
+import std/[os, osproc, tables, sets, strutils, algorithm, streams]
 import ./color
 
 type
@@ -21,10 +21,15 @@ type
   FontFiles = object
     regular, bold, italic, boldItalic: string
 
+  SysVariant = object
+    path: string              ## "" = the family is not installed
+    bold, italic: bool        ## what the file really is (else the style is synthesised)
+
   ResolvedFont* = object
     ## Result of resolving a `FontSpec` against the registry.
     path*: string             ## TTF file to open
     ttfStyle*: uint32         ## SDL_ttf style flags (synthetic bold/italic only; underline and strike-out are drawn by the Canvas)
+    isSystem*: bool           ## the file comes from the operating system's fonts (fontconfig)
 
 const
   CjkCandidates = [
@@ -78,6 +83,11 @@ else:
 
 var
   families: Table[string, FontFiles]
+  memoryFonts: Table[string, ref string]   ## `embedded:` paths of registered font data
+  retiredFonts: seq[ref string]            ## replaced data: still referenced by open fonts, never freed
+  sysVariants: Table[string, SysVariant]   ## system lookups (also misses), see `systemVariant`
+  sysFamilies: seq[string]
+  sysFamiliesDone = false
   userFamilies: HashSet[string]
   fallbackFiles: seq[string]
   fallbackEpoch = 0
@@ -122,11 +132,36 @@ proc registerFontFamily*(family, regular: string, bold = "", italic = "",
                                             italic: italic, boldItalic: boldItalic)
   inc fallbackEpoch   # contexts rebuild fonts
 
+proc registerFontFamilyData*(family, regular: string, bold = "", italic = "",
+                             boldItalic = "") =
+  ## Like `registerFontFamily`, but from the bytes of TTF/OTF files (for
+  ## example `staticRead("fonts/Foo.ttf")`), so the font travels inside the
+  ## binary. The data is copied and kept for the life of the program. Missing
+  ## variants fall back to `regular` plus a synthetic style.
+  let key = family.toLowerAscii
+  proc put(variant, data: string): string =
+    if data.len == 0: return ""
+    let name = "user/" & key & "/" & variant
+    if name in memoryFonts: retiredFonts.add memoryFonts[name]
+    var r = new string
+    r[] = data
+    memoryFonts[name] = r
+    EmbeddedPrefix & name
+  let ff = FontFiles(regular: put("regular", regular), bold: put("bold", bold),
+                     italic: put("italic", italic),
+                     boldItalic: put("bolditalic", boldItalic))
+  userFamilies.incl key
+  families[key] = ff
+  inc fallbackEpoch
+
 proc embeddedFontData*(path: string): tuple[data: pointer, len: int] =
   ## Bytes of a font held in the binary (`path` is `embedded:<file name>`),
   ## or (nil, 0). The memory is static: never free it.
   if path.startsWith(EmbeddedPrefix):
     let name = path[EmbeddedPrefix.len .. ^1]
+    if name in memoryFonts:
+      let s = memoryFonts[name]
+      return (cast[pointer](cstring(s[])), s[].len)
     if name in embeddedFonts:
       let s = addr embeddedFonts[name]
       return (cast[pointer](cstring(s[])), s[].len)
@@ -186,14 +221,101 @@ proc fontRegistryEpoch*(): int =
   ensureFontRegistry()
   fallbackEpoch
 
+# ------------------------------------------------------------ system fonts
+# Linux/BSD: fontconfig through its command line tools (`fc-match`, `fc-list`),
+# so there is no link-time dependency; when they are missing every lookup
+# simply finds nothing and the text uses the bundled "sans".
+# TODO(windows, macos): enumerate and resolve through DirectWrite / CoreText.
+# Until then `systemFontFamilies` is empty there and unknown families fall back
+# to "sans".
+
+const HaveFontconfig = defined(linux) or defined(bsd)
+
+proc runTool(cmd: string, args: openArray[string]): string =
+  ## Standard output of `cmd` ("" when it is missing or fails).
+  when HaveFontconfig:
+    try:
+      let p = startProcess(cmd, args = args, options = {poUsePath})
+      defer: p.close()
+      result = p.outputStream.readAll()
+      if p.waitForExit() != 0: result = ""
+    except CatchableError:
+      result = ""
+
+func fcEscape(s: string): string =
+  ## Escapes the characters that are special in a fontconfig pattern.
+  for c in s:
+    if c in {'\\', '-', ':', ',', '='}: result.add '\\'
+    result.add c
+
+proc systemVariant(family: string, bold, italic: bool): SysVariant =
+  ## The installed file that best matches `family` with the wanted style, or an
+  ## empty path. fontconfig always answers (with a substitute when the family is
+  ## missing): the answer only counts when it names the requested family.
+  let key = family.toLowerAscii & (if bold: "|b" else: "|r") & (if italic: "i" else: "")
+  if key in sysVariants: return sysVariants[key]
+  when HaveFontconfig:
+    var pat = fcEscape(family)
+    if bold: pat.add ":weight=bold"
+    else: pat.add ":weight=regular"
+    pat.add (if italic: ":slant=italic" else: ":slant=roman")
+    let o = runTool("fc-match", ["-f", "%{family}\t%{weight}\t%{slant}\t%{file}", pat])
+    let parts = o.split('\t')
+    if parts.len == 4 and parts[3].len > 0 and fileExists(parts[3]):
+      var named = false
+      for n in parts[0].split(','):
+        if n.strip.cmpIgnoreCase(family.strip) == 0: named = true
+      if named:
+        let w = try: parseInt(parts[1].strip) except ValueError: 80
+        let sl = try: parseInt(parts[2].strip) except ValueError: 0
+        result = SysVariant(path: parts[3], bold: w >= 180, italic: sl > 0)
+  sysVariants[key] = result
+
+proc systemFontFamilies*(): seq[string] =
+  ## Family names installed on the system, sorted and without duplicates
+  ## (fontconfig's `fc-list`). Empty when the list cannot be read, on other
+  ## platforms for now, or when `fc-list` is missing. The result is cached.
+  if not sysFamiliesDone:
+    sysFamiliesDone = true
+    when HaveFontconfig:
+      var seen = initHashSet[string]()
+      for line in runTool("fc-list", [":", "family"]).splitLines:
+        for n in line.split(','):
+          let name = n.strip
+          if name.len > 0 and not seen.containsOrIncl(name.toLowerAscii):
+            sysFamilies.add name
+      sysFamilies.sort(proc(a, b: string): int = cmpIgnoreCase(a, b))
+  sysFamilies
+
+proc refreshSystemFonts*() =
+  ## Forgets the cached system lookups and family list (after installing fonts).
+  sysVariants.clear()
+  sysFamilies.setLen 0
+  sysFamiliesDone = false
+  inc fallbackEpoch
+
+proc registeredFontFamilies*(): seq[string] =
+  ## Families added with `registerFontFamily` / `registerFontFamilyData`
+  ## (lower case names), sorted.
+  for f in userFamilies: result.add f
+  result.sort()
+
 proc resolveFont*(spec: FontSpec): ResolvedFont =
   ## Chooses a file for `spec`, synthesising bold/italic when the family has
   ## no such variant. Falls back to "sans" for unknown families.
   ensureFontRegistry()
   let fam = if spec.family.len == 0: DefaultFamily else: spec.family.toLowerAscii
-  let ff = families.getOrDefault(fam, families[DefaultFamily])
   let wantB = fsBold in spec.style
   let wantI = fsItalic in spec.style
+  if fam notin families:
+    let v = systemVariant(spec.family, wantB, wantI)
+    if v.path.len > 0:
+      result.path = v.path
+      result.isSystem = true
+      if wantB and not v.bold: result.ttfStyle = result.ttfStyle or TtfBold
+      if wantI and not v.italic: result.ttfStyle = result.ttfStyle or TtfItalic
+      return
+  let ff = families.getOrDefault(fam, families[DefaultFamily])
   var path = ff.regular
   var synthB = wantB
   var synthI = wantI
@@ -211,11 +333,13 @@ proc resolveFont*(spec: FontSpec): ResolvedFont =
   # both itself.
 
 proc fontSource*(spec: FontSpec): string =
-  ## Where the font for `spec` comes from: "embedded" (in the binary),
-  ## "disk" (bundled file loaded from `NIMVCL_ASSETS` or the assets folder) or
-  ## "registered" (a family set with `registerFontFamily`).
+  ## Where the font for `spec` comes from: "system" (installed on this
+  ## machine), "registered" (a family set with `registerFontFamily` or
+  ## `registerFontFamilyData`), "embedded" (bundled, in the binary) or "disk"
+  ## (bundled file loaded from `NIMVCL_ASSETS` or the assets folder).
   let r = resolveFont(spec)
   let fam = if spec.family.len == 0: DefaultFamily else: spec.family.toLowerAscii
-  if r.path.startsWith(EmbeddedPrefix): "embedded"
+  if r.isSystem: "system"
   elif fam in userFamilies and fam in families: "registered"
+  elif r.path.startsWith(EmbeddedPrefix): "embedded"
   else: "disk"

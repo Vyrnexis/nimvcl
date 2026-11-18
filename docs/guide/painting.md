@@ -43,7 +43,7 @@ binary; build with `-d:nimvclNoEmbedFonts` to skip it and load the files from
 the `assets` folder instead. Overrides: if `NIMVCL_ASSETS` names a folder with
 `fonts/<file>.ttf`, that file is loaded from disk instead of the embedded copy,
 and `registerFontFamily("sans", ...)` replaces a bundled family.
-`fontSource(font("sans"))` reports "embedded", "disk" or "registered". For glyphs they lack,
+`fontSource(font("sans"))` reports "embedded", "disk", "registered" or "system". For glyphs they lack,
 nimvcl keeps a global fallback list. It holds the Noto Symbols fonts and, when
 one is installed, **a system CJK font**: the first of Noto Sans CJK, Noto Serif
 CJK, WenQuanYi (Micro Hei / Zen Hei) or Droid Sans Fallback found in the usual
@@ -54,6 +54,34 @@ boxes). `cjkFallbackFont()` tells you which file was picked (`""` for none).
 For another font, add it yourself: `addFallbackFontFile("/path/to/font.ttf")`.
 Missing files are ignored. (Color emoji fonts are not probed: SDL_ttf cannot
 scale their bitmaps.)
+
+### Font families and shipping
+
+A `FontSpec.family` is resolved in this order:
+
+1. A family you registered: `registerFontFamily(name, regularPath, bold, italic,
+   boldItalic)` loads files at run time; `registerFontFamilyData(name, regular,
+   bold, italic, boldItalic)` takes the file **bytes**, for example
+   `registerFontFamilyData("Foo", staticRead("fonts/Foo-Regular.ttf"))`, so the font
+   is part of the executable like the bundled ones. Missing variants are
+   synthesised from the regular face.
+2. The bundled families `sans` and `mono`.
+3. A **system font** (Linux/BSD): any other name is looked up with fontconfig
+   (`fc-match`; no link-time dependency). Only an exact family match counts: when
+   fontconfig answers with a substitute, or `fc-match` is not installed, the text
+   uses the bundled `sans`. Results are cached. `systemFontFamilies()` lists the
+   installed families (`fc-list`, sorted, empty when unavailable) and
+   `refreshSystemFonts()` forgets the caches. On Windows and macOS there is no
+   system lookup yet: unknown names fall back to `sans`.
+
+What to ship: bundled and registered-from-data (project) fonts **travel with the
+binary** and look the same everywhere. System fonts depend on the target machine:
+where the family is missing the text silently falls back to `sans`, so pick a
+bundled or project font for anything that must look the same. In the Object
+Inspector the `font.family` drop-down groups the choices as Bundled, Project and
+System (the last is marked as possibly missing on other machines); a free name can
+still be typed. `fontFileInfo(path)` reads the family name and bold/italic flags
+of a font file.
 
 ## Partial repainting
 

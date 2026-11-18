@@ -174,7 +174,10 @@ proc openFontAt(path: string, px: float32): Font =
 
 proc openEntry(key: FontKey): FontEntry =
   let px = key.px64.float32 / 64
-  let f = openFontAt(key.path, px)
+  var f = openFontAt(key.path, px)
+  if f == nil:   # an unreadable file (a system font SDL_ttf cannot open): use the bundled sans
+    let alt = resolveFont(font()).path
+    if alt != key.path: f = openFontAt(alt, px)
   if f == nil:
     raise newException(IOError, "openFont " & key.path & ": " & $getError())
   setFontHinting(f, hintingLight)
@@ -326,3 +329,23 @@ proc textureFor*(ctx: RenderContext, img: Image): Texture =
   e.lastUsed = ctx.frame
   ctx.textures[img.id] = e
   e.tex
+
+type FontFileInfo* = object
+  ## What a font file says about itself.
+  family*: string             ## "" when the file cannot be read as a font
+  style*: set[FontStyle]      ## fsBold / fsItalic of the face
+
+proc fontFileInfo*(path: string): FontFileInfo =
+  ## Family name and bold/italic flags of a TTF/OTF file (SDL_ttf). Initialises
+  ## SDL_ttf for the call when the application has not done so yet.
+  let wasInit = wasInit() > 0
+  if not wasInit and not sdl3_ttf.init(): return
+  let f = openFont(path.cstring, 16)
+  if f != nil:
+    let n = getFontFamilyName(f)
+    if n != nil: result.family = $n
+    let st = getFontStyle(f)
+    if (st and 0x01'u32) != 0: result.style.incl fsBold
+    if (st and 0x02'u32) != 0: result.style.incl fsItalic
+    closeFont(f)
+  if not wasInit: sdl3_ttf.quit()

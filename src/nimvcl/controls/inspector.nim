@@ -44,6 +44,7 @@
 import std/[strutils, algorithm, sets]
 import ./common, ./scrolling, ./edit, ./combobox, ./listbox, ./viewsupport
 import ../core/form
+import ../graphics/font
 import ../graphics/image
 import ../dsl/props_std
 export props_std
@@ -72,6 +73,7 @@ type
   ExtraEditorEvent* = proc(sender: Control, target: Obj, prop: string)
   HandlerListEvent* = proc(sender: Control, target: Obj, event: string): seq[string]
   ChoicesEvent* = proc(sender: Control, target: Obj, prop: string): seq[Obj]
+  FontFamiliesEvent* = proc(sender: Control, target: Obj): seq[string]
 
   ObjectInspector* = ref object of ScrollingControl
     fTargets: seq[Obj]
@@ -116,6 +118,19 @@ type
       ## shown. When nil the named objects of the target's form are offered
       ## (found by walking up from the target), which is wrong for a target
       ## shown inside a design surface: a designer supplies its form's objects.
+    onGetFontFamilies*: FontFamiliesEvent
+      ## The family names of the host's project fonts, offered under "Project" in
+      ## the `font.family` drop-down. When nil the families registered with
+      ## `registerFontFamily*` are offered.
+
+const
+  FontGroupBundled* = "-- Bundled --"
+  FontGroupProject* = "-- Project --"
+  FontGroupSystem* = "-- System (may be missing on other machines) --"
+    ## Group headers of the `font.family` drop-down; not selectable.
+
+proc isFontGroupHeader*(s: string): bool =
+  s in [FontGroupBundled, FontGroupProject, FontGroupSystem]
 
 const
   ExtraKinds = {pkStrings, pkImage, pkImages, pkCollection}
@@ -556,6 +571,9 @@ proc comboValue(ins: ObjectInspector, row: Row, v: var PropValue): string =
     v = if i == 0: pvObject(nil) else: pvObject(ins.fChoices[i - 1], objectName(ins.fChoices[i - 1]))
   of pkColor, pkEvent:
     return parseText(row.info, c.text, v)
+  of pkString:
+    if isFontGroupHeader(c.text): return "pick a font family, not a group"
+    v = pvString(c.text.strip)
   else: return "unsupported editor"
 
 proc commitEdit*(ins: ObjectInspector): bool {.discardable.} =
@@ -607,6 +625,31 @@ proc choicesFor(ins: ObjectInspector, info: PropInfo): seq[Obj] =
   var seen: seq[Obj]
   visitObjects(top, classByName(info.typeName), seen, result)
 
+proc isFamilyProp(info: PropInfo): bool =
+  info.kind == pkString and info.name.endsWith(".family")
+
+proc fontFamilyItems*(ins: ObjectInspector): seq[string] =
+  ## The entries of the `font.family` drop-down: the group headers
+  ## (`FontGroupBundled`, `FontGroupProject`, `FontGroupSystem`) each followed
+  ## by its families. A group without families has no header.
+  result = @[FontGroupBundled, DefaultFamily, MonoFamily]
+  var proj: seq[string]
+  if ins.onGetFontFamilies != nil and ins.fTargets.len > 0:
+    proj = ins.onGetFontFamilies(ins, ins.fTargets[0])
+  else:
+    proj = registeredFontFamilies()
+  var seen = @[DefaultFamily, MonoFamily]
+  var group: seq[string]
+  for n in proj:
+    if n.len > 0 and n.toLowerAscii notin seen:
+      seen.add n.toLowerAscii
+      group.add n
+  if group.len > 0: result.add FontGroupProject; result.add group
+  group.setLen 0
+  for n in systemFontFamilies():
+    if n.toLowerAscii notin seen: group.add n
+  if group.len > 0: result.add FontGroupSystem; result.add group
+
 proc paletteIndex(c: Color): int =
   for i, (_, p) in Palette:
     if p == c: return i
@@ -632,6 +675,22 @@ proc beginEdit*(ins: ObjectInspector, row: int, openList = true): bool {.discard
     return false
   ins.fEditRow = row
   ins.scrollRowIntoView(row)
+  if isFamilyProp(r.info):
+    let c = ins.fEditCombo
+    ins.fColorEdit = false
+    c.dropList.style = lbStandard
+    c.style = csDropDown
+    var items = ins.fontFamilyItems
+    c.items = items
+    c.text = if mixed: "" else: v.s
+    ins.fEditKind = ekCombo
+    ins.layoutEditor()
+    c.visible = true
+    c.setFocus()
+    c.edit.selectAll()
+    if openList: c.dropDown()
+    ins.invalidate()
+    return true
   case r.info.kind
   of pkString, pkInt, pkFloat:
     ins.fEditKind = ekText

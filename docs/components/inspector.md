@@ -43,7 +43,9 @@ from .nfm".
   a fresh object of the same class is drawn **bold**. Composite properties and
   sets have a chevron: `font` expands into `family`, `size`, `style`; `margins`,
   `padding` and `constraints` into their four parts; `anchors` into one check box
-  per element.
+  per element. The `font.family` value is an editable drop-down grouped as Bundled,
+  Project (`onGetFontFamilies`, by default the registered families) and System
+  (marked as possibly missing on other machines); a free name can be typed.
 * The divider between the columns can be dragged.
 
 ## Editing
