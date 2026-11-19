@@ -733,7 +733,7 @@ proc beginEdit*(ins: ObjectInspector, row: int, openList = true): bool {.discard
   if isFamilyProp(r.info):
     let c = ins.fEditCombo
     ins.fColorEdit = false
-    c.dropList.style = lbStandard
+    c.dropStyle = lbStandard
     c.style = csDropDown
     var items = ins.fontFamilyItems
     c.items = items
@@ -759,7 +759,7 @@ proc beginEdit*(ins: ObjectInspector, row: int, openList = true): bool {.discard
   of pkBool, pkEnum, pkColor, pkObject, pkEvent:
     let c = ins.fEditCombo
     ins.fColorEdit = r.info.kind == pkColor
-    c.dropList.style = if ins.fColorEdit: lbOwnerDraw else: lbStandard
+    c.dropStyle = if ins.fColorEdit: lbOwnerDraw else: lbStandard
     case r.info.kind
     of pkBool:
       c.style = csDropDownList
@@ -1160,7 +1160,7 @@ proc initObjectInspector*(ins: ObjectInspector, owner: Component = nil) =
   cb.onExit = proc(s: Control) =
     if ins.fEditKind == ekCombo and not cb.droppedDown:
       if not ins.commitEdit(refocus = false): ins.cancelEdit(refocus = false)
-  cb.dropList.onDrawItem = proc(s: Control, cv: Canvas, index: int, rect: RectF,
+  cb.onDrawItem = proc(s: Control, cv: Canvas, index: int, rect: RectF,
                                 state: ItemStates) =
     if not ins.fColorEdit: return
     let t = ins.theme

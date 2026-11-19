@@ -30,6 +30,7 @@ free.add "banana"
 | `autoComplete` | bool | Complete typed text from the items (`csDropDown`) |
 | `dropDownCount` | int | Visible rows in the list (default 8) |
 | `dropDownWidth` | float32 | List width; 0 = same as the box |
+| `dropStyle`, `onDrawItem` | ListBoxStyle, event | `lbOwnerDraw` draws the list rows with `onDrawItem` |
 | `color` | Color | Own background: the field and the drop-down list; default `theme.surface`. Set it and `parentColor` turns off |
 | `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
 
@@ -50,6 +51,7 @@ Shortcuts also exist directly on the combo: `add`, `insert`, `delete`, `clear`,
 | Method | Description |
 |---|---|
 | `dropDown()`, `closeUp()` | Open or close the list |
+| `dropList` | The popup's `ListBox` while open, nil when closed (a view made for each opening) |
 
 ## Tips
 

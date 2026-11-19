@@ -353,7 +353,10 @@ suite "combobox":
   test "the drop-down list draws no focus ring of its own":
     let f = newShown()
     let c = f.mk(csDropDownList)
+    c.dropDown()
     check not c.dropList.showFocusRect
+    c.closeUp()
+    check c.dropList == nil
     check newListBox().showFocusRect                  # a stand-alone list keeps it
 
 
@@ -412,3 +415,45 @@ suite "combobox":
     check c.text == "" and changes == 1
     c.itemIndex = -1
     check changes == 1
+
+  test "items edited through cb.items keep the committed item, open or closed":
+    let f = newShown()
+    let c = mk(f, csDropDownList, items = ["a", "b", "c", "d"])
+    c.itemIndex = 2
+    changes = 0
+    c.items.insert(0, "z")                       # before it: the index follows
+    check c.itemIndex == 3 and c.text == "c" and changes == 0
+    c.items.delete(0)
+    check c.itemIndex == 2 and c.text == "c" and changes == 0
+    c.dropDown()
+    c.items.delete(0)                            # while open, through the items list
+    check c.itemIndex == 1 and c.dropList.itemIndex == 1 and c.text == "c"
+    c.closeUp()
+    check c.itemIndex == 1 and c.text == "c" and changes == 0
+    c.dropDown()
+    c.items.clear()
+    c.closeUp()
+    check c.itemIndex == -1 and c.count == 0 and changes == 1
+
+  test "sorted: replacing an item re-sorts and the selection stays on its text":
+    let f = newShown()
+    let c = mk(f, csDropDownList, items = ["b", "d", "f"])
+    c.sorted = true
+    c.itemIndex = 1
+    c.items[0] = "z"
+    check @[c[0], c[1], c[2]] == @["d", "f", "z"]
+    check c.text == "d" and c.itemIndex == 0
+
+  test "closing without a pick leaves the model alone; the list view is discarded":
+    let f = newShown()
+    let c = mk(f, csDropDownList, items = ["a", "b", "c"])
+    c.itemIndex = 1
+    c.dropDown()
+    let first = c.dropList
+    f.tap(keyDown)
+    check c.dropList.itemIndex == 2 and c.itemIndex == 1
+    c.closeUp()
+    check c.dropList == nil and c.itemIndex == 1 and c.text == "b"
+    c.dropDown()
+    check c.dropList != first and c.dropList.itemIndex == 1
+    c.closeUp()
