@@ -9,23 +9,23 @@
 ## enabled default button, Esc the first cancel button. They are reached
 ## through the key-handler chain (`UiRoot.addKeyHandler`), so they only see
 ## keys the focused control did not use; a focused Button handles Enter itself
-## (clicking itself). The handler is installed lazily (when a default/cancel
-## button is set or first painted).
+## (clicking itself). The handler is installed when a default/cancel button is
+## set, or when such a button gets into a form.
 ##
 ## Mnemonic: `&` in the caption underlines a letter while Alt is held;
 ## Alt+letter clicks the button.
 ##
-## `modalResult`: when not `mrNone`, a click also sets it on the button's form
-## (which closes it when shown with `showModal`).
+## `modalResult`: when not `mrNone`, a click first sets it on the button's form
+## (which closes it when shown with `showModal`), then runs `onClick`: the
+## handler can veto closing by setting `form.modalResult = mrNone`.
 
 import ../core/form
 import ./common
 
 type
-  Button* = ref object of Control
+  Button* = ref object of ClickableControl
     fDefault, fCancel, fFlat: bool
     fModalResult: ModalResult
-    fHot, fMouseDown, fKeyDown, fHooked: bool
 
 const ButtonPadding = 16'f32      ## horizontal text padding for autoSize
 
@@ -44,7 +44,7 @@ proc findDialogButton(c: Control, cancel: bool): Button =
 
 proc click*(b: Button) =
   ## Programmatic click (VCL Click): ignored while hidden or disabled.
-  if b.isVisible and b.isEnabled: b.doClick()
+  b.activate()
 
 proc handleDialogKey*(root: Control, key: var Key, shift: ShiftState) =
   ## Enter -> default button, Esc -> cancel button (no Ctrl/Alt). Sets `key`
@@ -61,14 +61,14 @@ proc installDialogKeys*(ui: UiRoot) =
   ## buttons, through the key-handler chain (id "dialog"; idempotent), so it
   ## coexists with menu shortcuts and the application's own `onUnhandledKey`.
   ui.addKeyHandler("dialog", proc(key: var Key, shift: ShiftState) =
-    handleDialogKey(ui.root, key, shift))
+    handleDialogKey(ui.root, key, shift), onRepeat = false)  # once per press
 
 proc ensureHook(b: Button) =
-  if b.fHooked: return
+  ## Makes sure the form `b` is in handles Enter/Esc (also after `b` moved to
+  ## another form).
   let h = b.host
-  if h of UiRoot:
+  if h of UiRoot and not UiRoot(h).hasKeyHandler("dialog"):
     installDialogKeys(UiRoot(h))
-    b.fHooked = true
 
 # ------------------------------------------------------------- properties
 
@@ -94,23 +94,11 @@ proc `flat=`*(b: Button, v: bool) =
 func modalResult*(b: Button): ModalResult = b.fModalResult
 proc `modalResult=`*(b: Button, v: ModalResult) = b.fModalResult = v
 
-func isPressed*(b: Button): bool =
-  ## Shown pressed: mouse held down inside it, or Space held while focused.
-  (b.fMouseDown and b.fHot) or b.fKeyDown
-
-func isHot*(b: Button): bool = b.fHot
-
-proc state(b: Button): VisualState =
-  b.visualState(b.fHot, b.isPressed)
-
 # --------------------------------------------------------------- behaviour
 
-method canFocus*(b: Button): bool = b.isVisible and b.isEnabled
-
-method activateMnemonic*(b: Button, ch: Rune): bool =
-  if mnemonicOf(b.caption) != ch: return false
-  b.click()
-  true
+method visibilityChanged*(b: Button) =
+  if b.fDefault or b.fCancel: b.ensureHook()   # inserted into a form
+  procCall visibilityChanged(Control(b))
 
 method preferredSize*(b: Button): SizeF =
   if not b.canMeasure: return sizeF(b.width, b.height)
@@ -119,66 +107,17 @@ method preferredSize*(b: Button): SizeF =
   sizeF(max(ceil(s.w) + 2 * ButtonPadding, 64),
         max(t.controlHeight, ceil(s.h) + t.spacing))
 
-method doMouseEnter*(b: Button) =
-  b.fHot = true
-  b.invalidate()
-  procCall doMouseEnter(Control(b))
-
-method doMouseLeave*(b: Button) =
-  b.fHot = false
-  b.invalidate()
-  procCall doMouseLeave(Control(b))
-
-method doMouseDown*(b: Button, button: MouseButton, shift: ShiftState,
-                    x, y: float32) =
-  if button == mbLeft:
-    b.fMouseDown = true
-    b.invalidate()
-  procCall doMouseDown(Control(b), button, shift, x, y)
-
-method doMouseMove*(b: Button, shift: ShiftState, x, y: float32) =
-  if b.fMouseDown and ssLeft notin shift:   # release was missed (focus lost)
-    b.fMouseDown = false
-    b.invalidate()
-  procCall doMouseMove(Control(b), shift, x, y)
-
-method doMouseUp*(b: Button, button: MouseButton, shift: ShiftState,
-                  x, y: float32) =
-  if button == mbLeft and b.fMouseDown:
-    b.fMouseDown = false
-    b.invalidate()
-  procCall doMouseUp(Control(b), button, shift, x, y)
-
 method doKeyDown*(b: Button, key: var Key, shift: ShiftState) =
-  procCall doKeyDown(Control(b), key, shift)
-  if key == keySpace and shift * {ssCtrl, ssAlt} == {}:
-    key = Key(0)
-    if not b.fKeyDown:
-      b.fKeyDown = true
-      b.invalidate()
-  elif key == keyEnter:
+  procCall doKeyDown(ClickableControl(b), key, shift)
+  if key == keyEnter:
     key = Key(0)
     if not b.keyIsRepeat: b.click()      # once per press, not per auto-repeat
 
-method doKeyUp*(b: Button, key: var Key, shift: ShiftState) =
-  procCall doKeyUp(Control(b), key, shift)
-  if key == keySpace and b.fKeyDown:
-    key = Key(0)
-    b.fKeyDown = false
-    b.invalidate()
-    b.click()
-
-method doExit*(b: Button) =
-  if b.fKeyDown:
-    b.fKeyDown = false
-  b.invalidate()
-  procCall doExit(Control(b))
-
 method doClick*(b: Button) =
-  procCall doClick(Control(b))
-  if b.fModalResult != mrNone:
+  if b.fModalResult != mrNone:         # before `onClick`, which may veto it
     let r = b.root
     if r of Form: Form(r).modalResult = b.fModalResult
+  procCall doClick(Control(b))
 
 # ------------------------------------------------------------------- paint
 
@@ -193,9 +132,8 @@ func customFace(base: Color, s: VisualState, t: Theme): Color =
   of vsDisabled: mix(base, t.surface, 0.6)
 
 method paint*(b: Button, c: Canvas) =
-  b.ensureHook()
   let t = b.theme
-  let st = b.state
+  let st = b.visualState
   let own = not b.parentColor and b.color.a > 0   # a colour set by the program
   let accent = b.fDefault and st != vsDisabled and not own
   let r = b.clientRect

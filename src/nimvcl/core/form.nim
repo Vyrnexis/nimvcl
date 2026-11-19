@@ -35,7 +35,7 @@ type
 
   Form* = ref object of Container
     fUi: UiRoot
-    fShown, fModal, fClosing, fSyncing: bool
+    fShown, fModal, fClosing: bool
     fModalResult: ModalResult
     fOwner: Form                 ## the form a modal form is owned by / centred on
     menuBar*: Control            ## the form's `MainMenu` (set by controls/menus.nim)
@@ -85,9 +85,11 @@ proc beginModalState*() =
   ## `runModalLoop` (application.nim), which does both.
   inc gGates
   if closePopupsProc != nil: closePopupsProc(nil)
+  for f in openForms(): f.fUi.cancelInteraction()   # their button release will not arrive
 
 proc endModalState*() =
   if gGates > 0: dec gGates
+  for f in openForms(): f.fUi.refreshHover()
 
 proc resetModalState*() =
   ## Forgets every modal form and gate (application shutdown).
@@ -174,10 +176,10 @@ proc `theme=`*(f: Form, t: Theme) =
 
 # ------------------------------------------------------------- key handlers
 
-proc addKeyHandler*(f: Form, id: string, hook: KeyHook) =
+proc addKeyHandler*(f: Form, id: string, hook: KeyHook, onRepeat = true) =
   ## Same as `f.ui.addKeyHandler` (input.nim): one chain per UiRoot, shared by
   ## forms and hosts.
-  f.fUi.addKeyHandler(id, hook)
+  f.fUi.addKeyHandler(id, hook, onRepeat)
 
 proc removeKeyHandler*(f: Form, id: string) = f.fUi.removeKeyHandler(id)
 
@@ -243,9 +245,7 @@ proc freeWindow*(f: Form) =
 
 proc syncMetrics*(f: Form) =
   ## Re-reads window size and scale (after a resize/scale event).
-  f.fSyncing = true
-  try: f.fUi.syncMetrics()
-  finally: f.fSyncing = false
+  f.fUi.syncMetrics()
 
 proc setForcedScale*(s: float32) =
   ## Forces the render scale (headless testing); 0 restores the real density.
@@ -261,8 +261,10 @@ proc forcedScale*(): float32 = gForcedScale
 
 method doResize*(f: Form) =
   procCall doResize(Container(f))
-  if not f.fSyncing and f.fUi.win != nil:
-    f.fUi.win.setLogicalSize(f.width, f.height)
+  let w = f.fUi.win
+  if w != nil:               # a size that came from the window is already there
+    let cur = w.logicalSize
+    if cur.w != f.width or cur.h != f.height: w.setLogicalSize(f.width, f.height)
 
 # ----------------------------------------------------------- show and hide
 
@@ -341,6 +343,8 @@ proc showModal*(f: Form): ModalResult =
     else: nil
   f.fOwner = parent
   if closePopupsProc != nil: closePopupsProc(nil)   # menus of the form below
+  for o in openForms():             # a press that opened the dialog never ends
+    if o != f: o.fUi.cancelInteraction()
   f.fModal = true
   gModals.add f
   try:
@@ -359,6 +363,7 @@ proc showModal*(f: Form): ModalResult =
       f.fUi.win.clearModal()
       if f.fShown: f.hide()
     f.fModalResult = mrNone
+    for o in openForms(): o.fUi.refreshHover()
     if parent != nil and parent.fUi.win != nil: parent.bringToFront()
 
 # --------------------------------------------------------- loop integration

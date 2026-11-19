@@ -31,19 +31,17 @@ type
   ToolButtonKind* = enum tbsButton, tbsCheck, tbsSeparator, tbsDivider
   GlyphProc* = proc(c: Canvas, r: RectF, color: Color)
 
-  ToolButton* = ref object of Control
+  ToolButton* = ref object of ClickableControl
     fKind: ToolButtonKind
     fDown, fAllowAllUp, fShowCaption: bool
     fGroup: int
     fGlyph: GlyphProc
     fImage: Image
     fImageIndex: int
-    fHot, fPressed: bool
 
   ToolBar* = ref object of Container
     fFlat: bool
-    fImages: ImageList
-    fImagesListener: int       ## id of our listener on `fImages` (0: none)
+    fImages: ImageListRef
 
 const
   GlyphSize = 16'f32
@@ -106,7 +104,7 @@ proc `imageIndex=`*(b: ToolButton, v: int) =
   b.requestLayout()
 
 func barImages(b: ToolButton): ImageList =
-  if b.parent != nil and b.parent of ToolBar: ToolBar(b.parent).fImages else: nil
+  if b.parent != nil and b.parent of ToolBar: ToolBar(b.parent).fImages.list else: nil
 
 func listIcon(b: ToolButton): bool =
   let il = b.barImages
@@ -131,29 +129,7 @@ method preferredSize*(b: ToolButton): SizeF =
       w += b.textWidth(b.caption, b.font)
     sizeF(max(w, h), h)
 
-method doMouseEnter*(b: ToolButton) =
-  b.fHot = true
-  b.invalidate()
-  procCall doMouseEnter(Control(b))
-
-method doMouseLeave*(b: ToolButton) =
-  b.fHot = false
-  b.invalidate()
-  procCall doMouseLeave(Control(b))
-
-method doMouseDown*(b: ToolButton, button: MouseButton, shift: ShiftState,
-                    x, y: float32) =
-  if button == mbLeft:
-    b.fPressed = true
-    b.invalidate()
-  procCall doMouseDown(Control(b), button, shift, x, y)
-
-method doMouseUp*(b: ToolButton, button: MouseButton, shift: ShiftState,
-                  x, y: float32) =
-  if button == mbLeft and b.fPressed:
-    b.fPressed = false
-    b.invalidate()
-  procCall doMouseUp(Control(b), button, shift, x, y)
+method canFocus*(b: ToolButton): bool = false    # never takes the keyboard focus
 
 method hitTest*(b: ToolButton, p: PointF): bool =
   b.fKind in {tbsButton, tbsCheck}
@@ -175,7 +151,7 @@ method paint*(b: ToolButton, c: Canvas) =
     c.line(r.w / 2, 5, r.w / 2, r.h - 5, t.border, 1)
     return
   let en = b.isEnabled
-  let st = b.visualState(b.fHot, b.fPressed and b.fHot)
+  let st = b.visualState
   let flat = b.parent == nil or not (b.parent of ToolBar) or ToolBar(b.parent).fFlat
   let face = r.inflate(-1)
   let own = b.parent != nil and Control(b.parent).ownColor
@@ -237,24 +213,19 @@ proc newToolButton*(parent: Container = nil, caption = "",
 
 # ----------------------------------------------------------------- ToolBar
 
-func images*(t: ToolBar): ImageList = t.fImages
+func images*(t: ToolBar): ImageList = t.fImages.list
 proc `images=`*(t: ToolBar, v: ImageList) =
-  if t.fImages != nil and t.fImagesListener != 0:
-    t.fImages.removeListener t.fImagesListener
-  t.fImagesListener = 0
-  t.fImages = v
-  if v != nil:
-    let bar = t
-    t.fImagesListener = v.addListener(proc() =       # icons changed: repaint/relayout
-      bar.invalidate()
-      bar.requestLayout()
-      for c in bar.children: c.requestLayout())
+  let bar = t
+  t.fImages.attach(v, proc() =       # icons changed: repaint/relayout
+    bar.invalidate()
+    bar.requestLayout()
+    for c in bar.children: c.requestLayout())
   t.invalidate()
   t.requestLayout()
   for c in t.children: c.requestLayout()
 
 method releaseResources*(t: ToolBar) =
-  t.images = nil
+  t.fImages.detach()
 
 func flat*(t: ToolBar): bool = t.fFlat
 proc `flat=`*(t: ToolBar, v: bool) =
@@ -262,7 +233,7 @@ proc `flat=`*(t: ToolBar, v: bool) =
   t.invalidate()
 
 method preferredSize*(t: ToolBar): SizeF =
-  var h = currentTheme().controlHeight
+  var h = t.theme.controlHeight
   for c in t.children:
     if c.visible and c.align == alCustom:
       h = max(h, c.height + c.margins.vertical)

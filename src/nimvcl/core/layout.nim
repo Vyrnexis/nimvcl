@@ -19,7 +19,7 @@
 ##    placed explicitly: `setBounds`/`left=`/... outside a layout, or when it was
 ##    inserted) and the parent size that rect belongs to. A container's design
 ##    size (`designSize`) is its own explicitly set size until its first layout
-##    (window-manager resizes, `hostSized`, do not count); a container never
+##    (window-manager resizes, `setHostSize`, do not count); a container never
 ##    explicitly sized uses its size at its first layout (the constructors' own
 ##    default size is not an explicit size: `placeControl`/`initTabSheet` clear
 ##    `designSet`, so an `alClient` panel is designed against what `align` gives
@@ -196,11 +196,10 @@ proc layout*(c: Container) =
       for ch in kids:
         if ch.visible and ch of Container and
            (Container(ch).needsLayout or Container(ch).childNeedsLayout):
-          c.childNeedsLayout = true
+          c.childNeedsLayout = true     # the next frame runs the leftover pass
   finally:
     c.layouting = false
-  c.invalidate()
-  c.afterLayout()
+  c.afterLayout()                  # what moved was invalidated by `setBounds`
 
 proc layoutIfNeeded*(c: Container) =
   ## `layout(c)` only when `c` or a descendant is flagged. The form calls this

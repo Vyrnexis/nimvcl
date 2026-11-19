@@ -11,10 +11,9 @@ import ./common
 type
   CheckBoxState* = enum cbUnchecked, cbChecked, cbGrayed
 
-  CheckBox* = ref object of Control
+  CheckBox* = ref object of ClickableControl
     fState: CheckBoxState
     fAllowGrayed: bool
-    fHot, fMouseDown, fKeyDown: bool
     onChange*: NotifyEvent
 
 func state*(b: CheckBox): CheckBoxState = b.fState
@@ -41,77 +40,15 @@ proc toggle*(b: CheckBox) =
     of cbChecked: (if b.fAllowGrayed: cbGrayed else: cbUnchecked)
     of cbGrayed: cbUnchecked
 
-proc isPressed*(b: CheckBox): bool =
-  (b.fMouseDown and b.fHot) or b.fKeyDown
-
-method canFocus*(b: CheckBox): bool = b.isVisible and b.isEnabled
-
 method preferredSize*(b: CheckBox): SizeF = indicatorPreferredSize(b)
-
-method activateMnemonic*(b: CheckBox, ch: Rune): bool =
-  if mnemonicOf(b.caption) != ch: return false
-  setFocus(b)
-  b.doClick()
-  true
-
-method doMouseEnter*(b: CheckBox) =
-  b.fHot = true
-  b.invalidate()
-  procCall doMouseEnter(Control(b))
-
-method doMouseLeave*(b: CheckBox) =
-  b.fHot = false
-  b.invalidate()
-  procCall doMouseLeave(Control(b))
-
-method doMouseDown*(b: CheckBox, button: MouseButton, shift: ShiftState,
-                    x, y: float32) =
-  if button == mbLeft:
-    b.fMouseDown = true
-    b.invalidate()
-  procCall doMouseDown(Control(b), button, shift, x, y)
-
-method doMouseMove*(b: CheckBox, shift: ShiftState, x, y: float32) =
-  if b.fMouseDown and ssLeft notin shift:
-    b.fMouseDown = false
-    b.invalidate()
-  procCall doMouseMove(Control(b), shift, x, y)
-
-method doMouseUp*(b: CheckBox, button: MouseButton, shift: ShiftState,
-                  x, y: float32) =
-  if button == mbLeft and b.fMouseDown:
-    b.fMouseDown = false
-    b.invalidate()
-  procCall doMouseUp(Control(b), button, shift, x, y)
 
 method doClick*(b: CheckBox) =
   b.toggle()
   procCall doClick(Control(b))
 
-method doKeyDown*(b: CheckBox, key: var Key, shift: ShiftState) =
-  procCall doKeyDown(Control(b), key, shift)
-  if key == keySpace and shift * {ssCtrl, ssAlt} == {}:
-    key = Key(0)
-    if not b.fKeyDown:
-      b.fKeyDown = true
-      b.invalidate()
-
-method doKeyUp*(b: CheckBox, key: var Key, shift: ShiftState) =
-  procCall doKeyUp(Control(b), key, shift)
-  if key == keySpace and b.fKeyDown:
-    key = Key(0)
-    b.fKeyDown = false
-    b.invalidate()
-    if b.isEnabled: b.doClick()
-
-method doExit*(b: CheckBox) =
-  b.fKeyDown = false
-  b.invalidate()
-  procCall doExit(Control(b))
-
 method paint*(b: CheckBox, c: Canvas) =
   let t = b.theme
-  let st = b.visualState(b.fHot, b.isPressed)
+  let st = b.visualState
   let box = indicatorRect(b)
   if b.ownColor: c.fillRect(b.clientRect, b.color)   # the area behind
   let on = b.fState != cbUnchecked

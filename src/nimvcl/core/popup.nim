@@ -252,9 +252,8 @@ proc routeKey(owner: Form, pe: PlatformEvent) =
   of ekKeyDown:
     var k = pe.key
     let ui = top.ui
-    ui.keyRepeat = pe.repeat
-    try: top.content.doKeyDown(k, pe.shift)
-    finally: ui.keyRepeat = false
+    ui.withKeyRepeat(pe.repeat):
+      top.content.doKeyDown(k, pe.shift)
     if k == keyEscape and top.isOpen: closePopup(top)
   of ekKeyUp:
     var k = pe.key
