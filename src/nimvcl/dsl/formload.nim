@@ -23,6 +23,7 @@ import std/[macros, os, sets, strutils, tables]
 import ../graphics/[color, font, image]
 import ../core/component
 import ./nfmsyntax {.all.}
+import ./propdeps
 import ./formmacro {.all.}
 ## Re-exported: the generated code writes colours (`hex"#rrggbb"`) and font parts
 ## (`font.size = 12`), which need these modules in the caller's scope.
@@ -306,7 +307,12 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
   proc errStmt(msg: string): string = "{.error: " & nimStr(msg) & ".}"
 
   proc genProps(n: NfmNode, target: string) =
-    for p in n.props:
+    # a file written before a property depended on another (`tabIndex` ahead of
+    # `tabs`) is applied in the order the registry would write it
+    var propNames: seq[string]
+    for p in n.props: propNames.add p.name
+    for pi in applyOrder(propNames):
+      let p = n.props[pi]
       let pos = nfmPos(file, p.line, p.col)
       if p.name.isEventProp:
         if p.value.kind != nvIdent:
