@@ -257,6 +257,9 @@ suite "docking":
     let g = guidePoint(site, ide.ed1.group, dsBottom)
     ide.inspector.dragPanel(pointF(g.x - ox, g.y - oy), ff)
     check ide.inspector.state == dpDocked
+    # the window is destroyed after the event that emptied it, not inside it
+    check Application.forms.len == nForms + 1
+    Application.processMessages()
     check Application.forms.len == nForms           # the window went away
     check site.floatingSites.len == 0
     check ide.inspector.group.formOrigin.y > ide.ed1.group.formOrigin.y
@@ -277,6 +280,7 @@ suite "docking":
     check ide.palette.state == dpDocked
     check ide.palette.group == ide.structure.group      # back as a tab
     check ide.palette.group.names == @["palette", "structure"]
+    Application.processMessages()
     check Application.forms.len == nForms - 1
     # double click on a tab floats a docked panel, and docks a floating one
     let f = ide.f
@@ -490,6 +494,7 @@ suite "docking":
     ide.palette.makeFloating(rectF(1000, 10, 300, 200))
     check Application.forms.len == n + 1
     ide.palette.hide()
+    Application.processMessages()
     check Application.forms.len == n
 
   test "events: dock, undock, activate, close and veto":
@@ -584,6 +589,33 @@ suite "docking":
     f.tap(keyF4, {ssCtrl})
     check ide.ed2.state == dpHidden
     check ide.ed1.group.activePanel == ide.ed1
+
+  test "Ctrl+Tab inside a nested PageControl cycles its pages, not the panels":
+    let ide = buildIde()
+    let f = ide.f
+    let pc = newPageControl(nil)
+    let s1 = newTabSheet(pc, "one")
+    let s2 = newTabSheet(pc, "two")
+    let e1 = newEdit(s1)
+    discard newEdit(s2)
+    let pg = newDockPanel(ide.site, "pages", "Pages", pc)
+    ide.site.dock(pg, ide.messages.group, dsLeft, 0.3)   # a group of its own
+    settle()
+    pg.activate()
+    f.activeControl = e1
+    check pc.tabIndex == 0
+    f.tap(keyTab, {ssCtrl})
+    check pc.tabIndex == 1
+    # a single-panel group does not swallow the key either
+    check pg.group.panels.len == 1
+
+  test "docking a panel onto its own group appends it last":
+    let ide = buildIde()
+    let c = newDockPanel(ide.site, "c", "c", newContent())
+    ide.site.dock(c, ide.ed1, dsCenter)
+    check ide.ed1.group.names == @["ed1", "ed2", "c"]
+    ide.site.dock(ide.ed1, ide.ed2, dsCenter)       # default index: last
+    check ide.ed1.group.names == @["ed2", "c", "ed1"]
 
   test "focus inside a panel makes it the active panel":
     let ide = buildIde()
