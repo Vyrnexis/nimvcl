@@ -18,7 +18,7 @@
 ##
 ## Freeing order (UI thread): RenderContext.close, renderer, window.
 
-import ../graphics/context
+import ../graphics/[context, image]
 import ../platform/[window, events]
 import ./component, ./control, ./input
 export input
@@ -43,6 +43,7 @@ type
     fPosition: FormPosition
     fBorderStyle: BorderStyle
     fFormStyle: FormStyle
+    fIcon: Image                 ## the window icon (nil: the platform's default)
     onShow*, onHide*, onActivate*, onDeactivate*: NotifyEvent
     onClose*: FormCloseEvent
     onCloseQuery*: FormCloseQueryEvent
@@ -150,6 +151,13 @@ proc `formStyle=`*(f: Form, v: FormStyle) =
   f.fFormStyle = v
   if f.fUi.win != nil: f.fUi.win.setStayOnTop(v == fsStayOnTop)
 
+func icon*(f: Form): Image = f.fIcon
+proc `icon=`*(f: Form, v: Image) =
+  ## The window icon (a form file stores its path as `icon = 'images/app.png'`).
+  ## Applied to the window when it exists, and again when the form is shown.
+  f.fIcon = v
+  if f.fUi.win != nil and v != nil: f.fUi.win.setIcon(v)
+
 func keyPreview*(f: Form): bool = f.fUi.keyPreview
 proc `keyPreview=`*(f: Form, v: bool) = f.fUi.keyPreview = v
 
@@ -216,6 +224,7 @@ proc ensureWindow(f: Form) =
     f.fUi.win = nil
     raise
   if f.fBorderStyle == bsSingle: w.setResizable(false)
+  if f.fIcon != nil: w.setIcon(f.fIcon)
   f.fUi.useBackbuffer = true      # partial repaints into a persistent target
   gForms.add f
   f.fUi.dirty = true

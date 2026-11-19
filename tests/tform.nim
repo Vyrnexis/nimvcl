@@ -535,3 +535,33 @@ suite "application":
   test "clipboard round trip":
     Application.clipboard = "nimvcl"
     check Application.clipboard == "nimvcl"
+
+suite "form icon and menu":
+  Application.init()
+
+  test "icon: kept, applied to the window when it exists and when it is created":
+    let f = newForm(nil, 200, 100)
+    check f.icon == nil
+    let img = newImage(16, 16, rgb(200, 0, 0))
+    f.icon = img                               # before the window exists
+    check f.icon == img
+    f.show()                                   # creates the window with the icon
+    check f.hasWindow
+    f.icon = newImage(32, 32, rgb(0, 0, 200))  # while shown
+    check f.icon.width == 32
+    f.icon = nil                               # clearing keeps the window alive
+    check f.icon == nil and f.hasWindow
+    f.freeWindow()
+
+  test "menu: assigning a MainMenu makes it the form's bar; nil removes it":
+    let f = newForm(nil, 300, 200)
+    let mm = newMainMenu(nil)
+    mm.addItem("File")
+    check f.menu == nil
+    f.menu = mm
+    check f.menu == mm and mm.parent == Container(f) and mm.align == alTop
+    let other = newMainMenu(nil)
+    f.menu = other
+    check f.menu == other and mm.parent == nil
+    f.menu = nil
+    check f.menu == nil
