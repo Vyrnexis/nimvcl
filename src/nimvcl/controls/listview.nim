@@ -160,6 +160,7 @@ type
     fHdrDownX: float32
     fEditor: InPlaceEditor
     fSlow: SlowClick
+    fDragScroll: DragScroll
     fType: TypeAhead
     slowClickDelay*: int
     onChange*: NotifyEvent
@@ -182,6 +183,7 @@ type
 
 const
   PadX = 6'f32
+  DragScrollMs = 45
   BorderGrab = 4'f32       ## header border hot zone (each side)
   DefaultColumnWidth = 100'f32
 
@@ -726,9 +728,17 @@ proc selectAll*(lv: ListView) =
 
 proc `multiSelect=`*(lv: ListView, v: bool) =
   if v == lv.fMulti: return
+  let ver = lv.fVer
+  let sn = lv.snap()
   lv.fMulti = v
-  if not v and lv.fSel.len > 1: lv.selectOnly(lv.fIndex)
+  if not v:
+    # single mode: the focused item is the selection (else the first selected)
+    if lv.fIndex < 0 and lv.fSel.len > 0:
+      lv.setFocusRow(lv.fSel.first)
+      lv.fAnchor = lv.fIndex
+    lv.selectOnly(lv.fIndex)
   lv.invalidate()
+  lv.notify(ver, sn)
 
 proc `extendedSelect=`*(lv: ListView, v: bool) = lv.fExtended = v
 
@@ -1160,6 +1170,32 @@ method doMouseDown*(lv: ListView, button: MouseButton, shift: ShiftState,
           if wasOnly and not lv.fReadOnly: lv.armSlow(i)
   procCall doMouseDown(Control(lv), button, shift, x, y)
 
+proc stopDrag(lv: ListView) =
+  lv.fDragging = false
+  lv.fDragScroll.stop()
+
+proc dragExtend(lv: ListView) =
+  ## Extends the drag selection to the item under (or nearest to) the pointer.
+  let i = lv.dragTarget(pointF(lv.fMouseX, lv.fMouseY))
+  if i >= 0 and i != lv.fIndex:
+    let v = lv.fVer
+    let sn = lv.snap()
+    lv.selectRange(max(lv.fAnchor, 0), i)
+    lv.setFocusRow(i)
+    lv.makeVisible(i)
+    lv.notify(v, sn)
+
+proc dragScrollStep(lv: ListView) =
+  ## One auto-scroll step toward the pointer that is held outside the items.
+  let vp = lv.viewport
+  if lv.fStyle == vsList:
+    if lv.fMouseX < vp.x: lv.scrollBy(-lv.cellW, 0)
+    elif lv.fMouseX >= vp.right: lv.scrollBy(lv.cellW, 0)
+  else:
+    let step = if lv.fStyle == vsReport: lv.itemHeight else: lv.cellH
+    if lv.fMouseY < vp.y: lv.scrollBy(0, -step)
+    elif lv.fMouseY >= vp.bottom: lv.scrollBy(0, step)
+
 method doMouseMove*(lv: ListView, shift: ShiftState, x, y: float32) =
   lv.fMouseIn = true
   lv.fMouseX = x
@@ -1175,16 +1211,18 @@ method doMouseMove*(lv: ListView, shift: ShiftState, x, y: float32) =
     else:
       lv.fResizeCol = -1
   elif lv.fDragging and ssLeft in shift and lv.count > 0:
-    let i = lv.dragTarget(p)
-    if i >= 0 and i != lv.fIndex:
-      let v = lv.fVer
-      let sn = lv.snap()
-      lv.selectRange(max(lv.fAnchor, 0), i)
-      lv.setFocusRow(i)
-      lv.makeVisible(i)
-      lv.notify(v, sn)
+    lv.dragExtend()
+    let vp = lv.viewport
+    if x < vp.x or x >= vp.right or y < vp.y or y >= vp.bottom:
+      lv.fDragScroll.start(DragScrollMs, proc(): bool =
+        if not lv.fDragging: return false
+        lv.dragScrollStep()
+        lv.dragExtend()
+        true)
+    else:
+      lv.fDragScroll.stop()
   elif lv.fDragging and ssLeft notin shift:
-    lv.fDragging = false
+    lv.stopDrag()
   # header hover / cursor
   if lv.headerHeight > 0:
     let hot = if lv.fResizeCol >= 0: -1 else: lv.columnAt(p)
@@ -1200,7 +1238,7 @@ method doMouseMove*(lv: ListView, shift: ShiftState, x, y: float32) =
 method doMouseUp*(lv: ListView, button: MouseButton, shift: ShiftState,
                   x, y: float32) =
   if button == mbLeft:
-    lv.fDragging = false
+    lv.stopDrag()
     lv.fResizeCol = -1
     if lv.fHdrDown >= 0:
       let down = lv.fHdrDown
@@ -1333,7 +1371,7 @@ method doKeyDown*(lv: ListView, key: var Key, shift: ShiftState) =
       lv.typeAhead(ch)
 
 method doExit*(lv: ListView) =
-  lv.fDragging = false
+  lv.stopDrag()
   lv.fResizeCol = -1
   lv.fHdrDown = -1
   lv.cancelSlow()

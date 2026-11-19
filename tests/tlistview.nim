@@ -940,6 +940,36 @@ suite "listview (selection model)":
     f.feed(ekMouseUp, below.x, below.y)
     check lv.selectedIndices == @[1, 2, 3, 4]
 
+  test "drag-select autoscrolls while the pointer is held below the items":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 60)
+    lv.multiSelect = true
+    let p1 = lv.fpos(ctr(lv.captionRect(1)))
+    f.feed(ekMouseDown, p1.x, p1.y)
+    let below = lv.fpos(pointF(ctr(lv.captionRect(1)).x, lv.clientRect.bottom + 15))
+    f.feed(ekMouseMove, below.x, below.y, shift = {ssLeft})
+    let first = lv.itemIndex
+    let t0 = getMonoTime()
+    while lv.itemIndex <= first + 3 and (getMonoTime() - t0).inMilliseconds < 3000:
+      Application.processMessages(60)
+    check lv.itemIndex > first + 3 and lv.scrollPosY > 0
+    f.feed(ekMouseUp, below.x, below.y)
+    let ti = lv.itemIndex
+    for i in 0 ..< 3: Application.processMessages(60)
+    check lv.itemIndex == ti                       # the timer stopped with the press
+
+  test "multiSelect = false keeps the focused item and fires onChange":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 6)
+    lv.multiSelect = true
+    lv.setSelection([1, 2, 4], 2)
+    var changes = 0
+    lv.onChange = proc(s: Control) = inc changes
+    lv.multiSelect = false
+    check lv.selectedIndices == @[2] and lv.itemIndex == 2 and changes == 1
+    lv.multiSelect = false
+    check changes == 1
+
 suite "listview design-time item data":
   Application.init()
 

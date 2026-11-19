@@ -236,3 +236,23 @@ proc arm*(s: var SlowClick, delay: int, fire: proc() {.closure.}) =
     x.enabled = false
     fire()
   t.enabled = true
+
+# ------------------------------------------------------- drag auto-scroll
+
+type
+  DragScroll* = object
+    ## Repeats a step (scroll and extend the selection) while a drag selection
+    ## is held outside the rows.
+    timer: Timer
+
+proc stop*(d: DragScroll) =
+  if d.timer != nil: d.timer.enabled = false
+
+proc start*(d: var DragScroll, interval: int, tick: proc(): bool {.closure.}) =
+  ## Runs `tick` every `interval` ms until `stop` or until it returns false.
+  ## `tick` is only kept the first time (the timer is reused).
+  if d.timer == nil:
+    d.timer = newTimer(nil, interval)
+    d.timer.onTimer = proc(t: Timer) =
+      if not tick(): t.enabled = false
+  d.timer.enabled = true

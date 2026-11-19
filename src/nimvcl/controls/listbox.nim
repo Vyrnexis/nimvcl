@@ -81,7 +81,7 @@ type
     fItemHeight, fExtent, fLastIh: float32
     fMouseY: float32
     fType: TypeAhead
-    fDragTimer: Timer
+    fDragScroll: DragScroll
     onChange*: NotifyEvent
     fOnData: DataEvent
     onDrawItem*: DrawItemEvent
@@ -505,7 +505,7 @@ proc dragSelect(lb: ListBox) =
 
 proc stopDrag(lb: ListBox) =
   lb.fDragging = false
-  if lb.fDragTimer != nil: lb.fDragTimer.enabled = false
+  lb.fDragScroll.stop()
 
 method doMouseMove*(lb: ListBox, shift: ShiftState, x, y: float32) =
   lb.fMouseIn = true
@@ -514,19 +514,15 @@ method doMouseMove*(lb: ListBox, shift: ShiftState, x, y: float32) =
     let vp = lb.viewport
     lb.dragSelect()
     if y < vp.y or y >= vp.bottom:
-      if lb.fDragTimer == nil:
-        lb.fDragTimer = newTimer(nil, DragScrollMs)
-        lb.fDragTimer.onTimer = proc(t: Timer) =
-          if not lb.fDragging:
-            t.enabled = false
-            return
-          let vp = lb.viewport
-          if lb.fMouseY < vp.y: lb.scrollBy(0, -lb.itemHeight)
-          elif lb.fMouseY >= vp.bottom: lb.scrollBy(0, lb.itemHeight)
-          lb.dragSelect()
-      lb.fDragTimer.enabled = true
-    elif lb.fDragTimer != nil:
-      lb.fDragTimer.enabled = false
+      lb.fDragScroll.start(DragScrollMs, proc(): bool =
+        if not lb.fDragging: return false
+        let vp = lb.viewport
+        if lb.fMouseY < vp.y: lb.scrollBy(0, -lb.itemHeight)
+        elif lb.fMouseY >= vp.bottom: lb.scrollBy(0, lb.itemHeight)
+        lb.dragSelect()
+        true)
+    else:
+      lb.fDragScroll.stop()
   elif lb.fDragging and ssLeft notin shift:
     lb.stopDrag()
   lb.updateHot()
