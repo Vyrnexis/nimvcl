@@ -69,7 +69,7 @@ const
   DragScrollMs = 45
   TextPad = 6'f32
   TextPadNoBorder = 2'f32
-  DefaultPasswordChar = Rune(0x2022)
+  DefaultPasswordChar* = Rune(0x2022)   ## the bullet `password = true` masks with
 
 var
   editClipboardGet*: proc(): string = proc(): string = Application.clipboard
@@ -257,6 +257,13 @@ proc `passwordChar=`*(e: Edit, c: Rune) =
   e.fPasswordChar = c
   e.touched()
 proc `passwordChar=`*(e: Edit, c: char) = e.passwordChar = Rune(ord(c))
+proc `passwordChar=`*(e: Edit, s: string) =
+  ## The first character of `s` masks the text; "" turns masking off (the text
+  ## form a form file stores).
+  e.passwordChar = if s.len == 0: Rune(0) else: s.runeAt(0)
+proc passwordCharText*(e: Edit): string =
+  ## `passwordChar` as a string ("" while masking is off).
+  if e.isPassword: $e.fPasswordChar else: ""
 proc password*(e: Edit): bool = e.isPassword
 proc `password=`*(e: Edit, v: bool) =
   ## `true` masks with a bullet.

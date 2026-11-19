@@ -1,11 +1,12 @@
 ## Edit tests, headless (offscreen SDL): events go through Application.dispatch
 ## like the loop does.
 
-import std/[unittest, unicode, monotimes, times, importutils]
+import std/[unittest, unicode, monotimes, times, importutils, strutils]
 import nimvcl/core/[types, control, form, application, input, timer]
 import nimvcl/platform/[events, window]
 import nimvcl/graphics/context
 import nimvcl/controls/[edit, editmodel]
+import nimvcl/dsl/[props, props_std, nfm]
 privateAccess(Edit)
 
 var
@@ -340,6 +341,51 @@ suite "edit":
     let bw = f.ctx.measureDevice("••", e.font).w / f.ctx.scale
     f.clickAt(e.left + 7 + bw + 1)
     check e.caretPos == 3                # after two characters
+
+  test "passwordChar: any character masks, \"\" and Rune(0) turn it off":
+    let f = newShown()
+    let e = f.mkEdit("secret")
+    e.passwordChar = "*"
+    check e.isPassword and e.passwordChar == Rune('*') and e.passwordCharText == "*"
+    check e.password
+    e.setFocus()
+    clip = "untouched"
+    f.ctrl('a'); f.ctrl('c')
+    check clip == "untouched"
+    e.passwordChar = "\u2022"
+    check e.passwordChar == DefaultPasswordChar
+    e.passwordChar = ""
+    check not e.isPassword and e.passwordCharText == ""
+    e.passwordChar = '#'
+    check e.passwordChar == Rune('#')
+    e.passwordChar = Rune(0)
+    check not e.password
+    f.ctrl('a'); f.ctrl('c')
+    check clip == "secret"               # copying works again
+
+  test "password and passwordChar in the registry and in form files":
+    let ci = classByName("Edit")
+    let e = newEdit(nil)
+    e.name = "e"
+    check ci.findProp("passwordChar").kind == pkString
+    setProp(Obj(e), "passwordChar", pvString("*"))
+    check e.passwordChar == Rune('*')
+    check getProp(Obj(e), "password").b          # still a password edit
+    let f = newForm(nil, 100, 100)
+    f.name = "F"
+    let e2 = newEdit(f)
+    e2.name = "pw"
+    e2.password = true                           # the default bullet: `password` is enough
+    var text = formToNfm(f)
+    check "password = true" in text and "passwordChar" notin text
+    e2.passwordChar = "*"
+    text = formToNfm(f)
+    check "passwordChar = '*'" in text and "password = true" notin text
+    let g = loadNfm(text)
+    check Edit(g.findComponent("pw")).passwordChar == Rune('*')
+    check formToNfm(g) == text
+    check Edit(loadNfm("object F: Form\n  object pw: Edit\n    password = true\n  end\nend\n")
+                .findComponent("pw")).passwordChar == DefaultPasswordChar
 
   test "scroll offset keeps the caret visible":
     let f = newShown()
