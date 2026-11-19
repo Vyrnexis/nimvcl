@@ -29,6 +29,8 @@ type
     savedClip: Rect                  # the renderer state found by beginFrame,
     savedClipOn: bool                # put back by endFrame (host mode)
     savedBlend: BlendMode
+    clipOn: bool                     # the renderer's clip rect is `appliedClip`
+    appliedClip: Rect
 
 const Ellipsis = "\u2026"
 
@@ -36,10 +38,14 @@ func ctx*(c: Canvas): RenderContext = c.ctx
 func scale*(c: Canvas): float32 = c.ctx.scale
 
 proc applyClip(c: Canvas) =
+  ## Makes the renderer's clip rect match the top of the clip stack (skipping
+  ## the SDL call when it already does, the common case for nested controls).
   let s = c.ctx.scale
   let r = renderer(c.ctx)
   if c.clips.len <= 1:
-    discard setRenderClipRect(r, nil)
+    if c.clipOn:
+      discard setRenderClipRect(r, nil)
+      c.clipOn = false
   else:
     let cl = c.clips[^1]
     let x0 = round(cl.x * s)
@@ -48,7 +54,11 @@ proc applyClip(c: Canvas) =
     let y1 = round(cl.bottom * s)
     var rc = Rect(x: x0.cint, y: y0.cint, w: max(x1 - x0, 0).cint,
                   h: max(y1 - y0, 0).cint)
+    if c.clipOn and rc.x == c.appliedClip.x and rc.y == c.appliedClip.y and
+       rc.w == c.appliedClip.w and rc.h == c.appliedClip.h: return
     discard setRenderClipRect(r, addr rc)
+    c.appliedClip = rc
+    c.clipOn = true
 
 proc beginFrame*(ctx: RenderContext): Canvas =
   ## Starts a frame: advances the cache clock, resets the clip and translate
@@ -220,6 +230,7 @@ proc strokeRoundRect*(c: Canvas, rect: RectF, radius: float32, color: Color,
   ## The thickness is rounded to whole device pixels (at least 1), like `frameRect`.
   if color.a == 0: return
   let r = c.snapRect(rect)
+  if r.w <= 0 or r.h <= 0: return
   c.ctx.geo.addStrokeRoundRect(r.x, r.y, r.w, r.h, radius * c.ctx.scale,
                                max(width * c.ctx.scale, 1'f32), color)
   c.flushGeo()
@@ -325,16 +336,21 @@ func firstLine(s: string): string =
   let i = s.find('\n')
   if i < 0: s else: s[0 ..< i]
 
-proc ellipsize(c: Canvas, text: string, font: FontSpec, maxPx: float32): string =
-  ## `text` shortened with an ellipsis so it fits in `maxPx` device px.
-  let full = c.ctx.measureDevice(text, font).w
-  if full <= maxPx: return text
+proc fitLine(c: Canvas, text: string, font: FontSpec, maxPx: float32,
+             ellipsis: bool): tuple[str: string, w, h: float32] =
+  ## The line to draw in `maxPx` device px and its size: `text` itself when it
+  ## fits (or `ellipsis` is off), else shortened with an ellipsis (empty when
+  ## not even that fits).
+  let full = c.ctx.measureDevice(text, font)
+  if not ellipsis or full.w <= maxPx: return (text, full.w, full.h)
   let ew = c.ctx.measureDevice(Ellipsis, font).w
-  if ew > maxPx: return ""
+  if ew > maxPx: return ("", 0'f32, 0'f32)
   var n = c.ctx.fitPrefix(text, font, maxPx - ew)
   n = min(n, text.len)
   while n > 0 and text[n - 1] in {' ', '\t'}: dec n
-  text[0 ..< n] & Ellipsis
+  let cut = text[0 ..< n] & Ellipsis
+  let size = c.ctx.measureDevice(cut, font)
+  (cut, size.w, size.h)
 
 proc textRect*(c: Canvas, text: string, font: FontSpec, rect: RectF, color: Color,
                hAlign = taLeft, vAlign = vaTop, wrap = false, ellipsis = true) =
@@ -347,13 +363,17 @@ proc textRect*(c: Canvas, text: string, font: FontSpec, rect: RectF, color: Colo
   let r = c.snapRect(rect)          # device rect, absolute
   var str = text
   var wrapPx = 0
+  var tw, th: float32
+  let al = case hAlign           # wrapped text aligns its lines inside the text object
+           of taLeft: horizontalAlignLeft
+           of taCenter: horizontalAlignCenter
+           of taRight: horizontalAlignRight
   if wrap:
     wrapPx = int(r.w)
+    (tw, th) = c.ctx.measureDevice(str, font, wrapPx, al)
   else:
-    str = firstLine(text)
-    if ellipsis: str = c.ellipsize(str, font, r.w)
+    (str, tw, th) = c.fitLine(firstLine(text), font, r.w, ellipsis)
     if str.len == 0: return
-  let (tw, th) = c.ctx.measureDevice(str, font, wrapPx)
   var x = r.x
   case hAlign
   of taLeft: discard
@@ -369,10 +389,6 @@ proc textRect*(c: Canvas, text: string, font: FontSpec, rect: RectF, color: Colo
     c.pushClip(rect)
   if wrap:
     # the paragraph box is r.w wide, so alignment happens inside the text object
-    let al = case hAlign
-             of taLeft: horizontalAlignLeft
-             of taCenter: horizontalAlignCenter
-             of taRight: horizontalAlignRight
     c.drawTextDev(str, font, r.x, round(y), color, wrapPx, al)
   else:
     c.drawTextDev(str, font, round(x), round(y), color)
