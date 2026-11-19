@@ -56,8 +56,8 @@
 import std/[monotimes, algorithm, strutils]
 import ../graphics/context
 import ../core/timer
-import ./common, ./scrolling, ./indexset
-export scrolling
+import ./common, ./scrolling, ./indexset, ./rowview
+export scrolling, rowview.nowMs, rowview.prefixIC, rowview.typeAheadChar
 
 type
   ListBoxStyle* = enum lbStandard, lbOwnerDraw
@@ -80,9 +80,7 @@ type
     fStyle: ListBoxStyle
     fItemHeight, fExtent, fLastIh: float32
     fMouseY: float32
-    fTypeBuf: string
-    fTypeTime: int64
-    typeAheadTimeout*: int       ## ms
+    fType: TypeAhead
     fDragTimer: Timer
     onChange*: NotifyEvent
     fOnData: DataEvent
@@ -95,8 +93,6 @@ type
 const
   ItemPadding = 8'f32
   DragScrollMs = 45
-
-proc nowMs*(): int64 = getMonoTime().ticks div 1_000_000
 
 # ----------------------------------------------------------------- basics
 
@@ -172,18 +168,10 @@ proc notify(lb: ListBox, ver: int) =
 proc touch(lb: ListBox) = inc lb.fVer
 
 proc selectOnly(lb: ListBox, i: int) =
-  if lb.fSel.len == 1 and i in lb.fSel: return
-  if i < 0 and lb.fSel.len == 0: return
-  lb.fSel.clear()
-  if i >= 0: lb.fSel.incl i
-  lb.touch()
+  if lb.fSel.selectOnly(i): lb.touch()
 
 proc selectRange(lb: ListBox, a, b: int) =
-  var s = initIndexSet()
-  s.inclRange(a, b)
-  if s == lb.fSel: return
-  lb.fSel = s
-  lb.touch()
+  if lb.fSel.selectRange(a, b): lb.touch()
 
 proc setFocusRow(lb: ListBox, i: int) =
   if i != lb.fIndex:
@@ -217,10 +205,9 @@ proc `topIndex=`*(lb: ListBox, v: int) =
   lb.scrollTo(lb.scrollPosX, float64(max(v, 0)) * float64(lb.itemHeight))
 
 proc firstFullRow(lb: ListBox): int =
-  int(ceil(lb.scrollPosY / float64(lb.itemHeight)))
+  firstFullRowAt(lb.scrollPosY, lb.itemHeight)
 proc lastFullRow(lb: ListBox): int =
-  min(int(floor((lb.scrollPosY + float64(lb.viewport.h)) /
-                float64(lb.itemHeight))) - 1, lb.count - 1)
+  lastFullRowAt(lb.scrollPosY, lb.viewport.h, lb.itemHeight, lb.count)
 
 proc makeVisible*(lb: ListBox, i: int) =
   ## Scrolls vertically the minimum distance that shows row `i` completely.
@@ -473,24 +460,8 @@ proc `[]=`*(lb: ListBox, i: int, s: string) = lb.items[i] = s
 # ---------------------------------------------------------------- user input
 
 proc applyClick(lb: ListBox, i: int, shift: ShiftState) =
-  if lb.fMulti:
-    if lb.fExtended:
-      if ssShift in shift and lb.fAnchor >= 0:
-        lb.selectRange(lb.fAnchor, i)
-      elif ssCtrl in shift:
-        lb.fSel.toggle i
-        lb.touch()
-        lb.fAnchor = i
-      else:
-        lb.selectOnly(i)
-        lb.fAnchor = i
-    else:
-      lb.fSel.toggle i
-      lb.touch()
-      lb.fAnchor = i
-  else:
-    lb.selectOnly(i)
-    lb.fAnchor = i
+  if lb.fSel.clickSelect(lb.fAnchor, i, lb.fMulti, lb.fExtended, shift):
+    lb.touch()
   lb.setFocusRow(i)
 
 method canFocus*(lb: ListBox): bool = lb.isVisible and lb.isEnabled
@@ -569,70 +540,38 @@ method doMouseUp*(lb: ListBox, button: MouseButton, shift: ShiftState,
 proc moveFocus(lb: ListBox, target: int, shift: ShiftState) =
   ## Keyboard navigation to row `target` (already clamped).
   let v = lb.fVer
-  if lb.fMulti:
-    if lb.fExtended and ssShift in shift:
-      if lb.fAnchor < 0: lb.fAnchor = max(lb.fIndex, 0)
-      lb.selectRange(lb.fAnchor, target)
-    elif lb.fExtended and ssCtrl notin shift:
-      lb.selectOnly(target)
-      lb.fAnchor = target
-    # else: focus only
-  else:
-    lb.selectOnly(target)
-    lb.fAnchor = target
+  if lb.fSel.keySelect(lb.fAnchor, lb.fIndex, target, lb.fMulti, lb.fExtended,
+                       shift):
+    lb.touch()
   lb.setFocusRow(target)
   lb.makeVisible(target)
   lb.notify(v)
 
-func prefixIC*(s, lowerPrefix: string): bool =
-  ## `s` starts with `lowerPrefix` (ASCII case-insensitive; the prefix is already lower case).
-  if s.len < lowerPrefix.len: return false
-  for j in 0 ..< lowerPrefix.len:
-    if toLowerAscii(s[j]) != lowerPrefix[j]: return false
-  true
+proc typeAheadTimeout*(lb: ListBox): int = lb.fType.timeout
+proc `typeAheadTimeout=`*(lb: ListBox, ms: int) = lb.fType.timeout = ms
 
-proc typeAhead(lb: ListBox, ch: char): bool =
-  let now = nowMs()
-  if now - lb.fTypeTime > lb.typeAheadTimeout: lb.fTypeBuf.setLen(0)
-  lb.fTypeTime = now
-  lb.fTypeBuf.add toLowerAscii(ch)
-  let n = lb.count
-  if n == 0: return true
-  let start = if lb.fTypeBuf.len == 1: lb.fIndex + 1 else: max(lb.fIndex, 0)
-  for k in 0 ..< n:
-    let i = (start + k) mod n
-    if prefixIC(lb.itemText(i), lb.fTypeBuf):
-      let v = lb.fVer
-      if lb.fMulti and not lb.fExtended: lb.setFocusRow(i)
-      else:
-        lb.selectOnly(i)
-        lb.fAnchor = i
-        lb.setFocusRow(i)
-      lb.makeVisible(i)
-      lb.notify(v)
-      break
-  true
+proc typeAhead(lb: ListBox, ch: char) =
+  let i = lb.fType.search(ch, lb.fIndex, lb.count,
+                          proc(i: int): string = lb.itemText(i))
+  if i < 0: return
+  let v = lb.fVer
+  if lb.fMulti and not lb.fExtended: lb.setFocusRow(i)
+  else:
+    lb.selectOnly(i)
+    lb.fAnchor = i
+    lb.setFocusRow(i)
+  lb.makeVisible(i)
+  lb.notify(v)
 
 method doKeyDown*(lb: ListBox, key: var Key, shift: ShiftState) =
   procCall doKeyDown(Control(lb), key, shift)
   if key == Key(0) or not lb.isEnabled: return
   let n = lb.count
   if shift * {ssAlt} != {}: return
-  var target = -2                       # -2: not a navigation key
-  let span = max(lb.lastFullRow - lb.firstFullRow, 1)
-  if key == keyUp: target = if lb.fIndex < 0: 0 else: lb.fIndex - 1
-  elif key == keyDown: target = lb.fIndex + 1
-  elif key == keyHome: target = 0
-  elif key == keyEnd: target = n - 1
-  elif key == keyPageDown:
-    let lf = lb.lastFullRow
-    target = if lb.fIndex < lf: lf else: lb.fIndex + span
-  elif key == keyPageUp:
-    let ff = lb.firstFullRow
-    target = if lb.fIndex > ff: ff else: lb.fIndex - span
-  if target != -2:
+  let target = rowNavTarget(key, lb.fIndex, n, lb.firstFullRow, lb.lastFullRow)
+  if target != NotNav:
     key = Key(0)
-    if n > 0: lb.moveFocus(min(max(target, 0), n - 1), shift)
+    if n > 0: lb.moveFocus(clampRow(target, n), shift)
     return
   if lb.fMulti and key == keySpace:
     key = Key(0)
@@ -643,11 +582,11 @@ method doKeyDown*(lb: ListBox, key: var Key, shift: ShiftState) =
   elif lb.fMulti and lb.fExtended and ssCtrl in shift and key == 'a'.key:
     key = Key(0)
     lb.selectAll()
-  elif shift * {ssCtrl, ssSuper} == {}:
-    let v = uint32(key)
-    if v >= 0x20 and v < 0x7f and (v != 0x20 or lb.fTypeBuf.len > 0 and
-        nowMs() - lb.fTypeTime <= lb.typeAheadTimeout):
-      if lb.typeAhead(char(v)): key = Key(0)
+  else:
+    let ch = lb.fType.keyChar(key, shift)
+    if ch != '\0':
+      key = Key(0)
+      lb.typeAhead(ch)
 
 method doExit*(lb: ListBox) =
   lb.stopDrag()
@@ -728,7 +667,7 @@ proc initListBox*(lb: ListBox, owner: Component = nil) =
   lb.fAnchor = -1
   lb.fHot = -1
   lb.fExtended = true
-  lb.typeAheadTimeout = 1000
+  lb.fType = initTypeAhead()
   lb.fSel = initIndexSet()
   lb.fShowFocusRect = true
   lb.padding = spacing(1)

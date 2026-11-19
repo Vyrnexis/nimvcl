@@ -1,9 +1,9 @@
 ## Small drawing / input helpers shared by `TreeView` and `ListView`.
 
 import std/strutils
-import ./common, ./checkbox, ./listbox
+import ./common, ./checkbox, ./listbox, ./rowview
 export checkbox.CheckBoxState, listbox.ItemState, listbox.ItemStates,
-       listbox.nowMs, listbox.prefixIC
+       rowview.nowMs, rowview.prefixIC, rowview.typeAheadChar
 
 const CheckSize* = 14'f32      ## side of the check boxes drawn inside the views
 
@@ -39,18 +39,6 @@ proc drawChevron*(c: Canvas, center: PointF, expanded: bool, color: Color) =
   else:
     c.line(center.x - 1.8, center.y - 3.5, center.x + 1.8, center.y, color, w)
     c.line(center.x + 1.8, center.y, center.x - 1.8, center.y + 3.5, color, w)
-
-proc typeAheadChar*(key: Key, shift: ShiftState): char =
-  ## The printable ASCII character of `key` for type-ahead, '\0' otherwise.
-  ## With Shift only letters count (shifted digits / symbols arrive as text and
-  ## are not type-ahead).
-  if shift * {ssCtrl, ssSuper, ssAlt} != {}: return '\0'
-  let v = uint32(key)
-  if v >= 0x20 and v < 0x7f:
-    if ssShift in shift and not (v >= 0x61 and v <= 0x7a): return '\0'
-    char(v)
-  else: '\0'
-
 
 # ------------------------------------------- design-time text forms (form files)
 

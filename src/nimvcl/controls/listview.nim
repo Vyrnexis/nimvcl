@@ -95,7 +95,7 @@
 import std/[sets, algorithm, strutils]
 import ../graphics/context
 import ../core/timer
-import ./common, ./scrolling, ./edit, ./imagelist, ./viewsupport, ./indexset
+import ./common, ./scrolling, ./edit, ./imagelist, ./viewsupport, ./indexset, ./rowview
 export scrolling, imagelist, viewsupport.CheckBoxState, viewsupport.ItemState,
        viewsupport.ItemStates
 
@@ -158,12 +158,10 @@ type
     fHdrHot, fHdrDown, fResizeCol: int
     fResizeX0, fResizeW0: float32
     fHdrDownX: float32
-    fEdit: Edit
-    fSlowTimer: Timer
-    fTypeBuf: string
-    fTypeTime: int64
+    fEditor: InPlaceEditor
+    fSlow: SlowClick
+    fType: TypeAhead
     slowClickDelay*: int
-    typeAheadTimeout*: int
     onChange*: NotifyEvent
     onSelectItem*: ListSelectEvent
     onSelectionChanged*: ListSelectionEvent
@@ -186,7 +184,6 @@ const
   PadX = 6'f32
   BorderGrab = 4'f32       ## header border hot zone (each side)
   DefaultColumnWidth = 100'f32
-  NotNav = low(int)        ## navTarget: not a navigation key
 
 # ----------------------------------------------------------------- basics
 
@@ -209,9 +206,11 @@ func largeImages*(lv: ListView): ImageList = lv.fLarge.list
 func cellWidth*(lv: ListView): float32 = lv.fCellW
 func sortColumn*(lv: ListView): int = lv.fSortCol
 func sortOrder*(lv: ListView): SortOrder = lv.fSortOrder
+func typeAheadTimeout*(lv: ListView): int = lv.fType.timeout
+proc `typeAheadTimeout=`*(lv: ListView, ms: int) = lv.fType.timeout = ms
 func isEditing*(lv: ListView): bool = lv.fEditIdx >= 0
 func editingIndex*(lv: ListView): int = lv.fEditIdx
-func editControl*(lv: ListView): Edit = lv.fEdit
+func editControl*(lv: ListView): Edit = lv.fEditor.edit
 func itemsPerRow*(lv: ListView): int = lv.fPer
   ## Icon views: cells per row (valid after layout).
 func rowsPerColumn*(lv: ListView): int = lv.fRpc
@@ -611,17 +610,10 @@ proc notify(lv: ListView, ver: int, sn: SelSnap) =
   if lv.onChange != nil: lv.onChange(lv)
 
 proc selectOnly(lv: ListView, i: int) =
-  if lv.fSel.len == 1 and i in lv.fSel: return
-  lv.fSel.clear()
-  if i >= 0: lv.fSel.incl i
-  lv.touch()
+  if lv.fSel.selectOnly(i): lv.touch()
 
 proc selectRange(lv: ListView, a, b: int) =
-  var s = initIndexSet()
-  s.inclRange(a, b)
-  if s == lv.fSel: return
-  lv.fSel = s
-  lv.touch()
+  if lv.fSel.selectRange(a, b): lv.touch()
 
 proc setFocusRow(lv: ListView, i: int) =
   if i != lv.fIndex:
@@ -1041,7 +1033,7 @@ proc `checkboxes=`*(lv: ListView, v: bool) = lv.fCheckboxes = v; lv.invalidate()
 # ----------------------------------------------------------------- editing
 
 proc layoutEdit(lv: ListView) =
-  if lv.fEditIdx < 0 or lv.fEdit == nil: return
+  if lv.fEditIdx < 0 or lv.fEditor.edit == nil: return
   let r = lv.captionRect(lv.fEditIdx)
   let ih = lv.itemHeight
   let vp = lv.viewport
@@ -1064,16 +1056,15 @@ proc layoutEdit(lv: ListView) =
   else:
     y = r.y + (r.h - ih) / 2
   w = min(w, max(vp.right - x, 40))
-  lv.fEdit.setBounds(x, y, w, h)
+  lv.fEditor.edit.setBounds(x, y, w, h)
 
 proc endEdit*(lv: ListView, cancel = false) =
   ## Ends the in-place edit: commits (`onEdited`) unless `cancel`.
   if lv.fEditIdx < 0: return
   let i = lv.fEditIdx
   lv.fEditIdx = -1
-  var txt = lv.fEdit.text
-  if lv.fEdit.focused: lv.setFocus()
-  lv.fEdit.visible = false
+  var txt = lv.fEditor.text
+  lv.fEditor.hide(lv)
   if not cancel and i < lv.count:
     let item = lv.getItem(i)
     if lv.onEdited != nil: lv.onEdited(lv, item, txt)
@@ -1090,21 +1081,10 @@ proc beginEdit*(lv: ListView, i: int): bool {.discardable.} =
   if lv.onEditing != nil: lv.onEditing(lv, item, allow)
   if not allow: return false
   lv.makeVisible(i)
-  if lv.fEdit == nil:
-    let e = newEdit(lv)
-    e.visible = false
-    e.tabStop = false
-    e.onKeyDown = proc(s: Control, key: var Key, shift: ShiftState) =
-      if key == keyEnter: key = Key(0); lv.endEdit()
-      elif key == keyEscape: key = Key(0); lv.endEdit(cancel = true)
-    e.onExit = proc(s: Control) = lv.endEdit()
-    lv.fEdit = e
+  lv.fEditor.ensure(lv, proc(cancel: bool) = lv.endEdit(cancel))
   lv.fEditIdx = i
-  lv.fEdit.text = item.fCaption
   lv.layoutEdit()
-  lv.fEdit.visible = true
-  lv.fEdit.setFocus()
-  lv.fEdit.selectAll()
+  lv.fEditor.show(item.fCaption)
   lv.invalidate()
   true
 
@@ -1116,21 +1096,14 @@ proc `readOnly=`*(lv: ListView, v: bool) =
 
 proc cancelSlow(lv: ListView) =
   lv.fSlowIdx = -1
-  if lv.fSlowTimer != nil: lv.fSlowTimer.enabled = false
+  lv.fSlow.cancel()
 
 proc armSlow(lv: ListView, i: int) =
   lv.fSlowIdx = i
-  if lv.fSlowTimer == nil:
-    let t = newTimer(nil, lv.slowClickDelay)
-    t.onTimer = proc(s: Timer) =
-      s.enabled = false
-      let j = lv.fSlowIdx
-      lv.fSlowIdx = -1
-      if j >= 0 and j == lv.fIndex and lv.focused: lv.beginEdit(j)
-    lv.fSlowTimer = t
-  lv.fSlowTimer.enabled = false
-  lv.fSlowTimer.interval = max(lv.slowClickDelay, 1)
-  lv.fSlowTimer.enabled = true
+  lv.fSlow.arm(lv.slowClickDelay, proc() =
+    let j = lv.fSlowIdx
+    lv.fSlowIdx = -1
+    if j >= 0 and j == lv.fIndex and lv.focused: lv.beginEdit(j))
 
 method canFocus*(lv: ListView): bool = lv.isVisible and lv.isEnabled
 
@@ -1146,24 +1119,8 @@ method doMouseLeave*(lv: ListView) =
   procCall doMouseLeave(Control(lv))
 
 proc applyClick(lv: ListView, i: int, shift: ShiftState) =
-  if lv.fMulti:
-    if lv.fExtended:
-      if ssShift in shift and lv.fAnchor >= 0:
-        lv.selectRange(lv.fAnchor, i)
-      elif ssCtrl in shift:
-        lv.fSel.toggle i
-        lv.touch()
-        lv.fAnchor = i
-      else:
-        lv.selectOnly(i)
-        lv.fAnchor = i
-    else:
-      lv.fSel.toggle i
-      lv.touch()
-      lv.fAnchor = i
-  else:
-    lv.selectOnly(i)
-    lv.fAnchor = i
+  if lv.fSel.clickSelect(lv.fAnchor, i, lv.fMulti, lv.fExtended, shift):
+    lv.touch()
   lv.setFocusRow(i)
 
 method doMouseDown*(lv: ListView, button: MouseButton, shift: ShiftState,
@@ -1275,47 +1232,31 @@ proc moveFocus(lv: ListView, target: int, shift: ShiftState) =
   ## Keyboard navigation to item `target` (already clamped).
   let v = lv.fVer
   let sn = lv.snap()
-  if lv.fMulti:
-    if lv.fExtended and ssShift in shift:
-      if lv.fAnchor < 0: lv.fAnchor = max(lv.fIndex, 0)
-      lv.selectRange(lv.fAnchor, target)
-    elif lv.fExtended and ssCtrl notin shift:
-      lv.selectOnly(target)
-      lv.fAnchor = target
-  else:
-    lv.selectOnly(target)
-    lv.fAnchor = target
+  if lv.fSel.keySelect(lv.fAnchor, lv.fIndex, target, lv.fMulti, lv.fExtended,
+                       shift):
+    lv.touch()
   lv.setFocusRow(target)
   lv.makeVisible(target)
   lv.notify(v, sn)
 
 proc typeAhead(lv: ListView, ch: char) =
-  let now = nowMs()
-  if now - lv.fTypeTime > lv.typeAheadTimeout: lv.fTypeBuf.setLen(0)
-  lv.fTypeTime = now
-  lv.fTypeBuf.add toLowerAscii(ch)
-  let n = lv.count
-  if n == 0: return
-  let start = if lv.fTypeBuf.len == 1: lv.fIndex + 1 else: max(lv.fIndex, 0)
-  for k in 0 ..< n:
-    let i = (start + k) mod n
-    if prefixIC(lv.itemCaption(i), lv.fTypeBuf):
-      let v = lv.fVer
-      let sn = lv.snap()
-      if lv.fMulti and not lv.fExtended: lv.setFocusRow(i)
-      else:
-        lv.selectOnly(i)
-        lv.fAnchor = i
-        lv.setFocusRow(i)
-      lv.makeVisible(i)
-      lv.notify(v, sn)
-      break
+  let i = lv.fType.search(ch, lv.fIndex, lv.count,
+                          proc(i: int): string = lv.itemCaption(i))
+  if i < 0: return
+  let v = lv.fVer
+  let sn = lv.snap()
+  if lv.fMulti and not lv.fExtended: lv.setFocusRow(i)
+  else:
+    lv.selectOnly(i)
+    lv.fAnchor = i
+    lv.setFocusRow(i)
+  lv.makeVisible(i)
+  lv.notify(v, sn)
 
 proc firstFullRow(lv: ListView): int =
-  int(ceil(lv.scrollPosY / float64(lv.itemHeight)))
+  firstFullRowAt(lv.scrollPosY, lv.itemHeight)
 proc lastFullRow(lv: ListView): int =
-  min(int(floor((lv.scrollPosY + float64(lv.viewport.h)) /
-                float64(lv.itemHeight))) - 1, lv.count - 1)
+  lastFullRowAt(lv.scrollPosY, lv.viewport.h, lv.itemHeight, lv.count)
 
 proc navTarget(lv: ListView, key: Key, cur: int): int =
   ## Target index of a navigation key; `NotNav` when `key` is not one.
@@ -1325,15 +1266,7 @@ proc navTarget(lv: ListView, key: Key, cur: int): int =
   if key == keyEnd: return n - 1
   case lv.fStyle
   of vsReport:
-    let span = max(lv.lastFullRow - lv.firstFullRow, 1)
-    if key == keyUp: result = if cur < 0: 0 else: cur - 1
-    elif key == keyDown: result = cur + 1
-    elif key == keyPageDown:
-      let lf = lv.lastFullRow
-      result = if cur < lf: lf else: cur + span
-    elif key == keyPageUp:
-      let ff = lv.firstFullRow
-      result = if cur > ff: ff else: cur - span
+    result = rowNavTarget(key, cur, n, lv.firstFullRow, lv.lastFullRow)
   of vsIcon, vsSmallIcon:
     let per = max(lv.fPer, 1)
     let rowsVisible = max(int(floor(lv.viewport.h / lv.cellH)), 1)
@@ -1394,9 +1327,8 @@ method doKeyDown*(lv: ListView, key: var Key, shift: ShiftState) =
     key = Key(0)
     lv.selectAll()
   else:
-    let ch = typeAheadChar(key, shift)
-    if ch != '\0' and (ch != ' ' or lv.fTypeBuf.len > 0 and
-                       nowMs() - lv.fTypeTime <= lv.typeAheadTimeout):
+    let ch = lv.fType.keyChar(key, shift)
+    if ch != '\0':
       key = Key(0)
       lv.typeAhead(ch)
 
@@ -1606,7 +1538,7 @@ proc initListView*(lv: ListView, owner: Component = nil) =
   lv.fPer = 1
   lv.fRpc = 1
   lv.slowClickDelay = 600
-  lv.typeAheadTimeout = 1000
+  lv.fType = initTypeAhead()
   lv.fSel = initIndexSet()
   lv.fChecks = initHashSet[int]()
   lv.padding = spacing(1)

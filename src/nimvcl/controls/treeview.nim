@@ -85,7 +85,7 @@
 import std/[sets, hashes, strutils]
 import ../graphics/context
 import ../core/timer
-import ./common, ./scrolling, ./edit, ./imagelist, ./viewsupport
+import ./common, ./scrolling, ./edit, ./imagelist, ./viewsupport, ./rowview
 export scrolling, imagelist, viewsupport.CheckBoxState, viewsupport.ItemState,
        viewsupport.ItemStates
 
@@ -135,12 +135,10 @@ type
     fRowSelect, fHideSel, fReadOnly, fCheckboxes, fPropagate, fMouseIn: bool
     fIndent, fItemHeight, fLastIh, fExtent, fMouseY: float32
     fImages: ImageListRef
-    fEdit: Edit
-    fSlowTimer: Timer
-    fTypeBuf: string
-    fTypeTime: int64
+    fEditor: InPlaceEditor
+    fSlow: SlowClick
+    fType: TypeAhead
     slowClickDelay*: int         ## ms before a second click starts editing
-    typeAheadTimeout*: int       ## ms
     onChange*: TreeNodeEvent
     onChanging*: TreeAllowEvent
     onExpanding*, onCollapsing*: TreeAllowEvent
@@ -229,7 +227,9 @@ func rowCount*(tv: TreeView): int = tv.fRows.len
 func nodeCount*(tv: TreeView): int = tv.fCount
 func isEditing*(tv: TreeView): bool = tv.fEditNode != nil
 func editingNode*(tv: TreeView): TreeNode = tv.fEditNode
-func editControl*(tv: TreeView): Edit = tv.fEdit
+func editControl*(tv: TreeView): Edit = tv.fEditor.edit
+func typeAheadTimeout*(tv: TreeView): int = tv.fType.timeout
+proc `typeAheadTimeout=`*(tv: TreeView, ms: int) = tv.fType.timeout = ms
   ## The in-place editor (nil until the first edit).
 func isUpdating*(tv: TreeView): bool = tv.fUpdating > 0
 
@@ -929,7 +929,7 @@ proc detach(tv: TreeView, n: TreeNode) =
     p.fExpanded = false
   if tv.fEditNode != nil and tv.fEditNode.fTree == nil:
     tv.fEditNode = nil
-    if tv.fEdit != nil: tv.fEdit.visible = false
+    if tv.fEditor.edit != nil: tv.fEditor.edit.visible = false
   if tv.fUpdating == 0: tv.refresh()
   if lostFocus:
     let idx = n.fIdx
@@ -1080,7 +1080,7 @@ proc toggleCheck*(tv: TreeView, n: TreeNode) =
 # ----------------------------------------------------------------- editing
 
 proc layoutEdit(tv: TreeView) =
-  if tv.fEditNode == nil or tv.fEdit == nil: return
+  if tv.fEditNode == nil or tv.fEditor.edit == nil: return
   let n = tv.fEditNode
   if n.fRow < 0: return
   let ih = tv.itemHeight
@@ -1089,16 +1089,15 @@ proc layoutEdit(tv: TreeView) =
   let vp = tv.viewport
   let x = g.labelX - 3
   let w = max(g.labelW + 24, 80)
-  tv.fEdit.setBounds(x, y, min(w, max(vp.right - x, 40)), ih)
+  tv.fEditor.edit.setBounds(x, y, min(w, max(vp.right - x, 40)), ih)
 
 proc endEdit*(tv: TreeView, cancel = false) =
   ## Ends the in-place edit: commits (`onEdited`) unless `cancel`.
   if tv.fEditNode == nil: return
   let n = tv.fEditNode
   tv.fEditNode = nil
-  var txt = tv.fEdit.text
-  if tv.fEdit.focused: tv.setFocus()
-  tv.fEdit.visible = false
+  var txt = tv.fEditor.text
+  tv.fEditor.hide(tv)
   if not cancel and n.fTree == tv:
     if tv.onEdited != nil: tv.onEdited(tv, n, txt)
     n.text = txt
@@ -1114,21 +1113,10 @@ proc beginEdit*(tv: TreeView, n: TreeNode): bool {.discardable.} =
   if tv.onEditing != nil: tv.onEditing(tv, n, allow)
   if not allow: return false
   tv.makeRowVisible(n.fRow)
-  if tv.fEdit == nil:
-    let e = newEdit(tv)
-    e.visible = false
-    e.tabStop = false
-    e.onKeyDown = proc(s: Control, key: var Key, shift: ShiftState) =
-      if key == keyEnter: key = Key(0); tv.endEdit()
-      elif key == keyEscape: key = Key(0); tv.endEdit(cancel = true)
-    e.onExit = proc(s: Control) = tv.endEdit()
-    tv.fEdit = e
+  tv.fEditor.ensure(tv, proc(cancel: bool) = tv.endEdit(cancel))
   tv.fEditNode = n
-  tv.fEdit.text = n.fText
   tv.layoutEdit()
-  tv.fEdit.visible = true
-  tv.fEdit.setFocus()
-  tv.fEdit.selectAll()
+  tv.fEditor.show(n.fText)
   tv.invalidate()
   true
 
@@ -1175,22 +1163,15 @@ proc `propagateChecks=`*(tv: TreeView, v: bool) = tv.fPropagate = v
 
 proc cancelSlow(tv: TreeView) =
   tv.fSlowNode = nil
-  if tv.fSlowTimer != nil: tv.fSlowTimer.enabled = false
+  tv.fSlow.cancel()
 
 proc armSlow(tv: TreeView, n: TreeNode) =
   tv.fSlowNode = n
-  if tv.fSlowTimer == nil:
-    let t = newTimer(nil, tv.slowClickDelay)
-    t.onTimer = proc(s: Timer) =
-      s.enabled = false
-      let m = tv.fSlowNode
-      tv.fSlowNode = nil
-      if m != nil and m == tv.fFocus and m.fTree == tv and tv.focused:
-        tv.beginEdit(m)
-    tv.fSlowTimer = t
-  tv.fSlowTimer.enabled = false
-  tv.fSlowTimer.interval = max(tv.slowClickDelay, 1)
-  tv.fSlowTimer.enabled = true
+  tv.fSlow.arm(tv.slowClickDelay, proc() =
+    let m = tv.fSlowNode
+    tv.fSlowNode = nil
+    if m != nil and m == tv.fFocus and m.fTree == tv and tv.focused:
+      tv.beginEdit(m))
 
 method canFocus*(tv: TreeView): bool = tv.isVisible and tv.isEnabled
 
@@ -1260,19 +1241,10 @@ proc moveFocus(tv: TreeView, n: TreeNode, shift: ShiftState) =
   else: tv.selectNode(n, shReplace)
 
 proc typeAhead(tv: TreeView, ch: char) =
-  let now = nowMs()
-  if now - tv.fTypeTime > tv.typeAheadTimeout: tv.fTypeBuf.setLen(0)
-  tv.fTypeTime = now
-  tv.fTypeBuf.add toLowerAscii(ch)
-  let n = tv.fRows.len
-  if n == 0: return
   let cur = if tv.fFocus != nil and tv.fFocus.fRow >= 0: tv.fFocus.fRow else: -1
-  let start = if tv.fTypeBuf.len == 1: cur + 1 else: max(cur, 0)
-  for k in 0 ..< n:
-    let i = (start + k) mod n
-    if prefixIC(tv.fRows[i].fText, tv.fTypeBuf):
-      tv.moveFocus(tv.fRows[i], {})
-      break
+  let i = tv.fType.search(ch, cur, tv.fRows.len,
+                          proc(i: int): string = tv.fRows[i].fText)
+  if i >= 0: tv.moveFocus(tv.fRows[i], {})
 
 proc focusRow(tv: TreeView): int =
   if tv.fFocus != nil: tv.fFocus.fRow else: -1
@@ -1285,21 +1257,10 @@ method doKeyDown*(tv: TreeView, key: var Key, shift: ShiftState) =
   if shift * {ssAlt} != {}: return
   let n = tv.fRows.len
   let fr = tv.focusRow
-  var target = low(int)                   # row; low(int): not a navigation key
-  let span = max(tv.lastFullRow - tv.firstFullRow, 1)
-  if key == keyUp: target = if fr < 0: 0 else: fr - 1
-  elif key == keyDown: target = fr + 1
-  elif key == keyHome: target = 0
-  elif key == keyEnd: target = n - 1
-  elif key == keyPageDown:
-    let lf = tv.lastFullRow
-    target = if fr < lf: lf else: fr + span
-  elif key == keyPageUp:
-    let ff = tv.firstFullRow
-    target = if fr > ff: ff else: fr - span
-  if target != low(int):
+  let target = rowNavTarget(key, fr, n, tv.firstFullRow, tv.lastFullRow)
+  if target != NotNav:
     key = Key(0)
-    if n > 0: tv.moveFocus(tv.fRows[min(max(target, 0), n - 1)], shift)
+    if n > 0: tv.moveFocus(tv.fRows[clampRow(target, n)], shift)
     return
   let f = tv.fFocus
   if key == keyLeft and f != nil and f.fTree == tv:
@@ -1337,9 +1298,8 @@ method doKeyDown*(tv: TreeView, key: var Key, shift: ShiftState) =
     key = Key(0)
     tv.selectAll()
   else:
-    let ch = typeAheadChar(key, shift)
-    if ch != '\0' and (ch != ' ' or tv.fTypeBuf.len > 0 and
-                       nowMs() - tv.fTypeTime <= tv.typeAheadTimeout):
+    let ch = tv.fType.keyChar(key, shift)
+    if ch != '\0':
       key = Key(0)
       tv.typeAhead(ch)
 
@@ -1478,7 +1438,7 @@ proc initTreeView*(tv: TreeView, owner: Component = nil) =
   tv.fShowRoot = true
   tv.fShowButtons = true
   tv.slowClickDelay = 600
-  tv.typeAheadTimeout = 1000
+  tv.fType = initTypeAhead()
   tv.padding = spacing(1)
 
 proc newTreeView*(parent: Container = nil, left = 0'f32, top = 0'f32,

@@ -89,7 +89,7 @@
 ## fires first.
 
 import std/[algorithm, parseutils, strutils, math]
-import ./common, ./scrolling, ./edit, ./gridmodel
+import ./common, ./scrolling, ./edit, ./gridmodel, ./rowview
 export scrolling, gridmodel.AxisSizes
 
 type
@@ -131,7 +131,7 @@ type
     fDrag: DragMode
     fDragIdx: int
     fDragStart, fDragSize: float32
-    fEditor: Edit
+    fEd: InPlaceEditor
     fEditing: bool
     fEditCol, fEditRow: int
     fEditOrig: string
@@ -210,7 +210,7 @@ func hotTrack*(g: DrawGrid): bool = g.fHotTrack
 func col*(g: DrawGrid): int = g.fCol
 func row*(g: DrawGrid): int = g.fRow
 func editing*(g: DrawGrid): bool = g.fEditing
-func editor*(g: DrawGrid): Edit = g.fEditor
+func editor*(g: DrawGrid): Edit = g.fEd.edit
 func editCell*(g: DrawGrid): GridCoord = (g.fEditCol, g.fEditRow)
 
 func colWidth*(g: DrawGrid, c: int): float32 = g.fCols.size(c)
@@ -414,26 +414,24 @@ proc selectionChanged(g: DrawGrid) =
 # ------------------------------------------------------------------ editing
 
 proc positionEditor(g: DrawGrid) =
-  if not g.fEditing or g.fEditor == nil: return
+  if not g.fEditing or g.fEd.edit == nil: return
   let a = g.scrollArea
   let r = g.cellRect(g.fEditCol, g.fEditRow)
   let vis = r.intersect(a)
   if vis.isEmpty:
-    g.fEditor.setBounds(-100, -100, 1, 1)
+    g.fEd.edit.setBounds(-100, -100, 1, 1)
   else:
-    g.fEditor.setBounds(vis.x, vis.y, vis.w, vis.h)
+    g.fEd.edit.setBounds(vis.x, vis.y, vis.w, vis.h)
 
 proc endEdit*(g: DrawGrid, commit: bool, refocus = true) =
   ## Closes the editor, storing the text when `commit` and it changed.
   if not g.fEditing: return
   g.fEditing = false
-  let txt = g.fEditor.text
+  let txt = g.fEd.edit.text
   let c = g.fEditCol
   let r = g.fEditRow
   if commit and txt != g.fEditOrig: g.setCellText(c, r, txt)
-  let had = g.fEditor.focused
-  g.fEditor.visible = false
-  if refocus and had: g.setFocus()
+  g.fEd.hide(g, refocus)
   g.invalidate()
 
 proc moveCurrent*(g: DrawGrid, col, row: int, extend = false): bool {.discardable.}
@@ -470,15 +468,11 @@ proc editorKey(g: DrawGrid, key: var Key, shift: ShiftState) =
   g.moveCurrent(nc, nr)
 
 proc ensureEditor(g: DrawGrid) =
-  if g.fEditor != nil: return
-  let e = newEdit(g)
-  e.visible = false
-  e.tabStop = false
-  e.onKeyDown = proc(s: Control, k: var Key, sh: ShiftState) =
-    if g.fEditing: g.editorKey(k, sh)
-  e.onExit = proc(s: Control) =
-    if g.fEditing and not g.fEditor.focused: g.endEdit(true, refocus = false)
-  g.fEditor = e
+  g.fEd.ensure(g, proc(cancel: bool) = g.endEdit(not cancel),
+    keyHook = proc(k: var Key, sh: ShiftState) =
+      if g.fEditing: g.editorKey(k, sh),
+    exitHook = proc() =
+      if g.fEditing and not g.fEd.edit.focused: g.endEdit(true, refocus = false))
 
 proc startEdit*(g: DrawGrid, initial = "", useInitial = false): bool {.discardable.} =
   ## Opens the editor on the current cell (`initial` replaces the cell text
@@ -491,7 +485,7 @@ proc startEdit*(g: DrawGrid, initial = "", useInitial = false): bool {.discardab
   g.fEditRow = g.fRow
   g.fEditOrig = g.cellText(g.fCol, g.fRow)
   g.fEditing = true
-  let e = g.fEditor
+  let e = g.fEd.edit
   e.text = if useInitial: initial else: g.fEditOrig
   e.visible = true
   g.positionEditor()
