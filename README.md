@@ -8,7 +8,7 @@ first). Forms, `Align` and `Anchors`, `onClick` events, actions, menus, and a
 the [changelog](CHANGELOG.md).
 
 The companion IDE, a visual form designer built on nimvcl, lives in
-[nimvcl-ide](https://github.com/Vyrnexis/nimvcl-ide).
+[NimRAD](https://github.com/Vyrnexis/NimRAD).
 
 ![The nimvcl showcase: buttons and choices](docs/images/showcase-buttons.png)
 

@@ -3,7 +3,7 @@
 nimvcl is a Delphi VCL-style UI library for Nim 2.2, drawn with SDL3. If you
 know `TForm`, `TButton`, `Align`, `Anchors` and `OnClick`, you already know most
 of it. These pages are for Nim programmers who are new to the library. The visual
-form designer built on it is [nimvcl-ide](https://github.com/Vyrnexis/nimvcl-ide).
+form designer built on it is [NimRAD](https://github.com/Vyrnexis/NimRAD).
 
 **Conventions.** Examples assume `import nimvcl` and a form named `form`:
 
