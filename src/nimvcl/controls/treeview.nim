@@ -134,8 +134,7 @@ type
     fMulti, fExtended, fShowLines, fShowRoot, fShowButtons: bool
     fRowSelect, fHideSel, fReadOnly, fCheckboxes, fPropagate, fMouseIn: bool
     fIndent, fItemHeight, fLastIh, fExtent, fMouseY: float32
-    fImages: ImageList
-    fImgListener: int
+    fImages: ImageListRef
     fEdit: Edit
     fSlowTimer: Timer
     fTypeBuf: string
@@ -212,7 +211,7 @@ proc `selectedIndex=`*(n: TreeNode, v: int) =
 # -------------------------------------------------------------- tree basics
 
 func items*(tv: TreeView): TreeItems = TreeItems(tv: tv)
-func images*(tv: TreeView): ImageList = tv.fImages
+func images*(tv: TreeView): ImageList = tv.fImages.list
 func indent*(tv: TreeView): float32 = tv.fIndent
 func multiSelect*(tv: TreeView): bool = tv.fMulti
 func extendedSelect*(tv: TreeView): bool = tv.fExtended
@@ -240,7 +239,7 @@ func nodeAtRow*(tv: TreeView, row: int): TreeNode =
 proc itemHeight*(tv: TreeView): float32 =
   ## Row height in logical pixels (the automatic one when not set).
   if tv.fItemHeight > 0: return tv.fItemHeight
-  let icon = if tv.fImages != nil: tv.fImages.height + 4 else: 0'f32
+  let icon = if tv.fImages.list != nil: tv.fImages.list.height + 4 else: 0'f32
   if tv.canMeasure:
     max(max(ceil(tv.renderCtx.fontMetrics(tv.font).lineHeight) + 6, 18), icon)
   else: max(22'f32, icon)
@@ -377,13 +376,13 @@ proc geom(tv: TreeView, n: TreeNode, y: float32, ih: float32): NodeGeom =
   if tv.fCheckboxes:
     result.check = rectF(x, y + floor((ih - CheckSize) / 2), CheckSize, CheckSize)
     x += CheckSize + 4
-  if tv.fImages != nil:
-    result.icon = rectF(x, y + floor((ih - tv.fImages.height) / 2),
-                        tv.fImages.width, tv.fImages.height)
-    x += tv.fImages.width + 4
+  if tv.fImages.list != nil:
+    result.icon = rectF(x, y + floor((ih - tv.fImages.list.height) / 2),
+                        tv.fImages.list.width, tv.fImages.list.height)
+    x += tv.fImages.list.width + 4
   result.labelX = x
   result.labelW = tv.textWidth(n.fText, tv.font) + 2 * LabelPad
-  if tv.fImages != nil: result.selX = result.icon.x - 2
+  if tv.fImages.list != nil: result.selX = result.icon.x - 2
   else: result.selX = result.labelX
 
 proc prepareMeasure(tv: TreeView) =
@@ -422,7 +421,7 @@ proc rowExtent(tv: TreeView, n: TreeNode): float32 =
   ## bar must reach); `prepareMeasure` first.
   var x = LeftPad + float32(max(tv.colOf(n) + 1, 0)) * tv.fIndent
   if tv.fCheckboxes: x += CheckSize + 4
-  if tv.fImages != nil: x += tv.fImages.width + 4
+  if tv.fImages.list != nil: x += tv.fImages.list.width + 4
   x + tv.labelWidthEstimate(n.fText) + 2 * LabelPad + 4
 
 proc measureExtent(tv: TreeView): float32 =
@@ -1143,16 +1142,11 @@ proc `readOnly=`*(tv: TreeView, v: bool) =
 # ---------------------------------------------------------- property setters
 
 proc `images=`*(tv: TreeView, v: ImageList) =
-  if tv.fImages != nil and tv.fImgListener != 0:
-    tv.fImages.removeListener(tv.fImgListener)
-  tv.fImgListener = 0
-  tv.fImages = v
+  tv.fImages.attach(v, proc() =          # repaint / re-measure on list changes
+    tv.fExtentStale = true
+    tv.refresh()
+    tv.invalidate())
   tv.fExtentStale = true
-  if v != nil:                           # repaint / re-measure on list changes
-    tv.fImgListener = v.addListener(proc() =
-      tv.fExtentStale = true
-      tv.refresh()
-      tv.invalidate())
   tv.refresh()
 method releaseResources*(tv: TreeView) =
   tv.images = nil
@@ -1451,7 +1445,7 @@ method paint*(tv: TreeView, c: Canvas) =
       drawCheckGlyph(c, g.check, node.fCheck, t, enabled)
     if g.icon.w > 0:
       let idx = if sel and node.fSelImage >= 0: node.fSelImage else: node.fImage
-      tv.fImages.draw(c, idx, g.icon.x, g.icon.y, enabled)
+      tv.fImages.list.draw(c, idx, g.icon.x, g.icon.y, enabled)
     c.textRect(node.fText, tv.font,
                rectF(g.labelX + LabelPad, y, g.labelW - LabelPad, ih), col,
                taLeft, vaCenter)

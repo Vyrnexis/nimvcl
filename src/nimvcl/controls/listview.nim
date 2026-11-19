@@ -152,8 +152,7 @@ type
     fCheckboxes, fReadOnly, fDragging, fMouseIn: bool
     fItemHeight, fLastIh, fCellW, fMouseX, fMouseY: float32
     fPer, fRpc: int                  ## icon views: cells per row; list: rows per column
-    fSmall, fLarge: ImageList
-    fSmallListener, fLargeListener: int
+    fSmall, fLarge: ImageListRef
     fSortCol: int
     fSortOrder: SortOrder
     fHdrHot, fHdrDown, fResizeCol: int
@@ -205,8 +204,8 @@ func rowSelect*(lv: ListView): bool = lv.fRowSelect
 func hotTrack*(lv: ListView): bool = lv.fHotTrack
 func checkboxes*(lv: ListView): bool = lv.fCheckboxes
 func readOnly*(lv: ListView): bool = lv.fReadOnly
-func smallImages*(lv: ListView): ImageList = lv.fSmall
-func largeImages*(lv: ListView): ImageList = lv.fLarge
+func smallImages*(lv: ListView): ImageList = lv.fSmall.list
+func largeImages*(lv: ListView): ImageList = lv.fLarge.list
 func cellWidth*(lv: ListView): float32 = lv.fCellW
 func sortColumn*(lv: ListView): int = lv.fSortCol
 func sortOrder*(lv: ListView): SortOrder = lv.fSortOrder
@@ -270,7 +269,7 @@ proc lineH(lv: ListView): float32 =
 proc itemHeight*(lv: ListView): float32 =
   ## Row height in report / list / small icon views (automatic when not set).
   if lv.fItemHeight > 0: return lv.fItemHeight
-  let icon = if lv.fSmall != nil: lv.fSmall.height + 4 else: 0'f32
+  let icon = if lv.fSmall.list != nil: lv.fSmall.list.height + 4 else: 0'f32
   max(max(lv.lineH + 6, 20), icon)
 
 proc headerHeight*(lv: ListView): float32 =
@@ -278,7 +277,7 @@ proc headerHeight*(lv: ListView): float32 =
   if lv.fStyle == vsReport and lv.fShowHeader: max(lv.itemHeight + 2, 24) else: 0
 
 func largeIconSize(lv: ListView): SizeF =
-  if lv.fLarge != nil: sizeF(lv.fLarge.width, lv.fLarge.height) else: sizeF(32, 32)
+  if lv.fLarge.list != nil: sizeF(lv.fLarge.list.width, lv.fLarge.list.height) else: sizeF(32, 32)
 
 proc cellW(lv: ListView): float32 =
   if lv.fCellW > 0 and lv.fStyle != vsReport: return lv.fCellW
@@ -388,13 +387,13 @@ proc captionRectIn(lv: ListView, i: int, cell: RectF): RectF =
   of vsReport:
     var x = cell.x + PadX
     if lv.fCheckboxes: x += CheckSize + 4
-    if lv.fSmall != nil: x += lv.fSmall.width + 4
+    if lv.fSmall.list != nil: x += lv.fSmall.list.width + 4
     let w0 = if lv.fColumns.len > 0: lv.fColumns[0].fWidth else: cell.w
     rectF(x, cell.y, max(cell.x + w0 - PadX - x, 0), cell.h)
   of vsSmallIcon, vsList:
     var x = cell.x + 4
     if lv.fCheckboxes: x += CheckSize + 4
-    if lv.fSmall != nil: x += lv.fSmall.width + 4
+    if lv.fSmall.list != nil: x += lv.fSmall.list.width + 4
     rectF(x, cell.y, max(cell.right - 4 - x, 0), cell.h)
   of vsIcon:
     let top = cell.y + 6 + lv.largeIconSize.h + 4
@@ -409,15 +408,15 @@ proc iconRect*(lv: ListView, i: int): RectF =
   let cell = lv.itemRect(i)
   case lv.fStyle
   of vsIcon:
-    if lv.fLarge == nil and lv.fSmall == nil: return rectF(0, 0, 0, 0)
+    if lv.fLarge.list == nil and lv.fSmall.list == nil: return rectF(0, 0, 0, 0)
     let s = lv.largeIconSize
     rectF(cell.x + floor((cell.w - s.w) / 2), cell.y + 6, s.w, s.h)
   else:
-    if lv.fSmall == nil: return rectF(0, 0, 0, 0)
+    if lv.fSmall.list == nil: return rectF(0, 0, 0, 0)
     var x = cell.x + (if lv.fStyle == vsReport: PadX else: 4)
     if lv.fCheckboxes: x += CheckSize + 4
-    rectF(x, cell.y + floor((cell.h - lv.fSmall.height) / 2),
-          lv.fSmall.width, lv.fSmall.height)
+    rectF(x, cell.y + floor((cell.h - lv.fSmall.list.height) / 2),
+          lv.fSmall.list.width, lv.fSmall.list.height)
 
 proc checkRect*(lv: ListView, i: int): RectF =
   ## The check box of item `i` in client coordinates (empty when none).
@@ -1012,22 +1011,15 @@ proc `viewStyle=`*(lv: ListView, v: ListViewStyle) =
   lv.refresh()
   if lv.fIndex >= 0: lv.makeVisible(lv.fIndex)
 
-proc watchImages(lv: ListView, old, v: ImageList, id: var int) =
-  ## Re-subscribes to the image list so changes repaint / re-measure the view.
-  if old != nil and id != 0: old.removeListener(id)
-  id = 0
-  if v != nil:
-    id = v.addListener(proc() =
-      lv.refresh()
-      lv.invalidate())
-
 proc `smallImages=`*(lv: ListView, v: ImageList) =
-  lv.watchImages(lv.fSmall, v, lv.fSmallListener)
-  lv.fSmall = v
+  lv.fSmall.attach(v, proc() =
+    lv.refresh()
+    lv.invalidate())
   lv.refresh()
 proc `largeImages=`*(lv: ListView, v: ImageList) =
-  lv.watchImages(lv.fLarge, v, lv.fLargeListener)
-  lv.fLarge = v
+  lv.fLarge.attach(v, proc() =
+    lv.refresh()
+    lv.invalidate())
   lv.refresh()
 method releaseResources*(lv: ListView) =
   lv.smallImages = nil
@@ -1496,7 +1488,7 @@ proc drawCaptionAndIcon(lv: ListView, c: Canvas, item: ListItem, i: int,
     drawCheckGlyph(c, cr, (if lv.itemChecked(i): cbChecked else: cbUnchecked), t, enabled)
   let ir = lv.iconRect(i)
   if ir.w > 0:
-    let il = if lv.fStyle == vsIcon and lv.fLarge != nil: lv.fLarge else: lv.fSmall
+    let il = if lv.fStyle == vsIcon and lv.fLarge.list != nil: lv.fLarge.list else: lv.fSmall.list
     if il != nil: il.draw(c, item.imageIndex, ir.x, ir.y, enabled)
   let cap = lv.captionRectIn(i, cell)
   var f = lv.font

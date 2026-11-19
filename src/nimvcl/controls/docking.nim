@@ -110,9 +110,8 @@ type
 
   DockPanel* = ref object of Container
     fSite: DockSite
-    fImages: ImageList
+    fImages: ImageListRef
     fImageIndex: int
-    fListener: int
     fClosable: bool
     fContent: Control
     fDockPlace: DockPlace
@@ -253,7 +252,7 @@ proc `closable=`*(p: DockPanel, v: bool) =
 
 func content*(p: DockPanel): Control = p.fContent
 func imageIndex*(p: DockPanel): int = p.fImageIndex
-func images*(p: DockPanel): ImageList = p.fImages
+func images*(p: DockPanel): ImageList = p.fImages.list
 
 proc findPanel*(s: DockSite, name: string): DockPanel =
   ## The panel with this name, nil when there is none.
@@ -1195,7 +1194,7 @@ func tabInsertIndex(rects: seq[RectF], x: float32): int =
 
 proc tabWidthNatural(g: DockTabs, p: DockPanel): float32 =
   var w = 20'f32 + g.textWidth(displayText(p.caption), g.font.bold)
-  if p.fImages != nil and p.fImageIndex >= 0: w += p.fImages.width + 6
+  if p.fImages.list != nil and p.fImageIndex >= 0: w += p.fImages.list.width + 6
   if p.fClosable and p == g.fActive: w += 20   # only the selected tab reserves room
   clamp(w, 56'f32, 220'f32)
 
@@ -1661,9 +1660,9 @@ method paint*(g: DockTabs, c: Canvas) =
     elif hot:
       c.fillRect(rectF(r.x, r.y + 2, r.w, r.h - 3), th.hover)
     var tx = r.x + 10
-    if p.fImages != nil and p.fImageIndex >= 0 and r.w >= 80:
-      p.fImages.draw(c, p.fImageIndex, tx, r.y + (r.h - p.fImages.height) / 2)
-      tx += p.fImages.width + 6
+    if p.fImages.list != nil and p.fImageIndex >= 0 and r.w >= 80:
+      p.fImages.list.draw(c, p.fImageIndex, tx, r.y + (r.h - p.fImages.list.height) / 2)
+      tx += p.fImages.list.width + 6
     let cr = g.closeRectOf(p, r)
     let showClose = not cr.isEmpty and (sel or hot)
     let right = if showClose: cr.x - 2 else: r.right - 8
@@ -1783,12 +1782,9 @@ method `caption=`*(p: DockPanel, v: string) =
 
 proc `images=`*(p: DockPanel, il: ImageList) =
   ## The icon source for `imageIndex`.
-  if p.fImages == il: return
-  if p.fImages != nil: p.fImages.removeListener(p.fListener)
-  p.fImages = il
-  if il != nil:
-    p.fListener = il.addListener(proc() =
-      if p.parent != nil: p.parent.invalidate())
+  if p.fImages.list == il: return
+  p.fImages.attach(il, proc() =
+    if p.parent != nil: p.parent.invalidate())
   if p.parent != nil: p.parent.invalidate()
 
 proc `imageIndex=`*(p: DockPanel, v: int) =
@@ -1797,7 +1793,5 @@ proc `imageIndex=`*(p: DockPanel, v: int) =
   if p.parent != nil: p.parent.invalidate()
 
 method releaseResources*(p: DockPanel) =
-  if p.fImages != nil:
-    p.fImages.removeListener(p.fListener)
-    p.fImages = nil
+  p.fImages.detach()
   procCall releaseResources(Control(p))

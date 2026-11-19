@@ -68,7 +68,7 @@ type
     fRoot: MenuItem
     fTargets: seq[Control]
     fShown: PopupWindow           # the last popup window this menu opened
-    fImgListener: int             # id in the image list (0: none)
+    fImgRef: ImageListRef         # the menu's icons subscription
     onPopup*: PopupEvent
 
   MenuPanel = ref object of Container
@@ -92,7 +92,7 @@ type
     fRoot: MenuItem
     fOpen, fHot: int
     fDrop: PopupWindow
-    fImgListener: int
+    fImgRef: ImageListRef
 
 var
   menuOpening*: proc()   ## called just before a dropdown/popup menu is built (actions refresh here)
@@ -612,13 +612,9 @@ func items*(m: PopupMenu): MenuItem = m.fRoot
 func images*(m: PopupMenu): ImageList = m.fRoot.fImages
 proc `images=`*(m: PopupMenu, v: ImageList) =
   ## Icons of the menu; the open popup repaints when the list changes.
-  let old = m.fRoot.fImages
-  if old != nil and m.fImgListener != 0: old.removeListener m.fImgListener
-  m.fImgListener = 0
   m.fRoot.fImages = v
-  if v != nil:
-    m.fImgListener = v.addListener(proc() =
-      if m.fShown != nil and m.fShown.isOpen: m.fShown.content.invalidate())
+  m.fImgRef.attach(v, proc() =
+    if m.fShown != nil and m.fShown.isOpen: m.fShown.content.invalidate())
 proc add*(m: PopupMenu, item: MenuItem): MenuItem {.discardable.} = m.fRoot.add item
 proc addItem*(m: PopupMenu, caption: string, onClick: MenuItemEvent = nil,
               shortcut = noShortcut): MenuItem {.discardable.} =
@@ -765,14 +761,10 @@ func images*(m: MainMenu): ImageList = m.fRoot.fImages
 proc `images=`*(m: MainMenu, v: ImageList) =
   ## Icons of the menu; the bar and an open dropdown repaint when the list
   ## changes.
-  let old = m.fRoot.fImages
-  if old != nil and m.fImgListener != 0: old.removeListener m.fImgListener
-  m.fImgListener = 0
   m.fRoot.fImages = v
-  if v != nil:
-    m.fImgListener = v.addListener(proc() =
-      m.invalidate()
-      if m.fDrop != nil and m.fDrop.isOpen: m.fDrop.content.invalidate())
+  m.fImgRef.attach(v, proc() =
+    m.invalidate()
+    if m.fDrop != nil and m.fDrop.isOpen: m.fDrop.content.invalidate())
 method releaseResources*(m: MainMenu) =
   m.images = nil
   m.fRoot.releaseLinks()
