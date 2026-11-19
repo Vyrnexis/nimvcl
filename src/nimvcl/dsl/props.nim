@@ -44,11 +44,16 @@
 ##   condition (over `self`) holds, because another property implies it.
 ## * `defaultWhen font, parentFont` the property counts as default while the
 ##   bool property `parentFont` is true.
+## * `after tabIndex, tabs` the first property is applied after the others:
+##   its setter only accepts a value that the others make valid (an index into
+##   a list). `propsOf` lists the properties in that order, so a saved form file
+##   and every loader that applies properties in file order set them correctly.
+##   Names the class does not have are ignored.
 ##
 ## Defaults are measured, not declared: a property is "default" when it has the
 ## value a freshly created instance of the object's class has.
 
-import std/[macros, tables, strutils]
+import std/[macros, tables, strutils, hashes]
 import ../graphics/[color, font, image]
 import ../core/[types, component, control]
 
@@ -121,6 +126,7 @@ type
     stored*: bool                        ## written to form files when not default
     defaultWhen*: string                 ## default while this bool property is true
     skipWhen*: proc(o: Obj): bool {.closure.}   ## not stored while this returns true (value implied by another property)
+    after*: seq[string]                  ## properties that must be set before this one (see `propsOf`)
     declaredIn*: ClassInfo
     get*: proc(o: Obj): PropValue {.closure.}
     set*: proc(o: Obj, v: PropValue) {.closure.}
@@ -141,13 +147,17 @@ type
     attach*: proc(parent, child: Obj) {.closure.}
     kids*: proc(o: Obj): seq[Obj] {.closure.}
     protoParent*: proc(): Obj {.closure.}   ## parent for the default-measuring instance
+    level: int                           ## 1 for a root class, parent's + 1 below
     defaultsReady: bool
     defaults: Table[string, PropValue]
+    propsCache: seq[PropInfo]
+    propsStamp: int                      ## `registryStamp` the cache was built for
 
 var
   classTable: Table[string, ClassInfo]
   classList: seq[ClassInfo]
   aliasTable: Table[string, string]
+  registryStamp = 1       ## bumped whenever a property list or an ordering changes
 
 # ------------------------------------------------------------------ values
 
@@ -230,6 +240,10 @@ template kindOfType*(T: typedesc): PropKind =
   elif T is ref: pkObject
   else: {.error: "registry: unsupported property type " & $T.}
 
+proc hash*(o: Obj): Hash =
+  ## Identity hash, so objects can be kept in sets and tables.
+  hash(cast[pointer](o))
+
 proc objectName*(o: Obj): string =
   if o != nil and o of Component: result = Component(o).name
 
@@ -289,12 +303,18 @@ proc fromPV*[T](v: PropValue, t: typedesc[T]): T =
   elif T is set:
     setFromPV(v, T)
   elif T is SomeInteger:
+    var n: int
     case v.kind
-    of pkInt: T(v.i)
+    of pkInt: n = v.i
     of pkFloat:
-      if v.f != float(int(v.f)): raise kindError("an integer", v)
-      T(int(v.f))
+      if not (v.f > -9.2e18 and v.f < 9.2e18) or v.f != float(int(v.f)):
+        raise kindError("an integer", v)
+      n = int(v.f)
     else: raise kindError("an integer", v)
+    when sizeof(T) < sizeof(int):
+      if n < int(low(T)) or n > int(high(T)):
+        raise newException(PropError, "whole number " & $n & " out of range for " & $T)
+    T(n)
   elif T is SomeFloat:
     case v.kind
     of pkFloat: T(v.f)
@@ -392,11 +412,18 @@ proc collectionProp*(name, childClass: string, ops: CollectionOps,
 # ---------------------------------------------------------------- registry
 
 proc newClassInfo*(name, nimType: string, parent: ClassInfo): ClassInfo =
-  ClassInfo(name: name, nimType: nimType, parent: parent)
+  ClassInfo(name: name, nimType: nimType, parent: parent,
+            level: (if parent == nil: 1 else: parent.level + 1))
 
 proc addProp*(ci: ClassInfo, p: PropInfo) =
   p.declaredIn = ci
   ci.props.add p
+  inc registryStamp
+
+proc setAfter*(p: PropInfo, others: openArray[string]) =
+  ## `p` is applied after the properties `others` (see `propsOf`).
+  p.after = @others
+  inc registryStamp
 
 proc addAlias*(alias, className: string) =
   aliasTable[alias] = className
@@ -419,11 +446,7 @@ proc addCollection*(ci: ClassInfo, name, childClass: string, ops: CollectionOps,
 
 proc allClasses*(): seq[ClassInfo] = classList
 
-proc depth*(ci: ClassInfo): int =
-  var c = ci
-  while c != nil:
-    inc result
-    c = c.parent
+proc depth*(ci: ClassInfo): int = ci.level
 
 proc isA*(ci, base: ClassInfo): bool =
   ## `ci` is `base` or inherits from it.
@@ -443,21 +466,44 @@ proc classOf*(o: Obj): ClassInfo =
         best = d
         result = ci
 
+proc place(props: seq[PropInfo], i: int, state: var seq[int], order: var seq[PropInfo]) =
+  if state[i] != 0: return        # placed, or a dependency cycle: keep the given order
+  state[i] = 1
+  for dep in props[i].after:
+    for j in 0 ..< props.len:
+      if props[j].name == dep:
+        place(props, j, state, order)
+        break
+  state[i] = 2
+  order.add props[i]
+
+proc inApplyOrder(props: seq[PropInfo]): seq[PropInfo] =
+  ## `props` with every property after those it names in `after`, otherwise in
+  ## the given order.
+  var state = newSeq[int](props.len)    # 0 new, 1 being placed, 2 placed
+  for i in 0 ..< props.len: place(props, i, state, result)
+
 proc propsOf*(ci: ClassInfo): seq[PropInfo] =
   ## Every property of the class including inherited ones: ancestors' first,
-  ## each in registration order. A property redeclared in a subclass replaces
-  ## the inherited one in place.
+  ## each in registration order, a property that is applied `after` others
+  ## behind them. A property redeclared in a subclass replaces the inherited
+  ## one in place. This is the order a form file is written and applied in.
+  if ci.propsStamp == registryStamp: return ci.propsCache
   var chain: seq[ClassInfo]
   var c = ci
   while c != nil:
     chain.add c
     c = c.parent
+  var all: seq[PropInfo]
   for i in countdown(chain.high, 0):
     for p in chain[i].props:
       var found = -1
-      for j in 0 ..< result.len:
-        if result[j].name == p.name: found = j
-      if found >= 0: result[found] = p else: result.add p
+      for j in 0 ..< all.len:
+        if all[j].name == p.name: found = j
+      if found >= 0: all[found] = p else: all.add p
+  ci.propsCache = inApplyOrder(all)
+  ci.propsStamp = registryStamp
+  ci.propsCache
 
 proc isDescendantOf*(o: Obj, className: string): bool =
   let ci = classOf(o)
@@ -597,7 +643,7 @@ proc findProp*(ci: ClassInfo, name: string): PropInfo =
   ## Property `name` (inherited ones included); nil when there is none. A dotted
   ## name addresses a sub-property (`"font.size"`, `"anchors.akLeft"`,
   ## `"font.style.fsBold"`).
-  let parts = name.split('.')
+  let parts = if '.' in name: name.split('.') else: @[name]
   var c = ci
   var cur: PropInfo = nil
   while c != nil and cur == nil:
@@ -651,7 +697,7 @@ proc ensureDefaults(ci: ClassInfo) =
   while cur != nil and cur.create == nil: cur = cur.parent
   if cur == nil: return
   var proto: Obj
-  try: proto = ci.create(nil, (if ci.protoParent != nil: ci.protoParent() else: nil))
+  try: proto = cur.create(nil, (if ci.protoParent != nil: ci.protoParent() else: nil))
   except CatchableError: proto = nil
   if proto == nil: return
   for p in ci.propsOf:
@@ -664,7 +710,7 @@ proc defaultOf*(ci: ClassInfo, p: PropInfo): PropValue =
   ## Value of `p` in a freshly created instance of `ci` (the value is not
   ## stored when equal to it). Sub-properties work too.
   ci.ensureDefaults()
-  let parts = p.name.split('.')
+  let parts = if '.' in p.name: p.name.split('.') else: @[p.name]
   if ci.defaults.hasKey(parts[0]):
     result = ci.defaults[parts[0]]
     var cur = ci.findProp(parts[0])
@@ -681,7 +727,7 @@ proc isDefault*(o: Obj, p: PropInfo): bool =
   ## True when `p` has the value of a fresh instance of the object's class.
   let ci = classOf(o)
   if ci == nil: return false
-  let base = p.name.split('.')[0]
+  let base = if '.' in p.name: p.name[0 ..< p.name.find('.')] else: p.name
   let bp = ci.findProp(base)
   if bp != nil and bp.skipWhen != nil and bp.skipWhen(o): return true
   if bp != nil and bp.defaultWhen.len > 0:
@@ -851,6 +897,12 @@ macro registerClass*(args: varargs[untyped]): untyped =
             findProp(`ci`, `nm`).skipWhen = proc(`o`: Obj): bool =
               let `selfId` = `cls`(`o`)
               `cond`
+        elif head.kind == nnkIdent and head.eqIdent("after") and st.len >= 3:
+          let nm = newLit(st[1].strVal)
+          var deps = newTree(nnkBracket)
+          for j in 2 ..< st.len: deps.add newLit(st[j].strVal)
+          stmts.add quote do:
+            findProp(`ci`, `nm`).setAfter(`deps`)
         elif head.kind == nnkIdent and head.eqIdent("defaultWhen") and st.len == 3:
           let nm = newLit(st[1].strVal)
           let flag = newLit(st[2].strVal)
@@ -861,7 +913,7 @@ macro registerClass*(args: varargs[untyped]): untyped =
           stmts.add propStmt(cls, ci, head.strVal, st[1][0], cat, nil, nil)
         else:
           error("registerClass: expected `name: Type`, `prop name, Type, get, set`, " &
-                "`category X:`, `nostore a, b` or `defaultWhen a, b`", st)
+                "`category X:`, `nostore a, b`, `after a, b` or `defaultWhen a, b`", st)
       else:
         error("registerClass: unsupported statement", st)
   if hasBody: walk(stmts, args[^1], "Behaviour", cls, ci)

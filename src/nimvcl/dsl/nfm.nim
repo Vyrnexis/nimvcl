@@ -29,7 +29,7 @@
 ## What is defined here is the run-time use of the registry: `loadNfm`,
 ## `formToNfm`, `nfmToFormMacro`.
 
-import std/[strutils, tables, macros, os, sets, hashes]
+import std/[strutils, tables, macros, os, sets, hashes, math]
 import ../graphics/[color, image]
 import ../core/[component, control, form]
 import ../controls/[menus, statusbar, listview, actions, flowpanel]
@@ -41,11 +41,6 @@ export flowpanel.parseGridSizes, flowpanel.gridSizesToText
 
 # ===================================================================== runtime
 
-proc fmtFloat(f: float): string =
-  let f32 = float32(f)
-  if f32 == float32(int64(f32)) and abs(f32) < 1e9: $int64(f32)
-  else: $f32
-
 proc toNfmValue*(info: PropInfo, v: PropValue): NfmValue =
   ## The text-form value of a property value; raises `PropError` for values with
   ## no text form (images, composite kinds, unnamed objects).
@@ -53,7 +48,10 @@ proc toNfmValue*(info: PropInfo, v: PropValue): NfmValue =
   of pkBool: nfmBool(v.b)
   of pkInt: nfmInt(v.i)
   of pkFloat:
-    let t = fmtFloat(v.f)
+    if classify(v.f) in {fcNan, fcInf, fcNegInf}:
+      raise newException(PropError, "property `" & info.name &
+                         "` is not a finite number (nothing to save)")
+    let t = formatNumber(v.f)
     NfmValue(kind: (if '.' in t or 'e' in t: nvFloat else: nvInt), text: t)
   of pkString: nfmString(v.s)
   of pkEnum: nfmIdent(info.enumName(v.i))
@@ -139,7 +137,8 @@ proc convertValue(info: PropInfo, v: NfmValue, file: string,
     pvBool(v.text == "true")
   of pkInt:
     if v.kind != nvInt: bad("`" & info.name & "` expects a whole number")
-    pvInt(parseInt(v.text))
+    try: pvInt(parseInt(v.text))
+    except ValueError: bad("`" & info.name & "`: `" & v.text & "` is too large for a whole number")
   of pkFloat:
     if v.kind notin {nvInt, nvFloat}: bad("`" & info.name & "` expects a number")
     pvFloat(parseFloat(v.text))
@@ -201,6 +200,11 @@ type Built = object
 
 proc buildTree(node: NfmNode, parent, rootOwner: Obj, file: string, opt: NfmOptions,
                byName: var Table[string, Obj], built: var seq[Built]) =
+  if node.inherited:
+    raise nfmError(file, node.line, node.col,
+                   "`inherited " & node.name & "` can only stand directly in an " &
+                   "`inherited` object of the form (it names an object of the ancestor " &
+                   "form, which cannot be moved into a new container)")
   var ci = classByName(node.className)
   if ci == nil:
     opt.problem(file, node.line, node.col,
@@ -232,7 +236,11 @@ proc applyProps(b: Built, file: string, opt: NfmOptions,
       if not (b.obj of Component) or p.value.kind != nvInt:
         opt.problem(file, p.line, p.col, "`" & p.name & "` takes a whole number")
         continue
-      let v = try: parseInt(p.value.text) except ValueError: 0
+      let v = try: parseInt(p.value.text)
+              except ValueError:
+                opt.problem(file, p.line, p.col, "`" & p.name & "`: `" & p.value.text &
+                            "` is too large for a whole number")
+                continue
       if p.name == "designLeft": Component(b.obj).designLeft = v
       else: Component(b.obj).designTop = v
       continue
@@ -265,8 +273,6 @@ proc applyProps(b: Built, file: string, opt: NfmOptions,
     except PropError as e:
       raise nfmError(file, p.line, p.col, "property `" & p.name & "`: " & e.msg)
 
-proc hash(o: Obj): Hash = hash(cast[pointer](o))
-
 proc markInherited(o: Obj, seen: var HashSet[Obj]) =
   if seen.containsOrIncl(o): return
   if o of Component:
@@ -289,7 +295,7 @@ proc overlay(n: NfmNode, o: Obj, fileName: string, owner: Component, opt: NfmOpt
       let co = byName[c.name]
       let ci = classOf(co)
       let want = classByName(c.className)
-      if ci == nil or want == nil or not ci.isA(want):
+      if ci == nil or want == nil or ci != want:
         opt.problem(fileName, c.line, c.col,
                     "`" & c.name & "` is a `" & (if ci == nil: "?" else: ci.name) &
                     "` in the ancestor, not a `" & c.className & "`")
@@ -373,7 +379,15 @@ proc buildNfm*(root: NfmNode, owner: Component = nil, options: NfmOptions = nil,
   ## come from the ancestor have `inherited` set.
   let opt = if options == nil: newNfmOptions() else: options
   var byName: Table[string, Obj]
-  buildNfmImpl(root, owner, opt, fileName, byName, @[absolutePath(fileName)])
+  let ownedBefore = if owner != nil: owner.components.len else: 0
+  try:
+    result = buildNfmImpl(root, owner, opt, fileName, byName, @[absolutePath(fileName)])
+  except CatchableError:
+    # a failed load leaves nothing of the half-built tree in `owner`
+    if owner != nil:
+      while owner.components.len > ownedBefore:
+        owner.removeComponent(owner.components[^1])
+    raise
 
 proc loadNfm*(text: string, owner: Component = nil, options: NfmOptions = nil,
               fileName = ""): Form =
@@ -613,7 +627,7 @@ proc nfmToFormMacro*(text: string, fileName = ""): string =
   var stubs: seq[string]
   var seenStub = initHashSet[string]()
   let formName = if root.name.len > 0: root.name else: "Form1"
-  proc emit(n: NfmNode, level: int, top: bool) =
+  proc emit(n: NfmNode, level: int) =
     let ind = "  ".repeat(level)
     for i, p in n.props:
       if p.name.isEventProp:
@@ -649,13 +663,13 @@ proc nfmToFormMacro*(text: string, fileName = ""): string =
     for c in n.children:
       if c.name.len > 0: o.add ind & c.className & " " & c.name & ":\n"
       else: o.add ind & c.className & ":\n"
-      emit(c, level + 1, false)
+      emit(c, level + 1)
   let head =
     if root.className == "Frame": "frame " & formName & ":\n"
     elif root.className == "Form": "form " & formName & ":\n"
     else: "form " & formName & " of " & root.className & ":\n"
   o.add head
   if root.name.len > 0: o.add "  name = " & nimStr(root.name) & "\n"
-  emit(root, 1, true)
+  emit(root, 1)
   for s in stubs: o.add s
   o

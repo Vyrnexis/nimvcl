@@ -2,7 +2,7 @@
 
 import std/[unittest, strutils, tables, os, osproc]
 import nimvcl
-import nimvcl/dsl/nfm
+import nimvcl/dsl/[nfm, props_std]
 
 const
   here = currentSourcePath().parentDir
@@ -420,3 +420,71 @@ suite "converters":
     if code != 0: echo output
     check code == 0
     removeDir dir
+
+suite "property order and robustness":
+  test "properties that depend on others are written, and so applied, after them":
+    Application.init()
+    let f = newForm(nil, 300, 200)
+    let tc = newTabControl(f)
+    tc.name = "tc"
+    setProp(Obj(tc), "tabs", pvStrings(@["a", "b", "c"]))
+    tc.tabIndex = 2
+    let ci = classByName("TabControl")
+    var names: seq[string]
+    for p in ci.propsOf: names.add p.name
+    check names.find("tabs") in 0 ..< names.find("tabIndex")
+    let text = formToNfm(f)
+    check text.find("tabs = ") in 0 ..< text.find("tabIndex = ")
+    let g = loadNfm(text)
+    check TabControl(g.findComponent("tc")).tabIndex == 2
+    check TabControl(g.findComponent("tc")).tabCount == 3
+    check formToNfm(g) == text
+    # the same for the other index/range properties
+    let lb = newListBox(f)
+    lb.name = "lb"
+    lb.items = ["x", "y", "z"]
+    lb.itemIndex = 1
+    let tr = newTrackBar(f)
+    tr.name = "tr"
+    tr.min = -20
+    tr.max = -10
+    tr.position = -15
+    let h = loadNfm(formToNfm(f))
+    check ListBox(h.findComponent("lb")).itemIndex == 1
+    check TrackBar(h.findComponent("tr")).position == -15
+
+  test "a dependency on a missing property is ignored":
+    check classByName("PageControl").propsOf.len > 0
+    var seen = false
+    for p in classByName("PageControl").propsOf:
+      if p.name == "tabIndex": seen = true
+    check seen
+
+  test "numbers that are not finite have no text form":
+    Application.init()
+    let f = newForm(nil, 300, 200)
+    f.width = Inf
+    expect PropError:
+      discard formToNfm(f)
+
+  test "a whole number beyond int raises NfmError":
+    expect NfmError:
+      discard loadNfm("object F: Form\n  object e: Edit\n    maxLength = 99999999999999999999\n  end\nend\n")
+    expect NfmError:
+      discard loadNfm("object F: Form\n  object t: Timer\n    designLeft = 99999999999999999999\n  end\nend\n")
+
+  test "an explicit font.color wins over the legacy textColor":
+    Application.init()
+    let f = loadNfm("object F: Form\n  object l: Label\n    textColor = #ff0000\n" &
+                    "    font.color = #00ff00\n  end\nend\n")
+    check Label(f.findComponent("l")).font.color == hex"#00ff00"
+
+  test "a failed load leaves nothing in the owner":
+    Application.init()
+    let owner = newComponent()
+    expect NfmError:
+      discard loadNfm("object F: Form\n  object a: Button\n  end\n  object a: Button\n  end\nend\n",
+                      owner)
+    check owner.components.len == 0
+    let ok = loadNfm("object F: Form\nend\n", owner)
+    check owner.components.len == 1 and owner.components[0] == Component(ok)

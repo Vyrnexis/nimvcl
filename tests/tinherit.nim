@@ -222,3 +222,36 @@ suite "designer and inspector with inherited components":
     ins.setValue("caption", pvString("Changed"))
     check ok.caption == "Changed"
     f.freeWindow()
+
+suite "inherited objects keep their place":
+  test "an inherited block under a new container is an error; the class must match":
+    expect NfmError:
+      discard loadNfm("inherited F: F\n  ancestor = 'base.nfm'\n  object box: Panel\n" &
+                      "    inherited okButton: Button\n    end\n  end\nend\n", nil, nil, dir / "x.nfm")
+    expect NfmError:
+      discard loadNfm("inherited F: F\n  ancestor = 'base.nfm'\n  inherited panel1: Control\n" &
+                      "  end\nend\n", nil, nil, dir / "x.nfm")
+    check loadNfm("inherited F: F\n  ancestor = 'base.nfm'\n  inherited panel1: Panel\n" &
+                  "  end\nend\n", nil, nil, dir / "x.nfm") != nil
+
+  test "the designer does not move an inherited control into another container":
+    Application.init()
+    let f = loadNfmFile(dir / "derived.nfm")
+    f.show()
+    discard f.paintIfDirty()
+    let d = newFormDesigner(f)
+    d.grid = 0
+    let ok = Button(f.named("okButton"))
+    let panel = Panel(f.named("panel1"))
+    let o = ok.formOrigin
+    let x0 = o.x + ok.width / 2
+    let y0 = o.y + ok.height / 2
+    proc feed(kind: EventKind, x, y: float32, shift: ShiftState = {}) =
+      Application.dispatch(PlatformEvent(kind: kind, windowId: f.win.id, x: x, y: y,
+                                         button: mbLeft, clicks: 1, shift: shift))
+    feed(ekMouseDown, x0, y0)
+    feed(ekMouseMove, x0 + 30, y0 + 100, {ssLeft})
+    feed(ekMouseMove, x0 + 60, y0 + 200, {ssLeft})
+    feed(ekMouseUp, x0 + 60, y0 + 200)
+    check ok.parent == Container(panel)
+    f.freeWindow()

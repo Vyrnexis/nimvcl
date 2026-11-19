@@ -376,9 +376,18 @@ proc parseNfm*(text: string, fileName = ""): NfmNode =
 
 proc legacyNames(n: NfmNode) =
   ## Older files wrote the text colour of a label or panel as `textColor`; it
-  ## is now `font.color`.
-  for p in n.props.mitems:
-    if p.name == "textColor": p.name = "font.color"
+  ## is now `font.color` (an explicit `font.color` in the same object wins).
+  var hasFontColor = false
+  for p in n.props:
+    if p.name == "font.color": hasFontColor = true
+  var i = 0
+  while i < n.props.len:
+    if n.props[i].name == "textColor":
+      if hasFontColor:
+        n.props.delete i
+        continue
+      n.props[i].name = "font.color"
+    inc i
   for c in n.children: legacyNames(c)
 
 # ------------------------------------------------------------------ writer
@@ -436,6 +445,11 @@ proc newNfmNode*(name, className: string): NfmNode =
 
 proc add*(n: NfmNode, name: string, v: NfmValue) =
   n.props.add NfmProp(name: name, value: v)
+
+func formatNumber*(f: float): string =
+  ## A number as short text: a whole `float32` value without the fraction.
+  let f32 = float32(f)
+  if abs(f32) < 1e9 and f32 == float32(int64(f32)): $int64(f32) else: $f32
 
 func nfmInt*(i: int64): NfmValue = NfmValue(kind: nvInt, text: $i)
 func nfmString*(s: string): NfmValue = NfmValue(kind: nvString, text: s)

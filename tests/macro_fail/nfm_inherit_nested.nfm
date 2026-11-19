@@ -1,0 +1,7 @@
+inherited Bad: Bad
+  ancestor = 'nfm_inherit_anc.nfm'
+  object box: Panel
+    inherited ok: Button
+    end
+  end
+end
