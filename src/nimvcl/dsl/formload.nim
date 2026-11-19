@@ -260,8 +260,14 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
   except NfmError as e: error("loadForm: " & e.msg, site)
   legacyNames(root)
   let file = path
-  let callerSrc = if fileExists(srcFile): readFile(srcFile) else: ""
-  let callerDefs = scanHandlerDefs(callerSrc)
+  # the calling module is scanned for handler definitions only when the form
+  # binds events or inherits some (a byte loop in the VM on every expansion)
+  var needDefs = root.inherited
+  for n in walk(root):
+    for p in n.props:
+      if p.name.isEventProp: needDefs = true
+  let callerDefs = if needDefs and fileExists(srcFile): scanHandlerDefs(readFile(srcFile))
+                   else: HandlerDefs()
 
   var anc: AncestorInfo
   if root.inherited:
