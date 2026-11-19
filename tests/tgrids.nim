@@ -633,6 +633,40 @@ suite "grids":
     g.clearCells()
     check g.cells[1, 1] == ""
 
+  test "row heights follow their rows on insertRow, deleteRow and sort":
+    let f = newShown()
+    let g = newStringGrid(f, GX, GY, 400, 200)
+    g.colCount = 1
+    g.rowCount = 8
+    for r in 0 ..< 8: g.cells[0, r] = $(7 - r)           # 7 6 5 4 3 2 1 0
+    g.rowHeights[5] = 60                                  # the row holding "2"
+    g.insertRow(2)
+    check g.rowHeights[6] == 60 and g.rowHeights[5] == g.defaultRowHeight
+    g.deleteRow(2)
+    check g.rowHeights[5] == 60 and g.rowHeights[6] == g.defaultRowHeight
+    g.deleteRow(5)                                        # the tall row itself
+    check g.rowHeights[5] == g.defaultRowHeight
+    g.rowHeights[1] = 50                                  # the row holding "6"
+    let tall = g.cells[0, 1]
+    g.sortByColumn(0)
+    var tallRows = 0
+    for r in 0 ..< g.rowCount:
+      if g.rowHeights[r] == 50:
+        inc tallRows
+        check g.cells[0, r] == tall
+    check tallRows == 1
+
+  test "sortByColumn orders like compareCells":
+    let f = newShown()
+    let g = newStringGrid(f, GX, GY, 400, 200)
+    g.colCount = 1
+    let words = @["b", "10", "A", "9", "", "c", "1e2", "abc", "AB", "-3", "nan", "B"]
+    g.rowCount = words.len
+    for r, w in words: g.cells[0, r] = w
+    g.sortByColumn(0)
+    for r in 2 ..< words.len:                         # row 0 is the fixed row
+      check compareCells(g.cells[0, r - 1], g.cells[0, r]) <= 0
+
   test "sortByColumn: numeric, text, custom, descending, stable, fixed rows stay":
     let f = newShown()
     let g = newStringGrid(f, GX, GY, 400, 130)
