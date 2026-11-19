@@ -80,10 +80,12 @@ proc `flowStyle=`*(f: FlowPanel, v: FlowStyle) =
   f.relayout()
 func hGap*(f: FlowPanel): float32 = f.fHGap
 proc `hGap=`*(f: FlowPanel, v: float32) =
+  if v == f.fHGap: return
   f.fHGap = v
   f.relayout()
 func vGap*(f: FlowPanel): float32 = f.fVGap
 proc `vGap=`*(f: FlowPanel, v: float32) =
+  if v == f.fVGap: return
   f.fVGap = v
   f.relayout()
 

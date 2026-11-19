@@ -131,6 +131,22 @@ suite "standard controls":
     f.tap(keyHome); check t.position == 0
     check n > 0
 
+  test "trackbar: the wheel steps a focused bar by lineSize":
+    let f = newShown()
+    let t = newTrackBar(f, 10, 10, 200, 32)
+    t.max = 20
+    t.lineSize = 2
+    t.position = 10
+    f.wheel(t.cx, t.cy, 1)
+    check t.position == 10                       # not focused: no effect
+    f.click(t.cx, t.cy)
+    t.position = 10
+    f.wheel(t.cx, t.cy, 1)
+    check t.position == 12
+    f.wheel(t.cx, t.cy, -1)
+    f.wheel(t.cx, t.cy, -1)
+    check t.position == 8
+
   test "trackbar: thumb drag and page clicks":
     let f = newShown()
     let t = newTrackBar(f, 10, 10, 216, 32)        # travel = 200 px
@@ -355,7 +371,17 @@ suite "standard controls":
     last.text = "changed"
     check sb.panels[2].text == "changed"
     sb.simpleText = "hello"
-    check sb.simplePanel and sb.simpleText == "hello"
+    check not sb.simplePanel and sb.simpleText == "hello"    # the panels stay
+    sb.simpleText = ""
+    check sb.panels.len == 3 and not sb.simplePanel
+    sb.simplePanel = true
+    check sb.simplePanel
+    sb.clearPanels()
+    last.text = "detached"                  # no longer invalidates the bar
+    check sb.panels.len == 0
+    sb.simplePanel = false
+    sb.simpleText = "plain"                      # no panels: shown as one line
+    check sb.simplePanel
     f.tap(keySpace)                                 # painting must not crash
     Application.processMessages()
 
@@ -817,6 +843,26 @@ suite "standard controls":
     discard f.paintIfDirty()
     p.alignment = taRight
     check p.alignment == taRight and f.ui.needsPaint
+
+  test "toolbar: one pass places buttons end to end, skipping hidden ones, again after relayout":
+    let f = newShown(900, 300)
+    let tb = newToolBar(f)
+    var btns: seq[ToolButton]
+    for i in 0 ..< 40: btns.add newToolButton(tb, "B" & $i)
+    btns[3].visible = false
+    btns[5].margins = spacing(4, 0, 6, 0)
+    lay f
+    proc check1() =
+      var x = btns[0].left
+      for i, b in btns:
+        if not b.visible: continue
+        check b.left == round(x + b.margins.left)
+        x = x + b.margins.left + b.width + b.margins.right
+    check1()
+    btns[7].visible = false
+    btns[3].visible = true
+    lay f
+    check1()
 
   test "toolbar button preferred size uses its own theme":
     let f = newShown()
