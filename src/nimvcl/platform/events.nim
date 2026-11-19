@@ -97,7 +97,10 @@ proc modsToShift*(m: uint32): ShiftState =
   if (m and KMOD_SHIFT) != 0: result.incl ssShift
   if (m and KMOD_CTRL) != 0: result.incl ssCtrl
   if (m and KMOD_ALT) != 0: result.incl ssAlt
-  if (m and KMOD_GUI) != 0: result.incl ssSuper
+  if (m and KMOD_GUI) != 0:
+    # macOS: Command is the shortcut modifier (Cmd+C/V/A/Z ...), so it acts as Ctrl.
+    when defined(macosx): result.incl ssCtrl
+    else: result.incl ssSuper
 
 proc buttonsToShift(b: uint32): ShiftState =
   if (b and BUTTON_LMASK) != 0: result.incl ssLeft

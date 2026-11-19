@@ -1,6 +1,6 @@
 ## ListBox (phase 5). Headless (offscreen SDL), events built by hand.
 
-import std/[unittest, os]
+import std/[unittest, os, monotimes, times]
 import nimvcl
 import nimvcl/controls/[scrollbar, scrolling, scrollbox, listbox]
 
@@ -422,7 +422,9 @@ suite "listbox":
     f.feed(ekMouseDown, rowX, rowY(2))
     f.feed(ekMouseMove, rowX, 150, shift = {ssLeft})      # below the list
     let first = lb.itemIndex
-    for i in 0 ..< 6: Application.processMessages(60)
+    let t0 = getMonoTime()      # timer ticks come later on slow runners: wait for the effect
+    while lb.itemIndex <= first + 2 and (getMonoTime() - t0).inMilliseconds < 3000:
+      Application.processMessages(60)
     check lb.itemIndex > first + 2
     check lb.topIndex > 0
     # pointer above: scrolls back up

@@ -5,6 +5,23 @@ All notable changes to nimvcl are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0 the API can still change
 between minor versions.
 
+## [0.1.3] - 2026-11-19
+
+### Added
+
+- Windows and macOS support (experimental), with CI jobs for both. System
+  fonts are found by scanning the platform font folders and reading each
+  file's name table; the bundled Noto fonts work everywhere.
+- On macOS the Command key acts as Ctrl for shortcuts.
+- macOS builds link SDL3, SDL3_ttf and SDL3_image at build time (`nim.cfg`),
+  since dyld does not find Homebrew's libraries by bare name.
+
+### Fixed
+
+- `importPicture` stored an absolute path for a file on another drive.
+- An `.nfm` `ancestor` path written with `\` is read as `/`.
+- `.gitattributes` keeps LF line endings in checkouts on Windows.
+
 ## [0.1.2] - 2026-11-19
 
 ### Added

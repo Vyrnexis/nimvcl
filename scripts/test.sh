@@ -6,7 +6,7 @@
 # run are kept there when something fails; the folder is removed when all pass.
 set -u
 cd "$(dirname "$0")/.."
-export SDL_VIDEO_DRIVER=offscreen SDL_RENDER_DRIVER=software
+export SDL_VIDEO_DRIVER="${SDL_VIDEO_DRIVER:-offscreen}" SDL_RENDER_DRIVER="${SDL_RENDER_DRIVER:-software}"
 out="build/tests/run-$$"
 mkdir -p "$out"
 flags=(--hints:off --warnings:off "$@" --outdir:"$out" --nimcache:"$out/cache")

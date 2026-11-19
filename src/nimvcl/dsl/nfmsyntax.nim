@@ -362,7 +362,8 @@ proc parseNfm*(text: string, fileName = ""): NfmNode =
         if p.value.kind != nvString or p.value.text.len == 0:
           lx.fail(p.value.line, p.value.col, "`ancestor` expects the path of the ancestor " &
                   "form file, like 'unit1.nfm'")
-        result.ancestor = p.value.text
+        # stored with '/'; a form file written on Windows may say '\\'
+        result.ancestor = p.value.text.replace('\\', '/')
         result.props.delete(i)
         found = true
         break

@@ -9,7 +9,9 @@ const CompiledFonts = currentSourcePath().parentDir.parentDir / "src" / "nimvcl"
 
 putEnv("NIMVCL_ASSETS", "/nonexistent/nimvcl-assets")   # bundled fonts must come from the binary
 
-let haveFc = findExe("fc-match").len > 0 and findExe("fc-list").len > 0
+# Windows and macOS scan the font folders, no fontconfig needed there.
+let haveFc = defined(windows) or defined(macosx) or
+  (findExe("fc-match").len > 0 and findExe("fc-list").len > 0)
 let fams = if haveFc: systemFontFamilies() else: @[]
 
 suite "system fonts":

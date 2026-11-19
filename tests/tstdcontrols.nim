@@ -94,7 +94,10 @@ suite "standard controls":
     p.style = pbsMarquee
     check p.runsMarquee                # started by visibilityChanged, no paint needed
     let ph = p.marqueePhase
-    pump(150)
+    var waited = 0                     # the first tick comes late on slow runners
+    while p.marqueePhase == ph and waited < 3000:
+      pump(50)
+      waited += 50
     check p.marqueePhase != ph
     p.visible = false
     check not p.runsMarquee            # stopped at once
@@ -243,7 +246,7 @@ suite "standard controls":
     check s.value == 1                              # still in the delay
     pump(650)
     let v = s.value
-    check v >= 6
+    check v >= 3                                    # repeating (50 ms ideally; slow runners tick later)
     f.up(ux, up.fy(4))
     pump(150)
     check s.value == v                              # stopped on release

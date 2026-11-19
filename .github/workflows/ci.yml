@@ -25,3 +25,71 @@ jobs:
       - name: Show failed test logs
         if: failure()
         run: for f in build/tests/run-*/*.log; do echo "=== $f"; tail -n 60 "$f"; done
+
+  # Windows and macOS are experimental: nothing here has been run on those
+  # systems by the author yet, so a failure must not turn the workflow red.
+  # If SDL's "offscreen" video driver turns out to be missing in a build, use
+  # SDL_VIDEO_DRIVER=dummy instead (windows has no real window to open anyway).
+  windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      SDL_VIDEO_DRIVER: offscreen
+      SDL_RENDER_DRIVER: software
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 2.2.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # The MSYS2 SDL3 build cannot open any file (SDL_IOFromFile fails for every
+      # path, so images, fonts and screenshots all fail); the official SDL
+      # release DLLs work.
+      - name: Install SDL3
+        run: |
+          sdl="$RUNNER_TEMP/sdl"; mkdir -p "$sdl"
+          for u in libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18-win32-x64.zip \
+                   libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-3.2.2-win32-x64.zip \
+                   libsdl-org/SDL_image/releases/download/release-3.4.8/SDL3_image-3.4.8-win32-x64.zip; do
+            curl -fsSL -o "$sdl/pkg.zip" "https://github.com/$u"
+            unzip -qo "$sdl/pkg.zip" -d "$sdl"
+          done
+          ls "$sdl"/*.dll
+          echo "$RUNNER_TEMP\\sdl" >> "$GITHUB_PATH"
+      - name: Install Graphviz
+        run: |
+          choco install graphviz -y --no-progress
+          echo "C:\\Program Files\\Graphviz\\bin" >> "$GITHUB_PATH"
+      - name: Install dependencies
+        run: nimble install -d -y
+      - name: Build examples
+        run: nimble examples
+      - name: Test
+        run: bash scripts/test.sh
+      - name: Show failed test logs
+        if: failure()
+        run: for f in build/tests/run-*/*.log; do echo "=== $f"; tail -n 60 "$f"; done
+
+  macos:
+    runs-on: macos-latest
+    continue-on-error: true
+    env:
+      # SDL's offscreen driver cannot create windows on macOS (it wants OpenGL/EGL)
+      SDL_VIDEO_DRIVER: dummy
+      SDL_RENDER_DRIVER: software
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Nim and SDL3
+        run: brew install nim sdl3 sdl3_ttf sdl3_image graphviz
+      - name: Install dependencies
+        run: nimble install -d -y
+      - name: Build examples
+        run: nimble examples
+      - name: Test
+        run: bash scripts/test.sh
+      - name: Show failed test logs
+        if: failure()
+        run: for f in build/tests/run-*/*.log; do echo "=== $f"; tail -n 60 "$f"; done

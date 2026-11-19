@@ -37,8 +37,8 @@ suite "loadForm applications stay light":
       check banned notin mods
 
   test "it builds and runs":
-    putEnv("SDL_VIDEO_DRIVER", "offscreen")
-    putEnv("SDL_RENDER_DRIVER", "software")
+    if not existsEnv("SDL_VIDEO_DRIVER"): putEnv("SDL_VIDEO_DRIVER", "offscreen")
+    if not existsEnv("SDL_RENDER_DRIVER"): putEnv("SDL_RENDER_DRIVER", "software")
     let (output, code) = execCmdEx(nimCmd("c", "-r"))
     check code == 0
     if code != 0: echo output

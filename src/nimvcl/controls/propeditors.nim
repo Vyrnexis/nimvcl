@@ -92,8 +92,11 @@ proc importPicture*(host: PropEditorHost, path: string): string =
   let abs = absolutePath(path).normalizedPath
   if host == nil or host.baseDir.len == 0: return path
   let base = absolutePath(host.baseDir).normalizedPath
-  if abs.isRelativeTo(base):
-    return relativePath(abs, base, '/')
+  # `isRelativeTo` says yes for a file on another drive (Windows), where
+  # `relativePath` just returns the absolute path back
+  let rel = relativePath(abs, base, '/')
+  if not rel.isAbsolute and rel != ".." and not rel.startsWith("../"):
+    return rel
   let dir = if host.imagesDir.len > 0: host.imagesDir else: base / "images"
   createDir dir
   let (_, name, ext) = splitFile(abs)

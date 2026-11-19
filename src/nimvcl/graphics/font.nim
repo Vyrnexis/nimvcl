@@ -4,7 +4,9 @@
 ## logical size and a style. It holds no SDL handle; the `RenderContext`
 ## resolves it to a rasterised font at `size * scale` when text is drawn.
 
-import std/[os, osproc, tables, sets, strutils, algorithm, streams]
+import std/[os, tables, sets, strutils, algorithm, streams]
+from std/unicode import Rune, toUTF8
+when not (defined(windows) or defined(macosx)): import std/osproc
 import ./color
 
 type
@@ -56,7 +58,14 @@ const
     # Droid Sans Fallback
     "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
     "/usr/share/fonts/droid/DroidSansFallbackFull.ttf",
-    "/usr/share/fonts/TTF/DroidSansFallback.ttf"]
+    "/usr/share/fonts/TTF/DroidSansFallback.ttf",
+    # macOS
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/Library/Fonts/Arial Unicode.ttf",
+    # Windows (the Fonts folder is looked up in `winFontsDir`)
+    "msyh.ttc", "YuGothR.ttc", "malgun.ttf", "simsun.ttc"]
   DefaultFontSize* = 14'f32
   DefaultFamily* = "sans"
   MonoFamily* = "mono"
@@ -182,6 +191,11 @@ proc addFallbackFontFile*(path: string) =
     fallbackFiles.add path
     inc fallbackEpoch
 
+proc winFontsDir(): string =
+  ## `%WINDIR%\\Fonts` ("" off Windows, so the candidates never match there).
+  when defined(windows): getEnv("WINDIR", "C:\\Windows") / "Fonts"
+  else: "/nonexistent-windows-fonts"
+
 proc ensureFontRegistry() =
   if initialized: return
   initialized = true
@@ -197,9 +211,13 @@ proc ensureFontRegistry() =
   # with addFallbackFontFile once colour glyph scaling is solved.
   for f in ["NotoSansSymbols2-Regular.ttf", "NotoSansSymbols-Regular.ttf"]:
     addFallbackFontFile(sys / f)   # probes the path; no fontconfig yet
+  when defined(windows):
+    addFallbackFontFile(winFontsDir() / "seguisym.ttf")
   # One common CJK font (first found), as the LAST fallback: the bundled fonts
   # and the symbol fonts win for the glyphs they have.
-  for f in CjkCandidates:
+  for c in CjkCandidates:
+    # bare file names (the Windows entries) live in the Windows Fonts folder
+    let f = if c.isAbsolute: c else: winFontsDir() / c
     if fileExists(f):
       cjkFile = f
       addFallbackFontFile(f)
@@ -225,11 +243,162 @@ proc fontRegistryEpoch*(): int =
 # Linux/BSD: fontconfig through its command line tools (`fc-match`, `fc-list`),
 # so there is no link-time dependency; when they are missing every lookup
 # simply finds nothing and the text uses the bundled "sans".
-# TODO(windows, macos): enumerate and resolve through DirectWrite / CoreText.
-# Until then `systemFontFamilies` is empty there and unknown families fall back
-# to "sans".
+# Windows and macOS: the font folders are scanned once (first use) and the
+# family and style are read from each file's `name` table (file name
+# heuristics when that fails). TTC/OTC collections count with their first face
+# only, because SDL_ttf opens face 0. No DirectWrite / CoreText is involved.
 
-const HaveFontconfig = defined(linux) or defined(bsd)
+const
+  # -d:nimvclFontScan forces the folder scan on Linux (for testing it there)
+  HaveFontScan = defined(windows) or defined(macosx) or defined(nimvclFontScan)
+  HaveFontconfig = (defined(linux) or defined(bsd)) and not HaveFontScan
+
+type
+  ScanEntry = object
+    family: string
+    plain: bool               ## the subfamily is a plain Regular/Bold/Italic/Bold Italic
+    bold, italic: bool
+    path: string
+
+var
+  scanned: seq[ScanEntry]
+  scanDone = false
+
+proc scanDirs(): seq[string] =
+  when defined(windows):
+    result.add winFontsDir()
+    let local = getEnv("LOCALAPPDATA")
+    if local.len > 0: result.add local / "Microsoft" / "Windows" / "Fonts"
+  elif defined(macosx):
+    result = @["/System/Library/Fonts", "/Library/Fonts",
+               getHomeDir() / "Library" / "Fonts"]
+  else:
+    result = @["/usr/share/fonts", getHomeDir() / ".local" / "share" / "fonts"]
+
+proc u16(b: string, o: int): int =
+  (ord(b[o]) shl 8) or ord(b[o + 1])
+
+proc u32(b: string, o: int): int =
+  (u16(b, o) shl 16) or u16(b, o + 2)
+
+proc decodeName(b: string, platform: int): string =
+  if platform == 3 or platform == 0:      # UTF-16BE (BMP only is enough here)
+    var i = 0
+    while i + 1 < b.len:
+      result.add Rune(u16(b, i)).toUTF8
+      i += 2
+  else:
+    result = b
+
+proc readNameTable(path: string): tuple[family, sub: string] =
+  ## Family and subfamily from a TTF/OTF/TTC file's `name` table; ("", "") when
+  ## it cannot be read. Typographic names (ids 16/17) win over ids 1/2.
+  try:
+    let f = newFileStream(path, fmRead)
+    if f == nil: return
+    defer: f.close()
+    var head = f.readStr(12)
+    if head.len < 12: return
+    if head[0 ..< 4] == "ttcf":
+      var more = f.readStr(4)           # offset of the first face
+      if more.len < 4: return
+      f.setPosition(u32(more, 0))
+      head = f.readStr(12)
+      if head.len < 12: return
+    let numTables = u16(head, 4)
+    let dir = f.readStr(numTables * 16)
+    if dir.len < numTables * 16: return
+    var nameOff, nameLen = -1
+    for i in 0 ..< numTables:
+      if dir[i * 16 ..< i * 16 + 4] == "name":
+        nameOff = u32(dir, i * 16 + 8)
+        nameLen = u32(dir, i * 16 + 12)
+    if nameOff < 0 or nameLen < 6 or nameLen > 4_000_000: return
+    f.setPosition(nameOff)
+    let t = f.readStr(nameLen)
+    if t.len < nameLen: return
+    let count = u16(t, 2)
+    let strOff = u16(t, 4)
+    var best: array[4, (int, string)]   # ids 1, 2, 16, 17: (rank, text)
+    for i in 0 ..< count:
+      let r = 6 + i * 12
+      if r + 12 > t.len: break
+      let plat = u16(t, r)
+      let lang = u16(t, r + 4)
+      let id = u16(t, r + 6)
+      let slot = case id
+        of 1: 0
+        of 2: 1
+        of 16: 2
+        of 17: 3
+        else: -1
+      if slot < 0: continue
+      let len = u16(t, r + 8)
+      let so = strOff + u16(t, r + 10)
+      if so + len > t.len: continue
+      # English Windows name beats other Windows names beats Mac names
+      let rank = if plat == 3 and lang == 0x409: 3
+                 elif plat == 3: 2
+                 elif plat == 1 and lang == 0: 1
+                 else: 0
+      if rank > best[slot][0]:
+        best[slot] = (rank, decodeName(t[so ..< so + len], plat))
+    result.family = if best[2][1].len > 0: best[2][1] else: best[0][1]
+    result.sub = if best[3][1].len > 0: best[3][1] else: best[1][1]
+  except CatchableError:
+    discard
+
+proc guessFromFileName(path: string): tuple[family, sub: string] =
+  ## Fallback when the name table is unreadable: "Arial Bold Italic.ttf" ->
+  ## ("Arial", "Bold Italic"); "Foo-BoldItalic.otf" likewise.
+  var stem = path.splitFile.name.replace('_', ' ').replace('-', ' ')
+  var sub: seq[string]
+  for w in ["BoldItalic", "BoldOblique", "Bold", "Italic", "Oblique", "Regular"]:
+    if stem.endsWith(w) and stem.len > w.len:
+      stem = stem[0 ..< stem.len - w.len]
+      sub.insert(w, 0)
+  var words = stem.strip.splitWhitespace
+  while words.len > 1 and words[^1].toLowerAscii in ["bold", "italic", "oblique", "regular"]:
+    sub.insert(words.pop, 0)
+  result = (words.join(" "), sub.join(" "))
+
+proc scanFonts() =
+  if scanDone: return
+  scanDone = true
+  when HaveFontScan:
+    for d in scanDirs():
+      try:
+        if not dirExists(d): continue
+        for path in walkDirRec(d):
+          let ext = path.splitFile.ext.toLowerAscii
+          if ext notin [".ttf", ".otf", ".ttc", ".otc"]: continue
+          var (fam, sub) = readNameTable(path)
+          if fam.len == 0: (fam, sub) = guessFromFileName(path)
+          if fam.len == 0: continue
+          let sl = sub.toLowerAscii
+          let bold = "bold" in sl
+          let italic = "italic" in sl or "oblique" in sl
+          let plain = sl in ["", "regular", "book", "roman", "normal", "bold",
+                             "italic", "bold italic", "oblique", "bold oblique"]
+          scanned.add ScanEntry(family: fam, plain: plain, bold: bold,
+                                italic: italic, path: path)
+      except CatchableError:
+        discard
+
+proc scanLookup(family: string, bold, italic: bool): SysVariant =
+  ## Best file of an installed family: an exact style match with a plain
+  ## subfamily name first, then the closest style (the caller synthesises the
+  ## rest).
+  var bestScore = -1
+  for e in scanned:
+    if e.family.cmpIgnoreCase(family.strip) != 0: continue
+    var score = 0
+    if e.bold == bold: score += 4
+    if e.italic == italic: score += 4
+    if e.plain: score += 2
+    if score > bestScore:
+      bestScore = score
+      result = SysVariant(path: e.path, bold: e.bold, italic: e.italic)
 
 proc runTool(cmd: string, args: openArray[string]): string =
   ## Standard output of `cmd` ("" when it is missing or fails).
@@ -254,7 +423,10 @@ proc systemVariant(family: string, bold, italic: bool): SysVariant =
   ## missing): the answer only counts when it names the requested family.
   let key = family.toLowerAscii & (if bold: "|b" else: "|r") & (if italic: "i" else: "")
   if key in sysVariants: return sysVariants[key]
-  when HaveFontconfig:
+  when HaveFontScan:
+    scanFonts()
+    result = scanLookup(family, bold, italic)
+  elif HaveFontconfig:
     var pat = fcEscape(family)
     if bold: pat.add ":weight=bold"
     else: pat.add ":weight=regular"
@@ -273,11 +445,18 @@ proc systemVariant(family: string, bold, italic: bool): SysVariant =
 
 proc systemFontFamilies*(): seq[string] =
   ## Family names installed on the system, sorted and without duplicates
-  ## (fontconfig's `fc-list`). Empty when the list cannot be read, on other
-  ## platforms for now, or when `fc-list` is missing. The result is cached.
+  ## (fontconfig's `fc-list` on Linux/BSD, a scan of the font folders on Windows
+  ## and macOS). Empty when the list cannot be read or `fc-list` is missing. The
+  ## result is cached.
   if not sysFamiliesDone:
     sysFamiliesDone = true
-    when HaveFontconfig:
+    when HaveFontScan:
+      scanFonts()
+      var seen = initHashSet[string]()
+      for e in scanned:
+        if not seen.containsOrIncl(e.family.toLowerAscii): sysFamilies.add e.family
+      sysFamilies.sort(proc(a, b: string): int = cmpIgnoreCase(a, b))
+    elif HaveFontconfig:
       var seen = initHashSet[string]()
       for line in runTool("fc-list", [":", "family"]).splitLines:
         for n in line.split(','):
@@ -292,6 +471,8 @@ proc refreshSystemFonts*() =
   sysVariants.clear()
   sysFamilies.setLen 0
   sysFamiliesDone = false
+  scanned.setLen 0
+  scanDone = false
   inc fallbackEpoch
 
 proc registeredFontFamilies*(): seq[string] =

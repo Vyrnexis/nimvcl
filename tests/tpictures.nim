@@ -120,15 +120,22 @@ doAssert f.icons.count == 2
 echo "embedded ok"
 """)
     let nimOut = dir / "prog"
-    let (o1, c1) = execCmdEx("nim c --hints:off --warnings:off --path:" & quoteShell(root / "src") &
+    # the program sits outside the repo, so it does not see nim.cfg: link SDL
+    # the way nim.cfg does on macOS
+    const sdlLink = when defined(macosx):
+      " --dynlibOverride:SDL3 --dynlibOverride:SDL3_ttf --dynlibOverride:SDL3_image" &
+      " --passL:\"-L/opt/homebrew/lib -L/usr/local/lib -lSDL3 -lSDL3_ttf -lSDL3_image\""
+    else: ""
+    let (o1, c1) = execCmdEx("nim c --hints:off --warnings:off" & sdlLink & " --path:" & quoteShell(root / "src") &
       " --nimcache:" & quoteShell(dir / "cache") & " -o:" & quoteShell(nimOut) & " " &
       quoteShell(dir / "prog.nim"))
     if c1 != 0: echo o1
     check c1 == 0
     removeDir dir / "images"
     removeFile dir / "pictures.nfm"
-    let (o2, c2) = execCmdEx("SDL_VIDEO_DRIVER=offscreen SDL_RENDER_DRIVER=software " &
-                             quoteShell(nimOut))
+    if not existsEnv("SDL_VIDEO_DRIVER"): putEnv("SDL_VIDEO_DRIVER", "offscreen")
+    if not existsEnv("SDL_RENDER_DRIVER"): putEnv("SDL_RENDER_DRIVER", "software")
+    let (o2, c2) = execCmdEx(quoteShell(nimOut.addFileExt(ExeExt)))
     check c2 == 0
     check "embedded ok" in o2
     removeDir ctx()

@@ -105,6 +105,40 @@ see [Imports and the prelude](docs/guide/imports.md).
 Other distros and the `requires` line are in
 [Getting started](docs/getting-started.md).
 
+## Platform support
+
+- **Linux** (Wayland and X11): built and tested; this is what CI gates on.
+- **Windows** and **macOS**: experimental. CI has jobs for both (allowed to
+  fail) that build the examples and run the headless test suite; the results
+  are listed in the workflow runs. Known so far:
+  - SDL3 is loaded at run time on Windows (`SDL3.dll` must be next to the exe
+    or on `PATH`) and linked at build time on macOS, see below.
+  - System fonts are found by scanning the font folders (`%WINDIR%\Fonts`,
+    `%LOCALAPPDATA%\Microsoft\Windows\Fonts`; `/System/Library/Fonts`,
+    `/Library/Fonts`, `~/Library/Fonts`) and reading each file's name table;
+    there is no fontconfig. TTC collections count with their first face. The
+    bundled Noto fonts always work.
+  - On macOS the Command key acts as Ctrl for shortcuts.
+  - Form files (`.nfm`) may have CRLF line endings; the repository itself is
+    checked out with LF (`.gitattributes`).
+  - Headless runs: the tests use SDL's `offscreen` video driver; on macOS that
+    driver cannot create windows, so use `SDL_VIDEO_DRIVER=dummy` there (what
+    CI does; `scripts/test.sh` keeps a driver you already set).
+  - Not verified: native file dialogs, clipboard, IME, HiDPI scaling and popup
+    windows on those systems (all go through SDL3).
+  - Install SDL3, SDL3_ttf and SDL3_image:
+    - Windows: the official release zips from
+      [libsdl-org](https://github.com/libsdl-org) (put the DLLs next to the
+      exe or on `PATH`). Do not use the MSYS2 `mingw-w64-x86_64-sdl3` build: its
+      `SDL_IOFromFile` fails for every path, so images, fonts and screenshots
+      cannot be loaded or written.
+    - macOS: `brew install sdl3 sdl3_ttf sdl3_image`. dyld does not find
+      Homebrew's dylibs by bare name, so SDL is linked at build time instead:
+      this repo's `nim.cfg` passes `--dynlibOverride:SDL3 --dynlibOverride:SDL3_ttf
+      --dynlibOverride:SDL3_image --passL:"-L/opt/homebrew/lib -L/usr/local/lib
+      -lSDL3 -lSDL3_ttf -lSDL3_image"`. Add the same to your own project's
+      config when building without it.
+
 ## Documentation
 
 Start at the [documentation index](docs/README.md).
