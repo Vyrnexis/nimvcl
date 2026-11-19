@@ -402,3 +402,21 @@ suite "event signatures in the registry":
     let p = classByName("PopupMenu").findProp("onPopup")
     check p.typeName == "PopupEvent"
     check p.params.len == 1 and p.params[0].typeName == "PopupMenu"
+
+type WideTabs = ref object of PageControl
+method sheetTabText*(p: WideTabs, s: TabSheet): string =
+  s.caption & "        "
+
+suite "tab text override":
+  test "a sheetTabText override is measured, not just drawn":
+    let f = newForm(nil, 400, 300)
+    f.show()
+    let plain = newPageControl(f, 0, 0, 400, 100)
+    discard newTabSheet(plain, "Unit1")
+    let wide = WideTabs()
+    initPageControl(wide, f)
+    wide.setBounds(0, 120, 400, 100)
+    discard newTabSheet(wide, "Unit1")
+    f.settle
+    check wide.tabText(0) == "Unit1        "
+    check wide.tabRect(0).w > plain.tabRect(0).w

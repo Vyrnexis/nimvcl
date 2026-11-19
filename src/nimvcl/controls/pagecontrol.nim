@@ -509,9 +509,16 @@ proc sheetIndex(p: PageControl, s: TabSheet): int =
       if c == Control(s): return k
       inc k
 
+method sheetTabText*(p: PageControl, s: TabSheet): string {.base.} =
+  ## The text shown on the tab of `s`: its caption. Override this, not
+  ## `tabText`, to change what a PageControl's tabs show: the strip measures
+  ## and draws every tab through it. An override builds on `s.caption`
+  ## (`procCall` of a base method re-dispatches).
+  s.caption
+
 method tabText*(p: PageControl, i: int): string =
   let s = p.sheetAt(i)
-  if s == nil: "" else: s.caption
+  if s == nil: "" else: p.sheetTabText(s)
 
 method tabEnabled*(p: PageControl, i: int): bool =
   let s = p.sheetAt(i)
@@ -524,7 +531,7 @@ method tabVisible*(p: PageControl, i: int): bool =
 method collectTabs*(p: PageControl, texts: var seq[string], shown: var seq[bool]) =
   for c in p.children:
     if c of TabSheet:
-      texts.add TabSheet(c).caption
+      texts.add p.sheetTabText(TabSheet(c))
       shown.add TabSheet(c).tabVisible
 
 proc showActive(p: PageControl) =

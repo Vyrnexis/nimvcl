@@ -5,6 +5,15 @@ All notable changes to nimvcl are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0 the API can still change
 between minor versions.
 
+## [0.2.1] - 2026-11-20
+
+### Fixed
+
+- PageControl measured its tabs from the sheet captions and ignored a
+  subclass's `tabText`, so extra tab text (NimRAD's room for a close button)
+  was drawn over. The new `sheetTabText` method is the one place a
+  PageControl's tab text comes from.
+
 ## [0.2.0] - 2026-11-20
 
 ### Added
