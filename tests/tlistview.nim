@@ -939,3 +939,43 @@ suite "listview (selection model)":
     f.feed(ekMouseMove, below.x, below.y, shift = {ssLeft})
     f.feed(ekMouseUp, below.x, below.y)
     check lv.selectedIndices == @[1, 2, 3, 4]
+
+suite "listview design-time item data":
+  Application.init()
+
+  test "itemImages and checkedItems as text":
+    let lv = newListView(nil)
+    lv.itemLines = @["a", "b", "c", "d"]
+    check lv.itemImages.len == 0 and lv.checkedItems.len == 0
+    lv.items[1].imageIndex = 2
+    lv.items[2].imageIndex = 0
+    lv.items[0].checked = true
+    lv.items[3].checked = true
+    check lv.itemImages == @["-1", "2", "0"]      # trailing "none" left out
+    check lv.checkedItems == @["0", "3"]
+    let w = newListView(nil)
+    w.itemLines = lv.itemLines
+    w.itemImages = lv.itemImages
+    w.checkedItems = lv.checkedItems
+    check w.items[1].imageIndex == 2 and w.items[3].imageIndex == -1
+    check w.itemChecked(0) and not w.itemChecked(1) and w.itemChecked(3)
+
+  test "bad entries are ignored; short lists clear the rest":
+    let lv = newListView(nil)
+    lv.itemLines = @["a", "b", "c"]
+    lv.itemImages = @["1", "x", "-5", "9"]
+    check lv.items[0].imageIndex == 1 and lv.items[1].imageIndex == -1 and
+          lv.items[2].imageIndex == -1
+    lv.checkedItems = @["1", "7", "q", "-1", "1"]
+    check lv.checkedItems == @["1"]
+    lv.checkedItems = @[]
+    check lv.checkedItems.len == 0
+    lv.itemImages = @[]
+    check lv.itemImages.len == 0
+
+  test "an item list set again clears images; the data must follow items":
+    let lv = newListView(nil)
+    lv.itemLines = @["a", "b"]
+    lv.itemImages = @["1", "1"]
+    lv.itemLines = @["x", "y", "z"]
+    check lv.itemImages.len == 0

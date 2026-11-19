@@ -1,5 +1,6 @@
 ## Small drawing / input helpers shared by `TreeView` and `ListView`.
 
+import std/strutils
 import ./common, ./checkbox, ./listbox
 export checkbox.CheckBoxState, listbox.ItemState, listbox.ItemStates,
        listbox.nowMs, listbox.prefixIC
@@ -49,3 +50,34 @@ proc typeAheadChar*(key: Key, shift: ShiftState): char =
     if ssShift in shift and not (v >= 0x61 and v <= 0x7a): return '\0'
     char(v)
   else: '\0'
+
+
+# ------------------------------------------- design-time text forms (form files)
+
+func imageIndexLines*(v: openArray[int]): seq[string] =
+  ## Image indexes as a form file stores them, one entry per item; trailing
+  ## "no image" (-1) entries are left out.
+  var n = v.len
+  while n > 0 and v[n - 1] < 0: dec n
+  for i in 0 ..< n: result.add $max(v[i], -1)
+
+func parseImageIndexLines*(v: openArray[string], count: int): seq[int] =
+  ## The inverse: `count` indexes, -1 for a missing or unreadable entry.
+  result = newSeq[int](count)
+  for i in 0 ..< count:
+    result[i] = -1
+    if i < v.len:
+      try: result[i] = max(parseInt(v[i].strip), -1)
+      except ValueError: discard
+
+func indexLines*(v: openArray[int]): seq[string] =
+  ## Item indexes (the checked items) as text.
+  for i in v: result.add $i
+
+func parseIndexLines*(v: openArray[string], count: int): seq[int] =
+  ## The inverse: the valid, distinct indexes (below `count`), in order.
+  for s in v:
+    try:
+      let i = parseInt(s.strip)
+      if i in 0 ..< count and i notin result: result.add i
+    except ValueError: discard

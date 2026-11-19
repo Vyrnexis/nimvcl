@@ -72,8 +72,34 @@ TreeNode: `text`, `data` (`RootRef`), `tag`, `imageIndex`, `selectedIndex`, `exp
 
 ## At design time
 
-`items` is a string list holding an outline: one node per line, indented by two
-spaces per level (`nodeLines` / `nodeLines =` in code). Node images, check
-state and expansion are not stored in a form file.
+`items` opens the items editor (`ItemsDlgForm` of `nimvcl/controls/propeditors`,
+like Delphi's): the nodes with Add (a sibling), Add child, Delete (with the
+sub-tree), Up, Down (past a sibling with its sub-tree), Indent and Outdent, and
+for the selected node its text, image index, selected image index and check
+state. In the form file the data is four string lists, applied in this order
+(expansion is not stored):
+
+```
+items = (
+  'Root'
+  '  Child'                # two spaces per level
+  'Second'
+)
+itemImages = (
+  '0'                      # imageIndex per node, in outline order
+  '1'
+)
+itemSelectedImages = (
+  '-1'
+  '2'                      # selectedIndex per node
+)
+checkedItems = (
+  '1'                      # outline indexes of the checked nodes
+)
+```
+
+In code: `nodeLines`, `itemImages`, `itemSelectedImages` and `checkedItems`. With
+`propagateChecks`, a grayed parent is derived from its children and not listed.
+The inspector lists only `items`; the other lists are edited by its dialog.
 
 [Back to the index](../README.md)

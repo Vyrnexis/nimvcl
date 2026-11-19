@@ -1513,3 +1513,52 @@ proc `nodeLines=`*(tv: TreeView, v: seq[string]) =
     let n = if depth == 0: tv.items.addChild(nil, text) else: stack[depth - 1].addChild(text)
     stack.add n
   tv.endUpdate()
+
+proc allNodes(tv: TreeView): seq[TreeNode] =
+  ## Every node in tree order (the order of `nodeLines`).
+  proc walk(n: TreeNode, acc: var seq[TreeNode]) =
+    for k in n.children:
+      acc.add k
+      walk(k, acc)
+  walk(tv.fRoot, result)
+
+proc itemImages*(tv: TreeView): seq[string] =
+  ## The `imageIndex` of each node, in `nodeLines` order, as text (what a form
+  ## file stores for `itemImages`); trailing "no image" entries are left out.
+  var v: seq[int]
+  for n in tv.allNodes: v.add n.imageIndex
+  imageIndexLines(v)
+
+proc `itemImages=`*(tv: TreeView, v: seq[string]) =
+  ## Sets the image index of every node from `v`; set it after the items.
+  let ns = tv.allNodes
+  let idx = parseImageIndexLines(v, ns.len)
+  for i, n in ns: n.imageIndex = idx[i]
+
+proc itemSelectedImages*(tv: TreeView): seq[string] =
+  ## Like `itemImages` for `selectedIndex`.
+  var v: seq[int]
+  for n in tv.allNodes: v.add n.selectedIndex
+  imageIndexLines(v)
+
+proc `itemSelectedImages=`*(tv: TreeView, v: seq[string]) =
+  let ns = tv.allNodes
+  let idx = parseImageIndexLines(v, ns.len)
+  for i, n in ns: n.selectedIndex = idx[i]
+
+proc checkedItems*(tv: TreeView): seq[string] =
+  ## The indexes (in `nodeLines` order) of the checked nodes as text (what a
+  ## form file stores for `checkedItems`); grayed parents are derived from
+  ## their children and not listed.
+  var v: seq[int]
+  for i, n in tv.allNodes:
+    if n.checked == cbChecked: v.add i
+  indexLines(v)
+
+proc `checkedItems=`*(tv: TreeView, v: seq[string]) =
+  ## Checks exactly the nodes listed in `v`; set it after the items and
+  ## `propagateChecks`.
+  let ns = tv.allNodes
+  let idx = parseIndexLines(v, ns.len)
+  for n in ns: n.checked = cbUnchecked
+  for i in idx: ns[i].checked = cbChecked
