@@ -232,7 +232,10 @@ proc dispatch*(a: TApplication, pe: PlatformEvent) =
   ## Routes one translated event to its form (the loop's single entry point).
   case pe.kind
   of ekNone, ekWake: discard
-  of ekQuit: a.terminate()
+  of ekQuit:                    # SIGINT/SIGTERM: ask like a click on the close box
+    let m = mainForm()
+    if m != nil and m.visible and m.acceptsInput: m.close()
+    else: a.terminate()
   of ekTimer: discard dispatchTimer(pe.timerId)
   of ekRenderReset:
     for f in openForms(): f.ui.resetBackbuffer()   # contents lost: repaint fully

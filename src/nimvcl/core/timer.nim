@@ -72,11 +72,16 @@ proc free*(t: Timer) =
   ## Disables the timer and drops it from the registry.
   t.enabled = false
 
+method releaseResources*(t: Timer) =
+  ## Freeing the owner of a timer (`Control.free`) stops it too.
+  t.free()
+
 proc dispatchTimer*(id: int): bool =
   ## Runs the handler of timer `id` (UI thread). False when it is unknown
   ## (already disabled).
   let t = registry.getOrDefault(id)
   if t == nil: return false
+  ackPlatformTimer(t.fHandle)   # the next tick may be posted while the handler runs
   let h = t.onTimer       # copy: the handler may clear or replace itself
   if h != nil: h(t)
   true

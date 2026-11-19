@@ -65,12 +65,12 @@ proc `textRole=`*(l: Label, v: ThemeColor) =
   ## Text colour by theme role (`tcMuted`, `tcAccent`, ...), resolved at paint
   ## time so it follows theme switches. It replaces an own `font.color`.
   l.fText.setRole v
-  if l.hasFontColor: l.fontColor = clTransparent   # the role replaces a fixed colour
+  if not l.parentFont and l.hasFontColor: l.fontColor = clTransparent   # the role replaces a fixed colour
   l.invalidate()
 proc resetTextColor*(l: Label) =
   ## Back to the theme's `text` colour (clears `font.color` and `textRole`).
   l.fText.reset()
-  if l.hasFontColor:
+  if not l.parentFont and l.hasFontColor:
     l.fontColor = clTransparent
   l.invalidate()
 

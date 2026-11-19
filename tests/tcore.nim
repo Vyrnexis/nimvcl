@@ -341,12 +341,13 @@ suite "keys and focus (findings 6, 7, 9, 12)":
     f.feed(ekKeyDown, key = key('x'))
     check log == @["a", "c"]
 
-  test "auto-repeat skips the default/cancel chain and is visible to controls":
+  test "auto-repeat skips handlers registered with onRepeat = false and is visible to controls":
     let f = newForm(nil, 200, 100)
     f.show()
     var dialog = 0
     var other = 0
-    f.addKeyHandler("dialog", proc(k: var Key, s: ShiftState) = inc dialog)
+    proc countDialog(k: var Key, s: ShiftState) = inc dialog
+    f.addKeyHandler("dialog", countDialog, onRepeat = false)
     f.addKeyHandler("other", proc(k: var Key, s: ShiftState) = inc other)
     f.feed(ekKeyDown, key = keyEnter)
     f.feed(ekKeyDown, key = keyEnter, repeat = true)
@@ -652,3 +653,87 @@ suite "fitPrefix (coordinator follow-up)":
     check f.ctx.fitPrefix("hello", font("", 14), 0.5) == 0
     check f.ctx.fitPrefix("hello", font("", 14), 1000) == 5
     f.freeWindow()
+
+suite "interaction and lifetime fixes":
+  setup:
+    Application.init()
+    Application.forceScale = 0
+  teardown:
+    for f in openForms(): f.freeWindow()
+
+  test "a modal state cancels the press that opened it":
+    let f = newForm(nil, 300, 200)
+    f.show()
+    let a = f.probe(0, 0, 100, 100, focusable = true)
+    let b = f.probe(150, 0, 100, 100, focusable = true)
+    f.feed(ekMouseDown, 10, 10)
+    check f.ui.captured == a
+    beginModalState()
+    check f.ui.captured == nil
+    endModalState()
+    f.feed(ekMouseDown, 160, 10)       # goes to what is under the pointer
+    check b.downs == 1 and a.downs == 1
+
+  test "showModal cancels the capture of the form below":
+    let f = newForm(nil, 300, 200)
+    f.show()
+    let a = f.probe(0, 0, 100, 100, focusable = true)
+    f.feed(ekMouseDown, 10, 10)
+    let d = newForm(nil, 100, 80)
+    d.onShow = proc(s: Control) = d.modalResult = mrOk
+    discard d.showModal()
+    check f.ui.captured == nil
+    d.freeWindow()
+
+  test "no click for a control the mouse-up handler removed":
+    let f = newForm(nil, 300, 200)
+    f.show()
+    let a = f.probe(0, 0, 100, 100)
+    var clicks = 0
+    a.onClick = proc(s: Control) = inc clicks
+    a.onMouseUp = proc(s: Control, b: MouseButton, sh: ShiftState, x, y: float32) =
+      s.parent = nil
+    f.feed(ekMouseDown, 10, 10)
+    f.feed(ekMouseUp, 10, 10)
+    check clicks == 0
+
+  test "freeing a control stops the timers it owns":
+    let f = newForm(nil, 300, 200)
+    let p = newPanel(f, "", 0, 0, 100, 100)
+    startTimerImpl = proc(ms: uint32, tag: int): uint32 = 7
+    defer: startTimerImpl = startPlatformTimer
+    let t = newTimer(p, 10)
+    t.enabled = true
+    check t.enabled
+    p.free()
+    check not t.enabled
+    check not dispatchTimer(1_000_000)
+
+  test "a timer posts one event until it is handled":
+    let id = 4242
+    let h = startPlatformTimer(1, id)
+    check h != 0
+    sleep(60)
+    var n = 0
+    var pe: PlatformEvent
+    while pollPlatformEvent(pe):
+      if pe.kind == ekTimer and pe.timerId == id: inc n
+    check n == 1                       # not one per millisecond
+    ackPlatformTimer(h)
+    sleep(30)
+    n = 0
+    while pollPlatformEvent(pe):
+      if pe.kind == ekTimer and pe.timerId == id: inc n
+    stopPlatformTimer(h)
+    check n == 1
+    while pollPlatformEvent(pe): discard
+
+  test "many queued jobs wake the loop once":
+    pushWake()
+    pushWake()
+    pushWake()
+    var n = 0
+    var pe: PlatformEvent
+    while pollPlatformEvent(pe):
+      if pe.kind == ekWake: inc n
+    check n == 1

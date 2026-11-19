@@ -15,9 +15,12 @@
 ## `[]=`, `width=`, `height=`) bumps `version` and calls the listeners added
 ## with `addListener` (`TreeView`, `ListView`, `ToolBar` and the menus subscribe
 ## while the list is assigned, so they repaint / re-measure by themselves). A
-## control that keeps an ImageList should `removeListener` when it lets go of it;
-## `Control.free` does that for the stock controls (a listener closure keeps its
-## client alive for as long as the list lives).
+## listener closure keeps its client alive for as long as the list lives, so a
+## client lets go of the list (`Control.free` does that for the stock controls).
+##
+## A client keeps its list in an `ImageListRef` field: `attach` replaces the
+## list and the subscription together, `detach` (from `releaseResources`)
+## drops both.
 
 import ../graphics/[geometry, canvas, image]
 import ../core/component
@@ -57,6 +60,27 @@ proc removeListener*(l: ImageList, id: int) =
     if l.fListeners[i][0] == id:
       l.fListeners.delete(i)
       return
+
+type
+  ImageListRef* = object
+    ## The ImageList a client uses plus the client's change subscription. One
+    ## place owns the order (unsubscribe the old list, subscribe the new one).
+    list: ImageList
+    listener: int
+
+func list*(r: ImageListRef): ImageList = r.list
+
+proc detach*(r: var ImageListRef) =
+  ## Unsubscribes and forgets the list.
+  if r.list != nil and r.listener != 0: r.list.removeListener r.listener
+  r.list = nil
+  r.listener = 0
+
+proc attach*(r: var ImageListRef, l: ImageList, onChange: proc() {.closure.}) =
+  ## Uses `l` (nil: none) and calls `onChange` after each change of it.
+  r.detach()
+  r.list = l
+  if l != nil: r.listener = l.addListener(onChange)
 
 proc changed(l: ImageList) =
   inc l.fVersion

@@ -60,12 +60,10 @@ type
     rootGetsMouse*: bool         ## the root itself is a mouse target (Form: true)
     autoSizeRoot*: bool          ## window size changes resize the root
     onUnhandledKey*: KeyHook     ## the application's own hook; runs before the chain
-    fKeyHandlers: seq[tuple[id: string, hook: KeyHook]]
+    fKeyHandlers: seq[tuple[id: string, hook: KeyHook, onRepeat: bool]]
     fAlt: bool                   ## an Alt key is down (mnemonic underlines)
     keyRepeat*: bool             ## the key event being dispatched is an auto-repeat
     windowInactive*: bool        ## the window lost focus (set by the Form)
-    revealOnFocus*: bool         ## focus changes scroll the control into view
-                                 ## (default true; off while a mouse press focuses)
     designers*: seq[DesignHook] ## attached design hooks (see core/design.nim)
     fHovered, fCaptured, fFocused, fPressed: Control
     fDesignCap, fKeyDesigner: DesignHook
@@ -74,6 +72,7 @@ type
     lastPos: PointF
     mouseInside: bool
     hoverStale: bool
+    layoutPending: bool          ## a container asked for a layout pass
     cursorApplied: bool
 
 func altHeld*(ui: UiRoot): bool = ui.fAlt
@@ -85,7 +84,7 @@ func keyIsRepeat*(c: Control): bool =
   h of UiRoot and UiRoot(h).keyRepeat
 
 proc newUiRoot*(root: Container): UiRoot =
-  result = UiRoot(root: root, dirty: true, revealOnFocus: true)
+  result = UiRoot(root: root, dirty: true)
   root.host = result
 
 func hovered*(ui: UiRoot): Control = ui.fHovered
@@ -167,7 +166,10 @@ method invalidate*(ui: UiRoot, r: RectF) =
   var area = 0'f32
   for q in ui.dirtyRects: area += q.w * q.h
   if area >= FullRepaintShare * form.w * form.h: ui.invalidateAll()
-method requestLayout*(ui: UiRoot) = ui.dirty = true
+method requestLayout*(ui: UiRoot) =
+  ## The layout pass before the next frame repaints what it moves; nothing is
+  ## invalidated here.
+  ui.layoutPending = true
 
 proc effectiveCursor(c: Control): Cursor =
   var x = c
@@ -243,10 +245,12 @@ method controlLost*(ui: UiRoot, c: Control) =
 proc canTakeFocus*(c: Control): bool =
   c != nil and c.isVisible and c.isEnabled and c.canFocus()
 
-proc focusControl*(ui: UiRoot, target: Control) =
+proc focusControl*(ui: UiRoot, target: Control, reveal = true) =
   ## Moves keyboard focus to `target` (nil clears it), or to what it forwards
   ## the focus to (`focusTarget`). Controls that are hidden, disabled or not
-  ## `canFocus` are refused.
+  ## `canFocus` are refused. With `reveal`, scrolling ancestors bring the
+  ## control into view (a mouse press passes false: it must not move the
+  ## control under the pointer).
   let c = if target == nil: nil else: target.focusTarget
   if c == ui.fFocused: return
   if c != nil and not canTakeFocus(c): return
@@ -260,7 +264,7 @@ proc focusControl*(ui: UiRoot, target: Control) =
     if popupHook != nil: popupHook(c, phRegister, mbLeft, pointF(0, 0))
     c.doEnter()
   ui.updateTextInput()
-  if c != nil and ui.fFocused == c and ui.revealOnFocus:
+  if reveal and c != nil and ui.fFocused == c:
     # scrolling ancestors (ScrollBox) bring the focused control into view
     var p = c.parent
     while p != nil:
@@ -447,9 +451,7 @@ proc mouseDown(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState,
   var f = target
   while f != nil and not canTakeFocus(f): f = Control(f.parent)
   if f != nil:
-    ui.revealOnFocus = false     # a press must not move the control under it
-    ui.focusControl(f)
-    ui.revealOnFocus = true
+    ui.focusControl(f, reveal = false)
   var sh = shift + ui.buttonShift
   let dbl = clicks == 2 and button == mbLeft
   if dbl: sh.incl ssDouble
@@ -477,14 +479,17 @@ proc mouseUp(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState): boo
   if t == nil: return false
   ui.buttons.excl button
   let lp = t.formToClient(p)
-  let pressed = ui.fPressed
-  if button == mbLeft: ui.fPressed = nil
   t.doMouseUp(button, shift + ui.buttonShift, lp.x, lp.y)
   if button == mbRight and popupHook != nil and t.root == Control(ui.root):
     popupHook(t, phMouseUp, button, p)
-  if button == mbLeft and pressed == t and t.isVisible and t.isEnabled and
-     t.clientRect.contains(t.formToClient(p)):
-    t.doClick()
+  if button == mbLeft:
+    # the handler may have removed, hidden or freed `t`, or closed the form:
+    # `controlLost`/`cancelInteraction` then cleared the pressed control
+    let clicked = ui.fPressed == t
+    ui.fPressed = nil
+    if clicked and t.root == Control(ui.root) and t.isVisible and
+       t.isEnabled and t.clientRect.contains(t.formToClient(p)):
+      t.doClick()
   if ui.buttons == {}:
     ui.fCaptured = nil
     ui.fPressed = nil
@@ -514,16 +519,19 @@ proc mouseWheel(ui: UiRoot, p: PointF, dx, dy: float32, shift: ShiftState): bool
 
 # -------------------------------------------------------------- keyboard
 
-proc addKeyHandler*(ui: UiRoot, id: string, hook: KeyHook) =
+proc addKeyHandler*(ui: UiRoot, id: string, hook: KeyHook, onRepeat = true) =
   ## Registers a handler for keys that neither the focused control nor the
   ## root handled, in registration order. The same `id` replaces the earlier
   ## handler (keeping its place). Several features share the chain; a hook set
-  ## on `onUnhandledKey` runs first.
+  ## on `onUnhandledKey` runs first. With `onRepeat = false` the handler is
+  ## skipped for the auto-repeats of a held key (default/cancel buttons act
+  ## once per press).
   for e in ui.fKeyHandlers.mitems:
     if e.id == id:
       e.hook = hook
+      e.onRepeat = onRepeat
       return
-  ui.fKeyHandlers.add (id, hook)
+  ui.fKeyHandlers.add (id, hook, onRepeat)
 
 proc removeKeyHandler*(ui: UiRoot, id: string) =
   for i in 0 ..< ui.fKeyHandlers.len:
@@ -551,7 +559,7 @@ proc runKeyChain(ui: UiRoot, k: var Key, shift: ShiftState) =
   let snapshot = ui.fKeyHandlers       # a handler may add or remove handlers
   for e in snapshot:
     if not ui.hasKeyHandler(e.id): continue          # removed meanwhile
-    if ui.keyRepeat and e.id == "dialog": continue   # default/cancel: once per press
+    if ui.keyRepeat and not e.onRepeat: continue
     e.hook(k, shift)
     if k == Key(0): return
   if shift * {ssCtrl, ssAlt, ssSuper} == {ssAlt}:
@@ -574,11 +582,15 @@ proc keyDesigner(ui: UiRoot): DesignHook =
   if d == nil or d.scope == nil or not d.scope.isVisible: return nil
   if ui.fFocused == nil or inside(d.scope, ui.fFocused): d else: nil
 
-proc keyDown(ui: UiRoot, key: Key, shift: ShiftState, repeat = false): bool =
-  if key == keyLAlt or key == keyRAlt: ui.setAlt(true)
+template withKeyRepeat*(ui: UiRoot, repeat: bool, body: untyped) =
+  ## Runs `body` with `keyIsRepeat` telling whether the key event is an
+  ## auto-repeat.
   let wasRepeat = ui.keyRepeat
   ui.keyRepeat = repeat
-  defer: ui.keyRepeat = wasRepeat
+  try: body
+  finally: ui.keyRepeat = wasRepeat
+
+proc keyDownIn(ui: UiRoot, key: Key, shift: ShiftState): bool =
   var k = key
   let kd = ui.keyDesigner()
   if kd != nil:
@@ -599,6 +611,11 @@ proc keyDown(ui: UiRoot, key: Key, shift: ShiftState, repeat = false): bool =
   ui.runKeyChain(k, shift)
   if k == Key(0): return true
   ui.fFocused != nil
+
+proc keyDown(ui: UiRoot, key: Key, shift: ShiftState, repeat = false): bool =
+  if key == keyLAlt or key == keyRAlt: ui.setAlt(true)
+  ui.withKeyRepeat(repeat):
+    result = ui.keyDownIn(key, shift)
 
 proc keyUp(ui: UiRoot, key: Key, shift: ShiftState): bool =
   if key == keyLAlt or key == keyRAlt: ui.setAlt(false)
@@ -635,9 +652,7 @@ proc resize*(ui: UiRoot, w, h: float32) =
   ## Sets the root's size (logical px) and relayouts.
   let r = ui.root
   let changed = r.width != w or r.height != h
-  r.hostSized = true      # a window resize is not the design size
-  try: r.setBounds(0, 0, w, h)
-  finally: r.hostSized = false
+  r.setHostSize(w, h)
   if changed: ui.invalidateAll()
 
 proc syncMetrics*(ui: UiRoot) =
@@ -691,7 +706,14 @@ proc handle*(ui: UiRoot, pe: PlatformEvent): bool =
 
 # ------------------------------------------------------------------ paint
 
-proc needsPaint*(ui: UiRoot): bool = ui.dirty or ui.dirtyRects.len > 0
+proc needsPaint*(ui: UiRoot): bool =
+  ui.dirty or ui.dirtyRects.len > 0 or ui.layoutPending or ui.hoverStale
+
+proc refreshHover*(ui: UiRoot) =
+  ## The control under a stationary pointer may have changed (a modal state
+  ## ended, a layout moved controls): hover is re-evaluated before the next
+  ## frame.
+  ui.hoverStale = true
 
 proc resetBackbuffer*(ui: UiRoot) =
   ## The renderer lost its render targets (SDL_EVENT_RENDER_TARGETS_RESET /
@@ -712,29 +734,9 @@ proc paintRegions(ui: UiRoot, cv: Canvas, clear, full: bool,
       root.paintTree(cv)
       cv.popClip()
 
-proc paintFrame*(ui: UiRoot, clear, present: bool) =
-  ## Layout, then one frame: optional clear with the root colour, the tree,
-  ## optional present. Clears the dirty state.
-  ##
-  ## With `useBackbuffer` the tree is drawn into the window's persistent
-  ## backbuffer texture, only inside the dirty regions (all of it when `dirty`
-  ## is set or the backbuffer was just (re)created); the backbuffer is then
-  ## copied to the window. Otherwise the tree is drawn straight to the current
-  ## target.
-  if ui.ctx == nil: return
-  ui.root.layoutIfNeeded()
-  if ui.hoverStale:
-    ui.hoverStale = false
-    if ui.mouseInside and ui.fCaptured == nil: ui.setHover(ui.hoverAt(ui.lastPos))
-    ui.root.layoutIfNeeded()
-  var full = ui.dirty
-  var bb = false
-  if ui.useBackbuffer and ui.win != nil and ui.win.window != nil:
-    if ui.win.ensureBackbuffer(): full = true
-    bb = ui.win.hasBackbuffer
-  let rects = ui.dirtyRects
-  ui.dirty = false
-  ui.dirtyRects.setLen 0
+proc drawFrame(ui: UiRoot, clear, present, full, bb: bool,
+               rects: openArray[RectF]) =
+  ## Paints one frame (see `paintFrame`).
   if not bb:
     let cv = beginFrame(ui.ctx)
     try:
@@ -747,7 +749,7 @@ proc paintFrame*(ui: UiRoot, clear, present: bool) =
     if present and ui.win != nil: ui.win.present()
     return
   ui.lastPaintFull = full
-  ui.lastPaintRects = if full: @[] else: rects
+  ui.lastPaintRects = if full: @[] else: @rects
   if full or rects.len > 0:
     ui.win.beginBackbuffer()
     try:
@@ -770,6 +772,39 @@ proc paintFrame*(ui: UiRoot, clear, present: bool) =
                    int(round(r.w * s)), int(round(r.h * s)))
       ui.win.drawDebugRects(dev)
     ui.win.present()
+
+proc paintFrame*(ui: UiRoot, clear, present: bool) =
+  ## Layout, then one frame: optional clear with the root colour, the tree,
+  ## optional present. Clears the dirty state (a frame that raises leaves the
+  ## whole window dirty, so the next one repaints it).
+  ##
+  ## With `useBackbuffer` the tree is drawn into the window's persistent
+  ## backbuffer texture, only inside the dirty regions (all of it when `dirty`
+  ## is set or the backbuffer was just (re)created); the backbuffer is then
+  ## copied to the window. Otherwise the tree is drawn straight to the current
+  ## target.
+  if ui.ctx == nil: return
+  let relaid = ui.layoutPending
+  ui.root.layoutIfNeeded()
+  if relaid: ui.hoverStale = true   # controls may have moved under the pointer
+  if ui.hoverStale:
+    ui.hoverStale = false
+    if ui.mouseInside and ui.fCaptured == nil: ui.setHover(ui.hoverAt(ui.lastPos))
+    ui.root.layoutIfNeeded()
+  # requests made by the layout itself are done; a pass that could not settle
+  # leaves its flags set and gets the next frame
+  ui.layoutPending = ui.root.needsLayout or ui.root.childNeedsLayout
+  var full = ui.dirty
+  var bb = false
+  if ui.useBackbuffer and ui.win != nil and ui.win.window != nil:
+    if ui.win.ensureBackbuffer(): full = true
+    bb = ui.win.hasBackbuffer
+  var rects = move(ui.dirtyRects)
+  ui.dirty = false
+  try: ui.drawFrame(clear, present, full, bb, rects)
+  except CatchableError:
+    ui.invalidateAll()
+    raise
 
 proc closeContext*(ui: UiRoot) =
   ## Closes the RenderContext (before the renderer is destroyed).

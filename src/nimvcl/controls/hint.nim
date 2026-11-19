@@ -164,10 +164,13 @@ proc hintObserver(f: Form, pe: PlatformEvent) =
     if not f.hasWindow or pe.windowId != f.win.id:
       hideHint()
       return
+    if not gShowHint:             # hints off: no hit test at all
+      hideHint()
+      return
     let p = pointF(f.win.toLogical(pe.x), f.win.toLogical(pe.y))
     let c = hintTarget(f, p)
     let text = if c == nil: "" else: hintFor(c)
-    if not gShowHint or text.len == 0 or topPopup(f) != nil:
+    if text.len == 0 or topPopup(f) != nil:
       hideHint()
       return
     gMouse = p

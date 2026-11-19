@@ -6,6 +6,7 @@
 ## input router converts them to logical pixels (they differ only when a scale
 ## is forced for headless testing).
 
+import std/atomics
 import sdl3 except Color, Cursor
 import ../core/types
 import ./sdlutil
@@ -41,6 +42,7 @@ var
   evWake, evTimer: uint32   # registered user event types (0 until initEvents)
   sdlInitialised = false
   ttfInitialised = false
+  wakePending: Atomic[bool]  # a wake event is queued and not yet translated
 
 proc ensureTtf*() =
   ## Initialises SDL_ttf once (a host app may already have done so; that is fine).
@@ -53,12 +55,16 @@ proc initPlatform*() =
   if sdlInitialised: return
   discard setHint(HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0")  # the Application decides
   if not initSdl(): raise newException(IOError, "SDL_Init: " & sdlError())
+  try:
+    ensureTtf()
+    let base = registerEvents(2)
+    if base == 0'u32: raise newException(IOError, "registerEvents: " & sdlError())
+    evWake = base
+    evTimer = base + 1
+  except CatchableError:
+    quitSdl()                # not half-initialised: a later call starts over
+    raise
   sdlInitialised = true
-  ensureTtf()
-  let base = registerEvents(2)
-  if base == 0'u32: raise newException(IOError, "registerEvents: " & sdlError())
-  evWake = base
-  evTimer = base + 1
 
 proc quitPlatform*() =
   ## Quits SDL_ttf and SDL; a later `initPlatform` starts them again.
@@ -70,26 +76,29 @@ proc quitPlatform*() =
     sdlInitialised = false
     evWake = 0
     evTimer = 0
+    wakePending.store(false)
 
 proc isPlatformInitialised*(): bool = sdlInitialised
 
-proc pushUser(kind: uint32, data: int) =
+proc pushUser(kind: uint32, data: int): bool =
   ## Thread safe. Allocates no GC memory (also called from SDL's timer thread).
-  if kind == 0: return
+  if kind == 0: return false
   var ev: Event
   ev.user.`type` = kind
   ev.user.data1 = cast[pointer](data)
-  discard pushEvent(ev)
+  pushEvent(ev)
 
 proc pushWake*() =
-  ## Wakes a blocked `waitPlatformEvent`. Safe from any thread.
+  ## Wakes a blocked `waitPlatformEvent`. Safe from any thread. One wake event
+  ## is queued at a time (until it is translated), however often this is called.
+  if evWake == 0 or wakePending.exchange(true): return
   {.cast(gcsafe).}:
-    pushUser(evWake, 0)
+    if not pushUser(evWake, 0): wakePending.store(false)
 
 proc pushTimerEvent*(id: int) =
   ## Safe from any thread (used by the SDL timer callback).
   {.cast(gcsafe).}:
-    pushUser(evTimer, id)
+    discard pushUser(evTimer, id)
 
 # ---------------------------------------------------------------- translate
 
@@ -119,7 +128,9 @@ proc translate*(ev: Event): PlatformEvent =
   ## Translates one SDL event. The kind is read as `common.type` (uint32) so
   ## registered user events do not become invalid enum values.
   let t = ev.common.`type`
-  if evWake != 0 and t == evWake: return PlatformEvent(kind: ekWake)
+  if evWake != 0 and t == evWake:
+    wakePending.store(false)   # before the loop drains its queue: no wake is lost
+    return PlatformEvent(kind: ekWake)
   if evTimer != 0 and t == evTimer:
     return PlatformEvent(kind: ekTimer, timerId: cast[int](ev.user.data1))
   template simple(k: EventKind): PlatformEvent =

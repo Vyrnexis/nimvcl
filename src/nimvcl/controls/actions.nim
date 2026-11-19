@@ -71,6 +71,8 @@ type
     fActions: seq[Action]
     fImages: ImageList
     fHooked: bool
+    fHookForm: Form            # the form whose key chain holds the handler
+    fKeyId: string             # id of this list's key handler in its form
     onExecute*, onUpdate*: ActionListEvent
 
   ActionLink = ref object of ActionLinkBase
@@ -86,7 +88,8 @@ proc apply(l: ActionLink)
 
 proc notify(a: Action) =
   let links = a.fLinks   # callbacks may link/unlink while we iterate
-  for l in links: l.apply()
+  for l in links:
+    if l.action == a: l.apply()    # an earlier client's handler may have unlinked it
 
 proc images(a: Action): ImageList =
   if a.fList != nil: a.fList.fImages else: nil
@@ -277,8 +280,9 @@ method release(l: ActionLink) =
     ToolButton(l.ctl).kind = l.origKind
     l.upgraded = false
   l.detach()
-  if l.action != nil: l.action.unlink(l)
+  let a = l.action
   l.action = nil
+  if a != nil: a.unlink(l)     # may drop the last reference to `l`: keep it last
 
 proc releaseClient(c: Component) =
   if c.actionLink != nil: c.actionLink.release()
@@ -312,11 +316,10 @@ proc action*(c: Control): Action =
     result = ActionLink(c.actionLink).action
 
 proc free*(a: Action) =
-  ## Unlinks every client and removes the action from its list and owner.
-  for l in a.fLinks:
-    l.detach()
-    l.action = nil
-  a.fLinks.setLen(0)
+  ## Unlinks every client (restoring tool buttons the action turned into check
+  ## buttons) and removes the action from its list and owner.
+  let links = a.fLinks   # `release` takes each link out of `fLinks`
+  for l in links: l.release()
   if a.fList != nil:
     let i = a.fList.fActions.find(a)
     if i >= 0: a.fList.fActions.delete(i)
@@ -352,8 +355,9 @@ proc ensureHook(l: ActionList) =
   let f = formOf(l)
   if f == nil: return
   l.fHooked = true
+  l.fHookForm = f
   let list = l
-  f.addKeyHandler("actions:" & $cast[uint](l), proc(key: var Key, shift: ShiftState) =
+  f.addKeyHandler(l.fKeyId, proc(key: var Key, shift: ShiftState) =
     if key == Key(0): return
     let mods = shift * {ssShift, ssCtrl, ssAlt}
     let k = normalizeKey(key)
@@ -367,7 +371,8 @@ proc ensureHook(l: ActionList) =
         keyPageDown]:
       return
     let sc = shortcut(k, mods)
-    for a in list.fActions:
+    let actions = list.fActions   # an action may edit the list when it runs
+    for a in actions:
       if a.fShortcut.isSet and a.fShortcut == sc and not a.fDisabled and
          not a.fHidden:
         key = Key(0)
@@ -386,8 +391,14 @@ proc add*(l: ActionList, a: Action): Action {.discardable.} =
   a.notify()
   a
 
+var gLists: seq[ActionList]   ## every live list: the idle update visits only these
+var gListCount: int
+
 proc initActionList*(l: ActionList, owner: Component = nil) =
   l.initComponent(owner)
+  inc gListCount
+  l.fKeyId = "actions:" & $gListCount
+  gLists.add l
   l.ensureHook()
 
 proc newActionList*(owner: Component = nil): ActionList {.discardable.} =
@@ -414,34 +425,45 @@ proc newAction*(list: ActionList, caption = "", onExecute: ActionEvent = nil,
   list.add result
 
 proc update*(l: ActionList) =
-  for a in l.fActions: a.update()
+  let actions = l.fActions   # an `onUpdate` may add or free actions
+  for a in actions:
+    if a.fList == l: a.update()
 
 proc free*(l: ActionList) =
   ## Frees the list's actions (unlinking their clients) and removes the list's
   ## key handler.
-  for a in l.fActions:
-    for lk in a.fLinks:
-      lk.detach()
-      lk.action = nil
-    a.fLinks.setLen(0)
-    a.fList = nil
-  l.fActions.setLen(0)
+  let actions = l.fActions
+  for a in actions: a.free()
   if l.fHooked:
-    let f = formOf(l)
-    if f != nil: f.removeKeyHandler("actions:" & $cast[uint](l))
+    l.fHookForm.removeKeyHandler(l.fKeyId)
+    l.fHookForm = nil
     l.fHooked = false
+  let i = gLists.find(l)
+  if i >= 0: gLists.delete(i)
   if l.owner != nil: l.owner.removeComponent(l)
+
+method releaseResources*(l: ActionList) =
+  ## Freeing the owner of a list (`Control.free`) frees the list too: it leaves
+  ## the idle update and the form's key chain.
+  l.free()
 
 # --------------------------------------------------------------- idle update
 
-proc updateIn(c: Component) =
-  if c of ActionList: ActionList(c).update()
-  for ch in c.components: updateIn(ch)
+proc hasUpdateHandler(l: ActionList): bool =
+  if l.onUpdate != nil: return true
+  for a in l.fActions:
+    if a.onUpdate != nil: return true
 
 proc updateActions*() =
-  ## Runs `onUpdate` of every action of every ActionList owned by an open
-  ## form. Called by the application's idle hook and before menus open.
-  for f in openForms(): updateIn(f)
+  ## Runs `onUpdate` of every action of every ActionList of an open form.
+  ## Called by the application's idle hook and before menus open. Lists with
+  ## nothing to run are skipped, so a form without update handlers costs a few
+  ## comparisons, not a walk over its components.
+  let lists = gLists          # a handler may create or free lists
+  for l in lists:
+    if not l.hasUpdateHandler: continue
+    let f = formOf(l)
+    if f != nil and f.hasWindow: l.update()
 
 Application.addIdleHook("actions", updateActions)
 block:

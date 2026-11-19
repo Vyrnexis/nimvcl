@@ -113,11 +113,16 @@ proc altHeld*(c: Control): bool =
   let h = c.host
   h of UiRoot and UiRoot(h).altHeld
 
+const MnemonicUnderlineGap = 2'f32   ## baseline to the mnemonic underline
+
 proc drawMnemonic*(c: Canvas, caption: string, f: FontSpec, rect: RectF,
                    col: Color, underline: bool, align = taLeft, valign = vaCenter,
                    wrap = false) =
   ## Draws `caption` without its `&` markers; the mnemonic character is
   ## underlined when `underline` (single line only, not when wrapped).
+  if '&' notin caption:                  # nothing to strip or underline
+    c.textRect(caption, f, rect, col, align, valign, wrap = wrap)
+    return
   let (txt, idx, _) = parseMnemonic(caption)
   c.textRect(txt, f, rect, col, align, valign, wrap = wrap)
   if underline and not wrap and idx >= 0 and idx < txt.len:
@@ -137,7 +142,7 @@ proc drawMnemonic*(c: Canvas, caption: string, f: FontSpec, rect: RectF,
       of vaTop: rect.y
       of vaCenter: rect.y + (rect.h - size.h) / 2
       of vaBottom: rect.bottom - size.h
-    let y = top + c.fontMetrics(f).ascent + 2
+    let y = top + c.fontMetrics(f).ascent + MnemonicUnderlineGap
     c.fillRect(rectF(x0 + before, y, max(w, 1), 1), col)
 
 # --------------------------------------------------------------- measuring
@@ -186,14 +191,102 @@ func accentFaceColor*(t: Theme, s: VisualState): Color =
   of vsDisabled: mix(t.accent, t.surface, 0.6)
 
 func borderColorFor*(t: Theme, s: VisualState): Color =
-  case s
-  of vsNormal: t.borderStrong
-  of vsHover: t.borderStrong
-  of vsPressed: t.borderStrong
-  of vsDisabled: t.border
+  if s == vsDisabled: t.border else: t.borderStrong
 
 func textColorFor*(t: Theme, s: VisualState): Color =
   if s == vsDisabled: t.textDisabled else: t.text
+
+# ------------------------------------------------- hover, press, activation
+
+type
+  ClickableControl* = ref object of Control
+    ## Base of the push-like controls (Button, CheckBox, RadioButton,
+    ## ToolButton): hover, the press that is shown while the mouse button or
+    ## Space is held, and activation by key and mnemonic. A subclass paints
+    ## from `visualState` and reacts to `doClick`; `activate` is the single
+    ## place where a completed gesture (Space released, Alt+letter) becomes a
+    ## click.
+    fHot, fMouseDown, fKeyDown: bool
+
+func isHot*(b: ClickableControl): bool = b.fHot
+  ## The pointer is over the control.
+
+func isPressed*(b: ClickableControl): bool =
+  ## Shown pressed: mouse held down inside it, or Space held while focused.
+  (b.fMouseDown and b.fHot) or b.fKeyDown
+
+proc visualState*(b: ClickableControl): VisualState =
+  b.visualState(b.fHot, b.isPressed)
+
+method activate*(b: ClickableControl) {.base.} =
+  ## The user completed an activation gesture without the mouse: clicks the
+  ## control unless it is hidden or disabled.
+  if b.isVisible and b.isEnabled: b.doClick()
+
+method canFocus*(b: ClickableControl): bool = b.isVisible and b.isEnabled
+
+method activateMnemonic*(b: ClickableControl, ch: Rune): bool =
+  if mnemonicOf(b.caption) != ch: return false
+  setFocus(b)
+  b.activate()
+  true
+
+method doMouseEnter*(b: ClickableControl) =
+  b.fHot = true
+  b.invalidate()
+  procCall doMouseEnter(Control(b))
+
+method doMouseLeave*(b: ClickableControl) =
+  b.fHot = false
+  b.invalidate()
+  procCall doMouseLeave(Control(b))
+
+method doMouseDown*(b: ClickableControl, button: MouseButton, shift: ShiftState,
+                    x, y: float32) =
+  if button == mbLeft:
+    b.fMouseDown = true
+    b.invalidate()
+  procCall doMouseDown(Control(b), button, shift, x, y)
+
+method doMouseMove*(b: ClickableControl, shift: ShiftState, x, y: float32) =
+  if b.fMouseDown and ssLeft notin shift:   # the release was missed (focus lost)
+    b.fMouseDown = false
+    b.invalidate()
+  procCall doMouseMove(Control(b), shift, x, y)
+
+method doMouseUp*(b: ClickableControl, button: MouseButton, shift: ShiftState,
+                  x, y: float32) =
+  if button == mbLeft and b.fMouseDown:
+    b.fMouseDown = false
+    b.invalidate()
+  procCall doMouseUp(Control(b), button, shift, x, y)
+
+method captureLost*(b: ClickableControl) =
+  if b.fMouseDown:
+    b.fMouseDown = false
+    b.invalidate()
+  procCall captureLost(Control(b))
+
+method doKeyDown*(b: ClickableControl, key: var Key, shift: ShiftState) =
+  procCall doKeyDown(Control(b), key, shift)
+  if key == keySpace and shift * {ssCtrl, ssAlt} == {}:
+    key = Key(0)
+    if not b.fKeyDown:
+      b.fKeyDown = true
+      b.invalidate()
+
+method doKeyUp*(b: ClickableControl, key: var Key, shift: ShiftState) =
+  procCall doKeyUp(Control(b), key, shift)
+  if key == keySpace and b.fKeyDown:
+    key = Key(0)
+    b.fKeyDown = false
+    b.invalidate()
+    b.activate()
+
+method doExit*(b: ClickableControl) =
+  b.fKeyDown = false
+  b.invalidate()
+  procCall doExit(Control(b))
 
 # -------------------------------------------- own colour and font colour
 

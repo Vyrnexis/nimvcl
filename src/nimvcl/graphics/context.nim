@@ -11,11 +11,12 @@
 ## Cache entries record the frame they were last used in; `endFrame` (through
 ## `sweep`) destroys the ones idle for more than `maxIdleFrames` frames.
 
-import std/[tables, math, algorithm]
+import std/[tables, math, algorithm, hashes]
 import sdl3, sdl3_ttf
 import ./font, ./image, ./aa
 
 const
+  ResolvedSlots = 32              ## direct-mapped memo of font resolutions
   DefaultMaxIdleFrames* = 120     ## frames an unused cache entry survives
   DefaultTextCacheCap* = 2048     ## hard limit on cached text objects
 
@@ -23,14 +24,28 @@ type
   ## `align` is the wrap alignment: a property of the rasterised font handle
   ## in SDL_ttf (changing it relayouts every text using that font), so wrapped
   ## centred/right text gets its own handle.
-  FontKey = tuple[path: string, px64: int32, style: uint32, align: uint8]
+  ## `path` is an id into `RenderContext.paths`: keys are plain numbers, so
+  ## building and hashing one allocates nothing.
+  FontKey = tuple[path: int32, px64: int32, style: uint32, align: uint8]
   TextKey = tuple[text: string, font: FontKey, wrapPx: int32]
 
   FontEntry = object
     font: Font
     fallbacks: seq[Font]
+    fallbacksOpen: bool           # the global fallback fonts were tried
     textRefs: int
     lastUsed: int
+
+  ResolvedKey = object
+    ## Memo of `resolveFont` for one (family, size, style): what the font key
+    ## needs, without the wrap alignment.
+    used: bool
+    family: string
+    size: float32
+    style: set[FontStyle]
+    path: int32
+    px64: int32
+    ttfStyle: uint32
 
   TextEntry = object
     text: ptr Text
@@ -49,6 +64,9 @@ type
     closed: bool
     epoch: int                    # font registry epoch the caches were built for
     fonts: Table[FontKey, FontEntry]
+    paths: seq[string]            # font files seen; FontKey.path indexes it
+    pathIds: Table[string, int32]
+    resolved: array[ResolvedSlots, ResolvedKey]
     texts: Table[TextKey, TextEntry]
     textures: Table[uint64, TexEntry]
     maxIdleFrames*: int
@@ -118,6 +136,7 @@ proc destroyTextures(ctx: RenderContext) =
 proc flushFontCaches(ctx: RenderContext) =
   ctx.destroyTexts()      # texts first: they reference the fonts
   ctx.destroyFonts()
+  for r in ctx.resolved.mitems: r.used = false   # file choices and sizes changed
 
 proc setScale*(ctx: RenderContext, s: float32) =
   ## Changes the display scale. Fonts are rasterised at `size * scale`, so on a
@@ -158,10 +177,28 @@ proc beginFrameTick*(ctx: RenderContext) =
 
 # ------------------------------------------------------------------- fonts
 
+proc pathId(ctx: RenderContext, path: string): int32 =
+  ctx.pathIds.withValue(path, id): return id[]
+  result = int32(ctx.paths.len)
+  ctx.paths.add path
+  ctx.pathIds[path] = result
+
 proc fontKey(ctx: RenderContext, spec: FontSpec, align = 0'u8): FontKey =
-  let r = resolveFont(spec)
   let size = if spec.size <= 0: DefaultFontSize else: spec.size
-  (r.path, int32(round(size * ctx.scale * 64)), r.ttfStyle, align)
+  let slot = int(cast[uint](hash(spec.family) !& hash(size) !& hash(spec.style)) mod
+                 ResolvedSlots)
+  let m = addr ctx.resolved[slot]
+  if not (m.used and m.size == size and m.style == spec.style and
+          m.family == spec.family):
+    let r = resolveFont(spec)
+    m.used = true
+    m.family = spec.family
+    m.size = size
+    m.style = spec.style
+    m.path = ctx.pathId(r.path)
+    m.px64 = int32(round(size * ctx.scale * 64))
+    m.ttfStyle = r.ttfStyle
+  (m.path, m.px64, m.ttfStyle, align)
 
 proc openFontAt(path: string, px: float32): Font =
   let (data, len) = embeddedFontData(path)
@@ -172,31 +209,48 @@ proc openFontAt(path: string, px: float32): Font =
   else:
     result = openFont(path.cstring, px)
 
-proc openEntry(key: FontKey): FontEntry =
+proc openEntry(ctx: RenderContext, key: FontKey): FontEntry =
   let px = key.px64.float32 / 64
-  var f = openFontAt(key.path, px)
+  let path = ctx.paths[key.path]
+  var f = openFontAt(path, px)
   if f == nil:   # an unreadable file (a system font SDL_ttf cannot open): use the bundled sans
     let alt = resolveFont(font()).path
-    if alt != key.path: f = openFontAt(alt, px)
+    if alt != path: f = openFontAt(alt, px)
   if f == nil:
-    raise newException(IOError, "openFont " & key.path & ": " & $getError())
+    raise newException(IOError, "openFont " & path & ": " & $getError())
   setFontHinting(f, hintingLight)
   setFontStyle(f, key.style)
   setFontWrapAlignment(f, HorizontalAlignment(key.align))
   result.font = f
+
+proc openFallbacks(e: var FontEntry, key: FontKey) =
+  ## Attaches the global fallback fonts (symbols, CJK, ...). SDL_ttf needs them
+  ## before it shapes a glyph the primary font lacks. They can be large files,
+  ## so this only runs for text outside ASCII (see `fontFor`).
+  e.fallbacksOpen = true
+  let px = key.px64.float32 / 64
   for p in fallbackFontFiles():
     let fb = openFont(p.cstring, px)
     if fb == nil: continue       # e.g. a bitmap font that cannot take this size
     setFontStyle(fb, key.style)
-    if addFallbackFont(f, fb): result.fallbacks.add fb
+    if addFallbackFont(e.font, fb): e.fallbacks.add fb
     else: closeFont(fb)
 
-proc fontFor(ctx: RenderContext, key: FontKey): Font =
-  var e = ctx.fonts.getOrDefault(key)
-  if e.font == nil:
-    e = openEntry(key)
-    ctx.fonts[key] = e
-  ctx.fonts.withValue(key, v): v.lastUsed = ctx.frame
+func needsFallbacks(text: string): bool =
+  ## The text has characters the primary (Latin) font may lack.
+  for ch in text:
+    if ch >= '\x80': return true
+
+proc fontFor(ctx: RenderContext, key: FontKey, text = ""): Font =
+  ## The cached font for `key`, opened on first use. Pass the text that is about
+  ## to be shaped or measured so the fallback fonts are attached when needed.
+  var e: ptr FontEntry
+  ctx.fonts.withValue(key, found): e = found
+  if e == nil:
+    ctx.fonts[key] = ctx.openEntry(key)
+    ctx.fonts.withValue(key, found): e = found
+  e.lastUsed = ctx.frame
+  if not e.fallbacksOpen and text.needsFallbacks: e[].openFallbacks(key)
   e.font
 
 proc fontMetrics*(ctx: RenderContext, spec: FontSpec): FontMetrics =
@@ -220,7 +274,7 @@ proc getText*(ctx: RenderContext, str: string, spec: FontSpec, wrapPx = 0,
   let al = if wrapPx > 0: uint8(ord(align)) else: 0'u8
   let fk = ctx.fontKey(spec, al)
   let key: TextKey = (str, fk, int32(max(wrapPx, 0)))
-  let f = ctx.fontFor(fk)
+  let f = ctx.fontFor(fk, str)
   ctx.texts.withValue(key, e):
     e.lastUsed = ctx.frame
     return e.text
@@ -233,14 +287,15 @@ proc getText*(ctx: RenderContext, str: string, spec: FontSpec, wrapPx = 0,
   t
 
 proc measureDevice*(ctx: RenderContext, str: string, spec: FontSpec,
-                    wrapPx = 0): tuple[w, h: float32] =
-  ## Text size in device pixels (height of an empty string is one line).
+                    wrapPx = 0, align: HorizontalAlignment = horizontalAlignLeft
+                   ): tuple[w, h: float32] =
+  ## Text size in device pixels (height of an empty string is one line). Pass
+  ## the `align` the text is drawn with: the shaped text is then shared.
   ctx.checkOpen()
-  let fk = ctx.fontKey(spec)
   if str.len == 0:
-    let f = ctx.fontFor(fk)
+    let f = ctx.fontFor(ctx.fontKey(spec))
     return (0'f32, getFontHeight(f).float32)
-  let t = ctx.getText(str, spec, wrapPx)
+  let t = ctx.getText(str, spec, wrapPx, align)
   var w, h: cint
   discard getTextSize(t, w, h)
   (w.float32, h.float32)
@@ -251,7 +306,7 @@ proc measureWidthDevice*(ctx: RenderContext, str: string, spec: FontSpec): float
   ## of a big document); `measureDevice` is cheaper for text that is drawn.
   ctx.checkOpen()
   if str.len == 0: return 0
-  let f = ctx.fontFor(ctx.fontKey(spec))
+  let f = ctx.fontFor(ctx.fontKey(spec), str)
   var mw: cint
   var ml: csize_t
   if not measureString(f, str.cstring, str.len.csize_t, 0, mw, ml):
@@ -263,7 +318,7 @@ proc fitPrefix*(ctx: RenderContext, str: string, spec: FontSpec,
   ## Number of leading bytes of `str` that fit in `maxPx` device pixels.
   ctx.checkOpen()
   if maxPx < 1: return 0        # SDL_ttf treats a width of 0 as unlimited
-  let f = ctx.fontFor(ctx.fontKey(spec))
+  let f = ctx.fontFor(ctx.fontKey(spec), str)
   var mw: cint
   var ml: csize_t
   if not measureString(f, str.cstring, str.len.csize_t, cint(max(maxPx, 0)), mw, ml):

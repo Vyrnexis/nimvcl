@@ -170,7 +170,11 @@ proc commit*(s: SpinEdit) =
 proc stepBy*(s: SpinEdit, dir: int, count = 1) =
   ## Commits pending text, then moves `value` by `dir * count * increment`.
   s.commit()
-  s.value = s.fValue + dir * count * s.fInc
+  let d = dir * count * s.fInc
+  s.value =                      # saturating: a range up to high(int) cannot overflow
+    if d > 0 and s.fValue > high(int) - d: high(int)
+    elif d < 0 and s.fValue < low(int) - d: low(int)
+    else: s.fValue + d
 
 proc repeatTick*(s: SpinEdit) =
   ## One auto-repeat step (the timer's handler); no-op, and the repeat stops,

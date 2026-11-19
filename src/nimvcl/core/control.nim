@@ -93,7 +93,6 @@ type
     layoutInitialized*: bool    ## false until the first layout recorded a size
     designSize*: SizeF          ## size the anchored children were designed for
     designSet*: bool            ## `designSize` valid (explicit size or first layout)
-    hostSized*: bool            ## host/window is resizing this root (not a design size)
     fScrollX, fScrollY: float32 ## scroll offset applied to alNone children
     onPaintOver*: PaintEvent    ## painted after the children (still clipped to
                                 ## the client rect); used by the form designer
@@ -449,12 +448,6 @@ method isTabStop*(c: Control): bool {.base.} =
   ## Base: the `tabStop` property. RadioButton overrides it (one stop per group).
   c.fTabStop
 
-method releaseResources*(c: Control) {.base.} =
-  ## Called by `free`: drop subscriptions that keep `c` alive from the outside
-  ## (image list listeners). Overridden by controls that make such links.
-  ## Base: nothing.
-  discard
-
 method activateMnemonic*(c: Control, ch: Rune): bool {.base.} =
   ## Alt+`ch` (a lowercased character of any script, see `keyRune`) was pressed and no menu bar item took it. A
   ## control whose caption has the mnemonic `ch` activates itself and returns
@@ -533,7 +526,7 @@ func sameColor(a, b: Color): bool =
 proc recordDesign(c: Control) =
   ## An explicit (non-layout) placement: it becomes the anchor baseline. A
   ## container's own explicit size is its design size until its first layout
-  ## (window-manager resizes go through `hostSized` and are excluded).
+  ## (window-manager resizes go through `setHostSize` and are excluded).
   c.designRect = rectF(c.fLeft, c.fTop, c.fWidth, c.fHeight)
   let p = c.fParent
   if p != nil:
@@ -543,10 +536,9 @@ proc recordDesign(c: Control) =
     else:
       c.designBaseSet = false
 
-proc setBounds*(c: Control, l, t, w, h: float32) =
-  ## Sets position and size. Width/height are clamped to >= 0 and to
-  ## `constraints` (like VCL's ConstrainedResize). Fires `doResize` when the
-  ## size changed.
+proc applyBounds(c: Control, l, t, w, h: float32, explicit: bool) =
+  ## `explicit`: the placement is the user's (it becomes the anchor baseline
+  ## and a container's design size); false for layout passes and window sizes.
   let nw = c.fConstraints.clampWidth(max(w, 0))
   let nh = c.fConstraints.clampHeight(max(h, 0))
   if l == c.fLeft and t == c.fTop and nw == c.fWidth and nh == c.fHeight: return
@@ -556,24 +548,35 @@ proc setBounds*(c: Control, l, t, w, h: float32) =
   c.fTop = t
   c.fWidth = nw
   c.fHeight = nh
-  let quiet = c.parentLayouting   # the parent's layout repaints/relayouts once
-  if not quiet:
+  let inLayout = c.parentLayouting   # the parent's layout relayouts once
+  if not inLayout:
     c.recordDesign()
-    if c of Container:
+    if explicit and c of Container:
       let k = Container(c)
-      if not k.layoutInitialized and not k.hostSized:
+      if not k.layoutInitialized:
         k.designSize = sizeF(nw, nh)
         k.designSet = true
-  if not quiet:
-    c.invalidateInParent(old)
-    c.invalidateInParent(c.visualRect)
+  c.invalidateInParent(old)
+  c.invalidateInParent(c.visualRect)
   if sizeChanged and c of Container:
-    if quiet: Container(c).needsLayout = true
+    if inLayout: Container(c).needsLayout = true
     else: markLayout(Container(c))
-  if not quiet and c.fAlign != alNone and c.fParent != nil:
+  if not inLayout and c.fAlign != alNone and c.fParent != nil:
     markLayout(c.fParent)
   if c.fParent != nil: c.fParent.childBoundsChanged(c)
   if sizeChanged: c.doResize()
+
+proc setBounds*(c: Control, l, t, w, h: float32) =
+  ## Sets position and size. Width/height are clamped to >= 0 and to
+  ## `constraints` (like VCL's ConstrainedResize). Fires `doResize` when the
+  ## size changed.
+  c.applyBounds(l, t, w, h, explicit = true)
+
+proc setHostSize*(c: Container, w, h: float32) =
+  ## The host (window) sets the size of a root container. Unlike `setBounds`
+  ## this is not a design size: anchored children follow it, relative to the
+  ## size the root was designed at.
+  c.applyBounds(0, 0, w, h, explicit = false)
 
 proc `left=`*(c: Control, v: float32) = c.setBounds(v, c.fTop, c.fWidth, c.fHeight)
 proc `top=`*(c: Control, v: float32) = c.setBounds(c.fLeft, v, c.fWidth, c.fHeight)
@@ -781,18 +784,23 @@ proc insertControl*(c: Container, child: Control, index = -1) =
   c.childBoundsChanged(child)
   if child.fVisible: child.notifyVisibility()
 
-proc releaseTree(c: Control) =
+proc releaseTree(c: Component) =
+  ## Releases `c` and everything below it: child controls, then the components
+  ## it owns that are not controls (timers, action lists, menus).
   if c of Container:
     for k in Container(c).fChildren: releaseTree(k)
+  let owned = c.components              # copy: a release may edit the owner
+  for x in owned:
+    if not (x of Control): releaseTree(x)
   if c.actionLink != nil: c.actionLink.release()
   c.releaseResources()
 
 proc free*(c: Control) =
   ## Frees `c` permanently (VCL `Free`): removes it from its parent and owner,
-  ## unlinks the action of `c` and of every descendant and drops their image
-  ## list subscriptions, so nothing outside keeps the subtree alive. Without
-  ## it an `Action` (its client links) or an `ImageList` (its change
-  ## listeners) holds on to a removed control. Do not use `c` afterwards; to
+  ## unlinks the action of `c` and of every descendant, drops their image list
+  ## subscriptions and stops the timers they own, so nothing outside keeps the
+  ## subtree alive. Without it an `Action` (its client links) or an
+  ## `ImageList` (its change listeners) holds on to a removed control. Do not use `c` afterwards; to
   ## only move a control use `parent=`. Forms are closed, not freed.
   if c.fParent != nil: c.fParent.removeControl(c)
   if c.owner != nil: c.owner.removeComponent(c)

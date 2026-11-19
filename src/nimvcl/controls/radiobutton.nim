@@ -13,9 +13,8 @@
 import ./common
 
 type
-  RadioButton* = ref object of Control
+  RadioButton* = ref object of ClickableControl
     fChecked: bool
-    fHot, fMouseDown, fKeyDown: bool
     onChange*: NotifyEvent
 
 func checked*(r: RadioButton): bool = r.fChecked
@@ -32,11 +31,16 @@ proc groupMembers*(r: RadioButton): seq[RadioButton] =
 method isTabStop*(r: RadioButton): bool =
   ## One tab stop per group: the checked usable button, else the first usable.
   if not r.tabStop or not r.isUsable: return false
-  let g = r.groupMembers
-  for o in g:
-    if o.fChecked and o.isUsable: return o == r
-  for o in g:
-    if o.isUsable: return o == r
+  let p = r.parent
+  if p == nil: return true
+  var first: RadioButton            # the first usable member
+  for ch in p.children:
+    if ch of RadioButton:
+      let o = RadioButton(ch)
+      if not o.isUsable: continue
+      if o.fChecked: return o == r
+      if first == nil: first = o
+  first == r
 
 proc `checked=`*(r: RadioButton, v: bool) =
   ## Checking unchecks the siblings; a checked button can only be unchecked
@@ -55,47 +59,7 @@ proc `checked=`*(r: RadioButton, v: bool) =
     if o.onChange != nil: o.onChange(o)
   if r.onChange != nil: r.onChange(r)
 
-proc isPressed*(r: RadioButton): bool = (r.fMouseDown and r.fHot) or r.fKeyDown
-
-method canFocus*(r: RadioButton): bool = r.isVisible and r.isEnabled
-
 method preferredSize*(r: RadioButton): SizeF = indicatorPreferredSize(r)
-
-method activateMnemonic*(r: RadioButton, ch: Rune): bool =
-  if mnemonicOf(r.caption) != ch: return false
-  setFocus(r)
-  r.doClick()
-  true
-
-method doMouseEnter*(r: RadioButton) =
-  r.fHot = true
-  r.invalidate()
-  procCall doMouseEnter(Control(r))
-
-method doMouseLeave*(r: RadioButton) =
-  r.fHot = false
-  r.invalidate()
-  procCall doMouseLeave(Control(r))
-
-method doMouseDown*(r: RadioButton, button: MouseButton, shift: ShiftState,
-                    x, y: float32) =
-  if button == mbLeft:
-    r.fMouseDown = true
-    r.invalidate()
-  procCall doMouseDown(Control(r), button, shift, x, y)
-
-method doMouseMove*(r: RadioButton, shift: ShiftState, x, y: float32) =
-  if r.fMouseDown and ssLeft notin shift:
-    r.fMouseDown = false
-    r.invalidate()
-  procCall doMouseMove(Control(r), shift, x, y)
-
-method doMouseUp*(r: RadioButton, button: MouseButton, shift: ShiftState,
-                  x, y: float32) =
-  if button == mbLeft and r.fMouseDown:
-    r.fMouseDown = false
-    r.invalidate()
-  procCall doMouseUp(Control(r), button, shift, x, y)
 
 method doClick*(r: RadioButton) =
   r.checked = true
@@ -108,12 +72,12 @@ proc moveInGroup(r: RadioButton, step: int) =
   for n in 1 ..< g.len:
     let o = g[(i + step * n + g.len * n) mod g.len]
     if o.isUsable:
-      o.checked = true
+      o.doClick()                # selecting by arrow is a click, as with the mouse
       setFocus(o)
       return
 
 method doKeyDown*(r: RadioButton, key: var Key, shift: ShiftState) =
-  procCall doKeyDown(Control(r), key, shift)
+  procCall doKeyDown(ClickableControl(r), key, shift)    # Space
   if shift * {ssCtrl, ssAlt} != {}: return
   if key == keyUp or key == keyLeft:
     key = Key(0)
@@ -121,28 +85,10 @@ method doKeyDown*(r: RadioButton, key: var Key, shift: ShiftState) =
   elif key == keyDown or key == keyRight:
     key = Key(0)
     r.moveInGroup(1)
-  elif key == keySpace:
-    key = Key(0)
-    if not r.fKeyDown:
-      r.fKeyDown = true
-      r.invalidate()
-
-method doKeyUp*(r: RadioButton, key: var Key, shift: ShiftState) =
-  procCall doKeyUp(Control(r), key, shift)
-  if key == keySpace and r.fKeyDown:
-    key = Key(0)
-    r.fKeyDown = false
-    r.invalidate()
-    if r.isEnabled: r.doClick()
-
-method doExit*(r: RadioButton) =
-  r.fKeyDown = false
-  r.invalidate()
-  procCall doExit(Control(r))
 
 method paint*(r: RadioButton, c: Canvas) =
   let t = r.theme
-  let st = r.visualState(r.fHot, r.isPressed)
+  let st = r.visualState
   let box = indicatorRect(r)
   if r.ownColor: c.fillRect(r.clientRect, r.color)   # the area behind
   if r.fChecked:
