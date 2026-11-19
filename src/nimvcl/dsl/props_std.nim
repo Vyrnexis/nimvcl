@@ -3,12 +3,22 @@
 ## Importing this module is enough; `nfm.nim` and the object inspector import it.
 ##
 ## Not registered (they have no sensible text form): `DockSite` and its panels
-## (their layout is saved with `saveLayout`), grid cells, owner-draw and
-## virtual-mode hooks. `TreeView.items` (an indented outline) and
-## `ListView.items` (tab-separated cells) are string lists: the item images,
-## check state and expansion are not stored.
+## (their layout is saved with `saveLayout`), owner-draw and virtual-mode
+## hooks.
+##
+## Item data is stored as string lists:
+##
+## * `TreeView.items` is an indented outline (two spaces per level),
+##   `ListView.items` has one line per item with its sub-items separated by
+##   tabs, `StringGrid.cells` one line per row with its cells separated by tabs.
+## * `ListView` and `TreeView` add `itemImages` (the image index of each item,
+##   in order; `TreeView` also `itemSelectedImages`) and `checkedItems` (the
+##   indexes of the checked items), applied after `items`. They are hidden in
+##   the object inspector: the items editor sets them with `items`.
+## * `DrawGrid.colWidths` / `rowHeights` are comma-separated sizes
+##   ("64, 120, 64"), empty while every size is the default.
 
-import std/strutils
+import std/[strutils, unicode]
 import ../graphics/[color, font, image, canvas]
 import ../core/[types, component, control, form, timer]
 import ../controls/[common, label, button, checkbox, radiobutton, panel, paintbox,
@@ -34,6 +44,24 @@ proc getLvItems(c: ListView): seq[string] = c.itemLines
 proc setLvItems(c: ListView, v: seq[string]) = c.itemLines = v
 proc getTvItems(c: TreeView): seq[string] = c.nodeLines
 proc setTvItems(c: TreeView, v: seq[string]) = c.nodeLines = v
+proc getLvImages(c: ListView): seq[string] = c.itemImages
+proc setLvImages(c: ListView, v: seq[string]) = c.itemImages = v
+proc getLvChecked(c: ListView): seq[string] = c.checkedItems
+proc setLvChecked(c: ListView, v: seq[string]) = c.checkedItems = v
+proc getTvImages(c: TreeView): seq[string] = c.itemImages
+proc setTvImages(c: TreeView, v: seq[string]) = c.itemImages = v
+proc getTvSelImages(c: TreeView): seq[string] = c.itemSelectedImages
+proc setTvSelImages(c: TreeView, v: seq[string]) = c.itemSelectedImages = v
+proc getTvChecked(c: TreeView): seq[string] = c.checkedItems
+proc setTvChecked(c: TreeView, v: seq[string]) = c.checkedItems = v
+proc getCells(g: StringGrid): seq[string] = g.cellLines
+proc setCells(g: StringGrid, v: seq[string]) = g.cellLines = v
+proc getColWidths(g: DrawGrid): string = g.colWidthsText
+proc setColWidths(g: DrawGrid, v: string) = g.colWidthsText = v
+proc getRowHeights(g: DrawGrid): string = g.rowHeightsText
+proc setRowHeights(g: DrawGrid, v: string) = g.rowHeightsText = v
+proc getPasswordChar(e: Edit): string = e.passwordCharText
+proc setPasswordChar(e: Edit, v: string) = e.passwordChar = v
 proc getLines(m: Memo): seq[string] = m.text.splitLines
 proc setLines(m: Memo, v: seq[string]) = m.text = v.join("\n")
 
@@ -157,6 +185,9 @@ registerClass(Form, parent = Container, create = newForm(owner)):
     position: FormPosition
     borderStyle: BorderStyle
     formStyle: FormStyle
+    icon: Image
+  category Behaviour:
+    menu: MainMenu
   category Events:
     onShow: NotifyEvent
     onHide: NotifyEvent
@@ -164,6 +195,8 @@ registerClass(Form, parent = Container, create = newForm(owner)):
     onDeactivate: NotifyEvent
     onClose: FormCloseEvent
     onCloseQuery: FormCloseQueryEvent
+  # a MainMenu object in the form is its menu already (its constructor sets it)
+  skipWhen menu, (self.menu != nil and self.menu.parent == Container(self))
 
 # ------------------------------------------------- text and buttons
 
@@ -186,6 +219,10 @@ registerClass(Button, parent = Control):
     isDefault: bool
     isCancel: bool
     modalResult: ModalResult
+  category Data:
+    images: ImageList
+    imageIndex: int
+    imageAlignment: ImageAlignment
 
 registerClass(CheckBox, parent = Control):
   category Appearance:
@@ -319,6 +356,7 @@ registerClass(Edit, parent = Control):
     placeholder: string
   category Behaviour:
     password: bool
+    prop passwordChar, string, getPasswordChar, setPasswordChar
     readOnly: bool
     maxLength: int
     charCase: EditCharCase
@@ -328,6 +366,8 @@ registerClass(Edit, parent = Control):
     text: string
   category Events:
     onChange: NotifyEvent
+  skipWhen password, (self.isPassword and self.passwordChar != DefaultPasswordChar)
+  skipWhen passwordChar, (self.passwordChar == DefaultPasswordChar)
 
 registerClass(Memo, parent = ScrollingControl):
   category Appearance:
@@ -454,6 +494,9 @@ registerClass(TreeView, parent = ScrollingControl, kids = noKids()):
     propagateChecks: bool
   category Data:
     prop items, seq[string], getTvItems, setTvItems
+    prop itemImages, seq[string], getTvImages, setTvImages
+    prop itemSelectedImages, seq[string], getTvSelImages, setTvSelImages
+    prop checkedItems, seq[string], getTvChecked, setTvChecked
     images: ImageList
   category Events:
     onChange: TreeNodeEvent
@@ -463,6 +506,10 @@ registerClass(TreeView, parent = ScrollingControl, kids = noKids()):
     onExpanded: TreeNodeEvent
     onCollapsed: TreeNodeEvent
     onChecked: TreeNodeEvent
+  hide itemImages, itemSelectedImages, checkedItems
+  after itemImages, items
+  after itemSelectedImages, items
+  after checkedItems, items, propagateChecks, itemImages
 
 registerClass(ListView, parent = ScrollingControl,
               kids = columnKids(self)):
@@ -484,6 +531,8 @@ registerClass(ListView, parent = ScrollingControl,
     sortOrder: SortOrder
   category Data:
     prop items, seq[string], getLvItems, setLvItems
+    prop itemImages, seq[string], getLvImages, setLvImages
+    prop checkedItems, seq[string], getLvChecked, setLvChecked
     smallImages: ImageList
     largeImages: ImageList
   category Events:
@@ -493,6 +542,9 @@ registerClass(ListView, parent = ScrollingControl,
     onItemDblClick: ListItemDblClickEvent
     onColumnClick: ListColumnEvent
     onColumnResize: ListColumnEvent
+  hide itemImages, checkedItems
+  after itemImages, items
+  after checkedItems, items, itemImages
 
 registerClass(ListColumn, parent = nil, create = newColumnOf(parent),
               protoParent = newListView(nil)):
@@ -511,6 +563,8 @@ registerClass(DrawGrid, parent = ScrollingControl, kids = noKids()):
     vertLines: bool
     defaultColWidth: float32
     defaultRowHeight: float32
+    prop colWidths, string, getColWidths, setColWidths
+    prop rowHeights, string, getRowHeights, setRowHeights
   category Behaviour:
     colCount: int
     rowCount: int
@@ -525,10 +579,15 @@ registerClass(DrawGrid, parent = ScrollingControl, kids = noKids()):
     onFixedCellClick: GridCellEvent
     onColWidthChanged: GridIndexEvent
     onRowHeightChanged: GridIndexEvent
+  after colWidths, colCount, defaultColWidth
+  after rowHeights, rowCount, defaultRowHeight
 
 registerClass(StringGrid, parent = DrawGrid):
   category Behaviour:
     sortOnHeaderClick: bool
+  category Data:
+    prop cells, seq[string], getCells, setCells
+  after cells, colCount, rowCount
   category Events:
     onHeaderClick: GridIndexEvent
 

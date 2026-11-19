@@ -575,3 +575,231 @@ suite "inspector: where object references come from":
     check ins.beginEdit("images")
     check ins.editCombo.items.len == 2           # (none) + the ImageList; the ToolBar is filtered out
     check ins.editCombo.items[1] == "elsewhere"
+
+# ---------------------------------------------------------------------------
+# design-time data: button images, password char, form icon and menu, grid
+# cells, list and tree items (properties, form files and editor dialogs)
+
+loadForm Designed, "nfm/designdata.nfm"
+
+proc checkDesigned(f: Form) =
+  ## What designdata.nfm says, whoever built the form.
+  let btn = Button(f.findComponent("btn"))
+  check btn.images == ImageList(f.findComponent("icons"))
+  check btn.imageIndex == 1 and btn.imageAlignment == iaRight
+  check Edit(f.findComponent("pw")).passwordChar == Rune('*')
+  check f.icon != nil and f.icon.source == "images/red.png"
+  check f.menu == MainMenu(f.findComponent("mm"))
+  let g = StringGrid(f.findComponent("grid"))
+  check g.colCount == 3 and g.rowCount == 4
+  check g.colWidths[0] == 40 and g.colWidths[1] == 80 and g.colWidths[2] == 60
+  check g.cells[0, 0] == "Name" and g.cells[1, 1] == "5" and g.cells[2, 3] == "0.5"
+  check g.cells[1, 3] == "" and g.cells[0, 3] == "Bolt"
+  let lv = ListView(f.findComponent("lv"))
+  check lv.itemLines == @["a\t1", "b\t2", "c"]
+  check lv.items[0].imageIndex == 0 and lv.items[1].imageIndex == -1 and
+        lv.items[2].imageIndex == 1
+  check lv.itemChecked(0) and not lv.itemChecked(1) and lv.itemChecked(2)
+  let tv = TreeView(f.findComponent("tv"))
+  check tv.nodeLines == @["Root", "  Child", "  Other", "Second"]
+  check tv.itemImages == @["0", "1"]
+  check tv.itemSelectedImages == @["-1", "1"] or tv.itemSelectedImages == @["1"]
+  check tv.checkedItems == @["2", "3"]
+
+suite "design-time data in form files":
+  Application.init()
+
+  test "loadForm and loadNfm build the same, and saving reproduces the file":
+    let a = newDesigned()
+    checkDesigned(a)
+    let b = loadNfmFile(nfmDir / "designdata.nfm")
+    checkDesigned(b)
+    let text = formToNfm(b)
+    check "menu =" notin text                 # the MainMenu child implies it
+    check formToNfm(a) == text
+    check formToNfm(loadNfm(text, nil, NfmOptions(strict: true, baseDir: nfmDir))) == text
+    for needle in ["passwordChar = '*'", "colWidths = '40, 80, 60'", "cells = (",
+                   "itemImages = (", "checkedItems = (", "icon = 'images/red.png'",
+                   "imageAlignment = iaRight", "images = icons"]:
+      check needle in text
+
+  test "properties are written after the ones they depend on":
+    let ci = classByName("StringGrid")
+    var names: seq[string]
+    for p in ci.propsOf: names.add p.name
+    check names.find("cells") > names.find("colCount")
+    check names.find("cells") > names.find("rowCount")
+    check names.find("colWidths") > names.find("colCount")
+    var lv: seq[string]
+    for p in classByName("ListView").propsOf: lv.add p.name
+    check lv.find("itemImages") > lv.find("items")
+    check lv.find("checkedItems") > lv.find("items")
+    var tv: seq[string]
+    for p in classByName("TreeView").propsOf: tv.add p.name
+    check tv.find("checkedItems") > tv.find("propagateChecks")
+    check tv.find("checkedItems") > tv.find("items")
+
+  test "defaults are not written":
+    let f = newForm(nil, 100, 100)
+    f.name = "F"
+    var n = 0
+    for c in [Control(newButton(f)), newEdit(f), newStringGrid(f), newListView(f),
+              newTreeView(f)]:
+      inc n
+      c.name = "c" & $n
+    let text = formToNfm(f)
+    for p in ["imageIndex", "imageAlignment", "passwordChar", "password", "cells",
+              "colWidths", "rowHeights", "itemImages", "checkedItems", "icon", "menu"]:
+      check (p & " =") notin text
+
+  test "the inspector hides the stored per-item lists":
+    let f = newForm(nil, 300, 300)
+    let ins = newObjectInspector(f)
+    ins.inspect(newListView(f))
+    check ins.selectProp("items")
+    check not ins.selectProp("itemImages")
+    check not ins.selectProp("checkedItems")
+    ins.inspect(newTreeView(f))
+    check ins.selectProp("items")
+    check not ins.selectProp("itemSelectedImages")
+
+suite "design-time data: editors":
+  Application.init()
+
+  test "StringGrid cells: the dialog edits a copy, OK applies counts and cells":
+    let f = newForm(nil, 400, 300)
+    let g = newStringGrid(f)
+    g.name = "g"
+    g.cells[0, 0] = "keep"
+    let ins = newObjectInspector(f)
+    let host = newPropEditorHost()
+    attachEditors(ins, host)
+    ins.inspect(g)
+    check ins.valueTextOf("cells") == "(1 line)"
+    host.runModal = proc(d: Form): ModalResult =
+      let dd = StringGridDlgForm(d)
+      check dd.colCountOf == 5 and dd.rowCountOf == 5
+      check dd.cellsOf == @["keep"]
+      dd.grid.cells[1, 1] = "x"
+      dd.grid.cells[2, 1] = "y"
+      dd.addColumn()
+      dd.addRow()
+      dd.grid.cells[5, 5] = "far"
+      mrCancel
+    ins.beginEdit("cells")
+    check g.colCount == 5 and g.cells[1, 1] == ""        # cancelled
+    host.runModal = proc(d: Form): ModalResult =
+      let dd = StringGridDlgForm(d)
+      dd.grid.cells[1, 1] = "x"
+      dd.grid.cells[2, 1] = "y"
+      dd.addColumn()
+      dd.addRow()
+      dd.grid.cells[5, 5] = "far"
+      mrOk
+    ins.beginEdit("cells")
+    check g.colCount == 6 and g.rowCount == 6
+    check g.cells[0, 0] == "keep" and g.cells[1, 1] == "x" and g.cells[2, 1] == "y"
+    check g.cells[5, 5] == "far"
+    check g.cellLines == @["keep", "\tx\ty", "", "", "", "\t\t\t\t\tfar"]
+
+  test "StringGrid dialog: delete row and column":
+    let d = newStringGridDlg(3, 3, 1, 1, @["h1\th2\th3", "a\tb\tc", "d\te\tf"])
+    d.grid.row = 1
+    d.grid.col = 1
+    d.deleteRow()
+    d.deleteColumn()
+    check d.rowCountOf == 2 and d.colCountOf == 2
+    check d.cellsOf == @["h1\th3", "d\tf"]
+    d.freeWindow()
+
+  test "ListView items: caption, sub-items, image index, checked":
+    let f = newForm(nil, 400, 300)
+    let lv = newListView(f)
+    lv.name = "lv"
+    lv.itemLines = @["a\t1", "b"]
+    lv.items[1].imageIndex = 3
+    lv.items[0].checked = true
+    let ins = newObjectInspector(f)
+    let host = newPropEditorHost()
+    attachEditors(ins, host)
+    ins.inspect(lv)
+    var changed: seq[string]
+    ins.onPropertyChanged = proc(s: Control, t: Obj, p: string) = changed.add p
+    host.runModal = proc(d: Form): ModalResult =
+      let dd = ItemsDlgForm(d)
+      check dd.recs.len == 2 and dd.recs[0].checked and dd.recs[1].image == 3
+      check dd.recs[0].subs == @["1"]
+      dd.list.itemIndex = 1
+      dd.capEdit.text = "beta"
+      dd.subMemo.text = "x\ny"
+      dd.imgSpin.value = 2
+      dd.chkBox.checked = true
+      dd.addItem()                              # after the selected one
+      dd.capEdit.text = "gamma"
+      dd.upBtn.click()
+      mrOk
+    ins.beginEdit("items")
+    check lv.itemLines == @["a\t1", "gamma", "beta\tx\ty"]
+    check lv.items[2].imageIndex == 2 and lv.items[1].imageIndex == -1
+    check lv.itemChecked(0) and not lv.itemChecked(1) and lv.itemChecked(2)
+    check "items" in changed and "checkedItems" in changed
+    host.runModal = proc(d: Form): ModalResult =
+      ItemsDlgForm(d).deleteItem()              # nothing selected? the first row is
+      mrCancel
+    ins.beginEdit("items")
+    check lv.count == 3
+
+  test "TreeView items: nesting, move with children, indent, delete subtree":
+    let tv = newTreeView(newForm(nil, 100, 100))
+    tv.nodeLines = @["Root", "  A", "    A1", "  B", "Second"]
+    tv.checkboxes = true
+    tv.items[0].children[1].checked = true      # B
+    tv.items[0].children[0].imageIndex = 4      # A
+    tv.items[0].children[0].selectedIndex = 5
+    let d = newItemsDlg(true, tv.nodeLines, tv.itemImages, tv.itemSelectedImages,
+                        tv.checkedItems)
+    check d.recs.len == 5 and d.recs[3].checked and d.recs[1].image == 4 and
+          d.recs[1].selImage == 5
+    d.list.itemIndex = 1                        # A (with A1)
+    d.moveItem(1)                               # past B
+    check d.itemLines == @["Root", "  B", "  A", "    A1", "Second"]
+    check d.selectedIndex == 2
+    d.moveItem(1)                               # A is the last child: stays
+    check d.selectedIndex == 2
+    d.indentItem(-1)                            # A and A1 become top level
+    check d.itemLines == @["Root", "  B", "A", "  A1", "Second"]
+    d.indentItem(1)
+    check d.itemLines == @["Root", "  B", "  A", "    A1", "Second"]
+    d.list.itemIndex = 2
+    check d.addItem(child = true) == 4
+    check d.recs[4].level == 2 and d.recs[4].text.startsWith("Item")
+    d.list.itemIndex = 0
+    d.deleteItem()                              # the whole Root subtree
+    check d.itemLines == @["Second"]
+    check d.itemImages == newSeq[string]() and d.checkedItems.len == 0
+    d.freeWindow()
+
+  test "TreeView through the inspector applies images and checks":
+    let f = newForm(nil, 400, 300)
+    let tv = newTreeView(f)
+    tv.name = "tv"
+    tv.checkboxes = true
+    let ins = newObjectInspector(f)
+    let host = newPropEditorHost()
+    attachEditors(ins, host)
+    ins.inspect(tv)
+    host.runModal = proc(d: Form): ModalResult =
+      let dd = ItemsDlgForm(d)
+      dd.addItem()
+      dd.capEdit.text = "top"
+      dd.imgSpin.value = 1
+      dd.addItem(child = true)
+      dd.capEdit.text = "leaf"
+      dd.chkBox.checked = true
+      dd.selSpin.value = 2
+      mrOk
+    ins.beginEdit("items")
+    check tv.nodeLines == @["top", "  leaf"]
+    check tv.itemImages == @["1"] and tv.itemSelectedImages == @["-1", "2"]
+    check tv.checkedItems == @["1"]
+    check tv.items[0].children[0].checked == cbChecked

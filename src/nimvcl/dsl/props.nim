@@ -40,6 +40,9 @@
 ##   indented block sets the category of the properties inside.
 ## * `nostore a, b` the properties are never written to a form file (they are
 ##   implied by others).
+## * `hide a, b` the properties are stored in form files but not listed by the
+##   object inspector (they are edited together with another property by its
+##   dialog, e.g. the per-item images of `ListView.items`).
 ## * `skipWhen text, (self.itemIndex >= 0)` the property is not stored while the
 ##   condition (over `self`) holds, because another property implies it.
 ## * `defaultWhen font, parentFont` the property counts as default while the
@@ -124,6 +127,7 @@ type
     returnType*: string                  ## events: the result type, "" for none
     enumNames*: seq[string]              ## pkEnum: values by ordinal; pkSet: elements by bit
     stored*: bool                        ## written to form files when not default
+    hidden*: bool                        ## not listed by the object inspector (edited through another property's dialog)
     defaultWhen*: string                 ## default while this bool property is true
     skipWhen*: proc(o: Obj): bool {.closure.}   ## not stored while this returns true (value implied by another property)
     after*: seq[string]                  ## properties that must be set before this one (see `propsOf`)
@@ -888,6 +892,11 @@ macro registerClass*(args: varargs[untyped]): untyped =
             let nm = newLit(st[j].strVal)
             stmts.add quote do:
               findProp(`ci`, `nm`).stored = false
+        elif head.kind == nnkIdent and head.eqIdent("hide"):
+          for j in 1 ..< st.len:
+            let nm = newLit(st[j].strVal)
+            stmts.add quote do:
+              findProp(`ci`, `nm`).hidden = true
         elif head.kind == nnkIdent and head.eqIdent("skipWhen") and st.len == 3:
           let nm = newLit(st[1].strVal)
           let cond = st[2]

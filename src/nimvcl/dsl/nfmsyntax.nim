@@ -489,7 +489,8 @@ proc nimExpr(cls, prop: string, v: NfmValue,
   ## The Nim expression for a property value, and the (possibly renamed)
   ## property it is assigned to. A few properties have a text form that is not
   ## their Nim type: `shortcut`, `columns`/`rows` of a `GridPanel`, `lines` of a
-  ## `Memo`.
+  ## `Memo`, the item lists of the views and grids (`items`, `cells`,
+  ## `colWidths`, `rowHeights`).
   result.prop = prop
   case v.kind
   of nvInt, nvFloat, nvBool: result.expr = v.text
@@ -497,6 +498,10 @@ proc nimExpr(cls, prop: string, v: NfmValue,
     if prop == "shortcut": result.expr = "shortcut(" & nimStr(v.text) & ")"
     elif cls == "GridPanel" and (prop == "columns" or prop == "rows"):
       result.expr = "parseGridSizes(" & nimStr(v.text) & ")"
+    elif cls in ["DrawGrid", "StringGrid"] and (prop == "colWidths" or prop == "rowHeights"):
+      # not the Nim `colWidths` (an indexable view): the text accessors
+      result.prop = prop & "Text"
+      result.expr = nimStr(v.text)
     else: result.expr = nimStr(v.text)
   of nvIdent:
     result.expr = if v.text in names: "self." & v.text else: v.text
@@ -506,6 +511,11 @@ proc nimExpr(cls, prop: string, v: NfmValue,
     if cls == "Memo" and prop == "lines":
       result.prop = "text"
       result.expr = nimStr(v.items.join("\n"))
+    elif cls == "StringGrid" and prop == "cells":
+      result.prop = "cellLines"
+      var parts: seq[string]
+      for s in v.items: parts.add nimStr(s)
+      result.expr = "@[" & parts.join(", ") & "]"
     elif (cls == "ListView" or cls == "TreeView") and prop == "items":
       # not the Nim `items` (an object): the outline/row text accessors
       result.prop = if cls == "ListView": "itemLines" else: "nodeLines"

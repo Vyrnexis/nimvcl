@@ -1,6 +1,6 @@
 ## Property registry (dsl/props, dsl/props_std). Headless (offscreen SDL).
 
-import std/unittest
+import std/[unittest, tables]
 import nimvcl
 import nimvcl/dsl/props_std
 
@@ -256,3 +256,71 @@ suite "registry":
     fz.initButton()
     check classOf(fz) == classByName("Button")
     expect PropError: discard classByName("Control").createObject(nil, nil)
+
+suite "design-time properties registered":
+  Application.init()
+
+  test "the audited properties exist with the right kinds":
+    proc kindOf(cls, prop: string): PropKind =
+      let p = classByName(cls).findProp(prop)
+      check p != nil
+      p.kind
+    check kindOf("Edit", "passwordChar") == pkString
+    check kindOf("Button", "images") == pkObject
+    check kindOf("Button", "imageIndex") == pkInt
+    check kindOf("Button", "imageAlignment") == pkEnum
+    check kindOf("Form", "icon") == pkImage
+    check kindOf("Form", "menu") == pkObject
+    check kindOf("StringGrid", "cells") == pkStrings
+    check kindOf("StringGrid", "colWidths") == pkString
+    check kindOf("StringGrid", "rowHeights") == pkString
+    check kindOf("DrawGrid", "colWidths") == pkString
+    check kindOf("StringGrid", "fixedRows") == pkInt
+    check kindOf("ListView", "itemImages") == pkStrings
+    check kindOf("ListView", "checkedItems") == pkStrings
+    check kindOf("TreeView", "itemImages") == pkStrings
+    check kindOf("TreeView", "itemSelectedImages") == pkStrings
+    check kindOf("TreeView", "checkedItems") == pkStrings
+
+  test "hidden properties are stored but not for the inspector":
+    for (c, p) in [("ListView", "itemImages"), ("ListView", "checkedItems"),
+                   ("TreeView", "itemImages"), ("TreeView", "itemSelectedImages"),
+                   ("TreeView", "checkedItems")]:
+      let pi = classByName(c).findProp(p)
+      check pi.hidden and pi.stored
+    check not classByName("ListView").findProp("items").hidden
+
+  test "ordering: dependent properties come after what they depend on":
+    proc pos(cls: string): Table[string, int] =
+      for i, p in classByName(cls).propsOf: result[p.name] = i
+    let sg = pos("StringGrid")
+    check sg["cells"] > sg["colCount"] and sg["cells"] > sg["rowCount"]
+    check sg["colWidths"] > sg["colCount"] and sg["colWidths"] > sg["defaultColWidth"]
+    check sg["rowHeights"] > sg["rowCount"] and sg["rowHeights"] > sg["defaultRowHeight"]
+    let lv = pos("ListView")
+    check lv["itemImages"] > lv["items"] and lv["checkedItems"] > lv["itemImages"]
+    let tv = pos("TreeView")
+    check tv["itemImages"] > tv["items"] and tv["itemSelectedImages"] > tv["items"]
+    check tv["checkedItems"] > tv["items"] and tv["checkedItems"] > tv["propagateChecks"]
+
+  test "get and set on live objects":
+    let g = newStringGrid(nil)
+    setProp(Obj(g), "cells", pvStrings(@["a\tb", "c"]))
+    check g.cells[1, 0] == "b" and g.cells[0, 1] == "c"
+    check getProp(Obj(g), "cells").strs == @["a\tb", "c"]
+    setProp(Obj(g), "colWidths", pvString("10, 20"))
+    check g.colWidths[1] == 20
+    check getProp(Obj(g), "colWidths").s == "10, 20, 64, 64, 64"
+    let b = newButton(nil)
+    let il = newImageList()
+    setProp(Obj(b), "images", pvObject(Obj(il)))
+    setProp(Obj(b), "imageIndex", pvInt(2))
+    setProp(Obj(b), "imageAlignment", pvEnum(ord(iaBottom)))
+    check b.images == il and b.imageIndex == 2 and b.imageAlignment == iaBottom
+    let f = newForm(nil, 100, 100)
+    let mm = newMainMenu(f)
+    f.menu = nil
+    setProp(Obj(f), "menu", pvObject(Obj(mm)))
+    check f.menu == mm
+    setProp(Obj(f), "icon", PropValue(kind: pkImage, image: newImage(2, 2)))
+    check f.icon != nil

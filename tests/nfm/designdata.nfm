@@ -1,0 +1,75 @@
+object Designed: Form
+  caption = 'Designed'
+  icon = 'images/red.png'
+  menu = mm
+  object icons: ImageList
+    images = (
+      'images/blue.png'
+      'images/green.png'
+    )
+  end
+  object mm: MainMenu
+    object miFile: MenuItem
+      caption = 'File'
+    end
+  end
+  object btn: Button
+    caption = 'Go'
+    images = icons
+    imageIndex = 1
+    imageAlignment = iaRight
+  end
+  object pw: Edit
+    passwordChar = '*'
+  end
+  object grid: StringGrid
+    colCount = 3
+    rowCount = 4
+    colWidths = '40, 80, 60'
+    cells = (
+      'Name\tQty\tPrice'
+      'Nut\t5'
+      ''
+      'Bolt\t\t0.5'
+    )
+  end
+  object lv: ListView
+    checkboxes = true
+    smallImages = icons
+    items = (
+      'a\t1'
+      'b\t2'
+      'c'
+    )
+    itemImages = (
+      '0'
+      ''
+      '1'
+    )
+    checkedItems = (
+      '0'
+      '2'
+    )
+  end
+  object tv: TreeView
+    checkboxes = true
+    images = icons
+    items = (
+      'Root'
+      '  Child'
+      '  Other'
+      'Second'
+    )
+    itemImages = (
+      '0'
+      '1'
+    )
+    itemSelectedImages = (
+      '1'
+    )
+    checkedItems = (
+      '2'
+      '3'
+    )
+  end
+end

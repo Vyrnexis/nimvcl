@@ -488,3 +488,23 @@ suite "property order and robustness":
     check owner.components.len == 0
     let ok = loadNfm("object F: Form\nend\n", owner)
     check owner.components.len == 1 and owner.components[0] == Component(ok)
+
+suite "item data properties":
+  test "cells, colWidths and per-item lists load, round-trip and report bad values":
+    Application.init()
+    let src = "object F: Form\n" &
+      "  object g: StringGrid\n    colCount = 3\n    rowCount = 3\n" &
+      "    colWidths = '10, 20, 30'\n    cells = (\n      'a\\tb'\n      ''\n      'c'\n    )\n  end\n" &
+      "  object lv: ListView\n    items = (\n      'x'\n      'y'\n    )\n" &
+      "    itemImages = (\n      ''\n      '2'\n    )\n    checkedItems = (\n      '1'\n    )\n  end\n" &
+      "end\n"
+    let f = loadNfm(src)
+    let g = StringGrid(f.findComponent("g"))
+    check g.cells[1, 0] == "b" and g.cells[0, 2] == "c" and g.colWidths[2] == 30
+    let lv = ListView(f.findComponent("lv"))
+    check lv.items[1].imageIndex == 2 and lv.itemChecked(1) and not lv.itemChecked(0)
+    let text = formToNfm(f)
+    check formToNfm(loadNfm(text)) == text
+    # a width list is text, a cell list is a list
+    expect NfmError: discard loadNfm("object F: Form\n  object g: StringGrid\n    cells = 'a'\n  end\nend\n")
+    expect NfmError: discard loadNfm("object F: Form\n  object g: StringGrid\n    colWidths = (\n      '1'\n    )\n  end\nend\n")
