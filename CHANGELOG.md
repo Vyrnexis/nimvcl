@@ -5,7 +5,7 @@ All notable changes to nimvcl are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0 the API can still change
 between minor versions.
 
-## [Unreleased]
+## [0.2.0] - 2026-11-20
 
 ### Added
 
