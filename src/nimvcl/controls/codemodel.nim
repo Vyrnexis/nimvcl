@@ -46,10 +46,13 @@
 ##   the lines `firstLine ..< firstLine + oldCount` were replaced by
 ##   `newCount` lines. The highlighter cache and the fold map subscribe to it.
 
-import std/[unicode, strutils]
-import ./editmodel
-export editmodel.snapIndex, editmodel.prevBoundary, editmodel.nextBoundary,
-       editmodel.runeCount
+import std/strutils
+import ./textutil
+export textutil.snapIndex, textutil.prevBoundary, textutil.nextBoundary,
+       textutil.runeCount, textutil.runeColOf, textutil.byteOfRuneCol,
+       textutil.wordLeftIn, textutil.wordRightIn, textutil.wordRangeIn,
+       textutil.identRangeIn, textutil.CharClass, textutil.charClass,
+       textutil.isIdentRune, textutil.endOfInsert
 
 type
   CodePos* = tuple[line, col: int]
@@ -75,8 +78,6 @@ type
 
   ChangeHandler* = proc(firstLine, oldCount, newCount: int) {.closure.}
 
-  CharClass* = enum ccSpace, ccWord, ccOther
-
   Op = object
     pos: CodePos
     removed, inserted: string
@@ -101,6 +102,8 @@ type
     lastKind: EditKind
     lastClass: CharClass
     lastPos: CodePos
+    pend: tuple[first, oldN, newN: int]   # changes recorded by spliceRaw
+    hasPend: bool
     savedStep: int            ## undoStack.len at the last save; -1 = unreachable
     fModified: bool
     maxUndo: int
@@ -108,7 +111,6 @@ type
 
 const
   DefaultMaxUndo = 10_000
-  Replacement = "\xEF\xBF\xBD"
 
 # ------------------------------------------------------------------ helpers
 
@@ -121,91 +123,10 @@ func isEmpty*(s: Selection): bool = s.anchor == s.caret
 func startPos*(s: Selection): CodePos = (if s.anchor < s.caret: s.anchor else: s.caret)
 func endPos*(s: Selection): CodePos = (if s.anchor < s.caret: s.caret else: s.anchor)
 
-func runeAt(s: string, i: int): Rune =
-  var r: Rune
-  fastRuneAt(s, i, r, false)
-  r
-
-func runeBefore(s: string, i: int): Rune = runeAt(s, prevBoundary(s, i))
-
-func charClass*(r: Rune): CharClass =
-  ## Code word classes: identifier characters (letters, digits, `_`), spaces,
-  ## everything else.
-  let v = int(r)
-  if v < 128:
-    let c = char(v)
-    if c in {'a'..'z', 'A'..'Z', '0'..'9', '_'}: ccWord
-    elif c in {' ', '\t', '\v', '\f', '\r', '\n'}: ccSpace
-    else: ccOther
-  elif r.isWhiteSpace: ccSpace
-  elif r.isAlpha: ccWord
-  else: ccOther
-
-func isIdentRune*(r: Rune): bool = charClass(r) == ccWord
-
-func utf8SeqLen(s: string, i: int): int =
-  ## Length of the valid UTF-8 sequence at `i`, 0 if it is invalid.
-  let b0 = ord(s[i])
-  if b0 < 0x80: return 1
-  proc cont(s: string, j: int): int {.inline.} =
-    if j < s.len: ord(s[j]) else: 0
-  template isC(x: int): bool = (x and 0xC0) == 0x80
-  if b0 in 0xC2 .. 0xDF:
-    if isC(cont(s, i + 1)): return 2
-  elif b0 in 0xE0 .. 0xEF:
-    let b1 = cont(s, i + 1)
-    let lo = if b0 == 0xE0: 0xA0 else: 0x80
-    let hi = if b0 == 0xED: 0x9F else: 0xBF
-    if b1 in lo .. hi and isC(cont(s, i + 2)): return 3
-  elif b0 in 0xF0 .. 0xF4:
-    let b1 = cont(s, i + 1)
-    let lo = if b0 == 0xF0: 0x90 else: 0x80
-    let hi = if b0 == 0xF4: 0x8F else: 0xBF
-    if b1 in lo .. hi and isC(cont(s, i + 2)) and isC(cont(s, i + 3)): return 4
-  0
-
-proc firstInvalidUtf8(s: string, start = 0, stop = -1): int =
-  ## Index of the first invalid byte in `s[start ..< stop]`, or -1.
-  let n = if stop < 0: s.len else: stop
-  var i = start
-  while i < n:
-    if i + 8 <= n:
-      var w: uint64
-      copyMem(addr w, unsafeAddr s[i], 8)
-      if (w and 0x8080808080808080'u64) == 0:
-        i += 8
-        continue
-    if ord(s[i]) < 0x80: inc i
-    else:
-      let l = utf8SeqLen(s, i)
-      if l == 0 or i + l > n: return i
-      i += l
-  -1
-
-proc fixUtf8(s: string, invalid: var int): string =
-  ## `s` with each invalid byte replaced by U+FFFD; counts them.
-  result = newStringOfCap(s.len + 8)
-  var i = 0
-  while i < s.len:
-    if ord(s[i]) < 0x80:
-      result.add s[i]
-      inc i
-    else:
-      let l = utf8SeqLen(s, i)
-      if l == 0:
-        result.add Replacement
-        inc invalid
-        inc i
-      else:
-        result.add s[i ..< i + l]
-        i += l
-
 proc normalizeInput(s: string): string =
   ## "\r\n" and lone "\r" become "\n"; invalid UTF-8 becomes U+FFFD.
-  var t = s
-  if firstInvalidUtf8(t) >= 0:
-    var n = 0
-    t = fixUtf8(t, n)
+  var bad = 0
+  let t = repairUtf8(s, bad)
   if t.find('\r') < 0: return t
   result = newStringOfCap(t.len)
   var i = 0
@@ -215,26 +136,6 @@ proc normalizeInput(s: string): string =
       result.add '\n'
     else: result.add t[i]
     inc i
-
-proc splitOn(s: string, c: char): seq[string] =
-  result = @[]
-  var start = 0
-  for i in 0 ..< s.len:
-    if s[i] == c:
-      result.add s[start ..< i]
-      start = i + 1
-  result.add s[start .. ^1]
-
-func endOfInsert*(start: CodePos, s: string): CodePos =
-  ## Where the caret is after inserting `s` (already normalised to "\n") at `start`.
-  var nl = 0
-  var lastNl = -1
-  for i in 0 ..< s.len:
-    if s[i] == '\n':
-      inc nl
-      lastNl = i
-  if nl == 0: (start.line, start.col + s.len)
-  else: (start.line + nl, s.len - lastNl - 1)
 
 # ----------------------------------------------------- columns, tabs, words
 
@@ -266,62 +167,6 @@ func colAtVisual*(line: string, vcol, tabWidth: int, roundNearest = false): int 
   line.len
 
 func visualWidth*(line: string, tabWidth: int): int = visualCol(line, line.len, tabWidth)
-
-func runeColOf*(line: string, col: int): int =
-  var i = 0
-  while i < col and i < line.len:
-    i = nextBoundary(line, i)
-    inc result
-
-func byteOfRuneCol*(line: string, rc: int): int =
-  var n = 0
-  while result < line.len and n < rc:
-    result = nextBoundary(line, result)
-    inc n
-
-func wordLeftIn*(s: string, i: int): int =
-  ## Start of the word (identifier or punctuation run) before `i`.
-  result = snapIndex(s, i)
-  while result > 0 and charClass(runeBefore(s, result)) == ccSpace:
-    result = prevBoundary(s, result)
-  if result > 0:
-    let cls = charClass(runeBefore(s, result))
-    while result > 0 and charClass(runeBefore(s, result)) == cls:
-      result = prevBoundary(s, result)
-
-func wordRightIn*(s: string, i: int): int =
-  ## Start of the next word after `i` (skips the current run and the spaces).
-  result = snapIndex(s, i)
-  if result < s.len:
-    let cls = charClass(runeAt(s, result))
-    if cls != ccSpace:
-      while result < s.len and charClass(runeAt(s, result)) == cls:
-        result = nextBoundary(s, result)
-  while result < s.len and charClass(runeAt(s, result)) == ccSpace:
-    result = nextBoundary(s, result)
-
-func wordRangeIn*(s: string, i: int): (int, int) =
-  ## The run of the same class (identifier, spaces, punctuation) around `i`;
-  ## at the end of the line the run before it. (0, 0) for an empty line.
-  if s.len == 0: return (0, 0)
-  var p = snapIndex(s, i)
-  if p >= s.len: p = prevBoundary(s, s.len)
-  let cls = charClass(runeAt(s, p))
-  var a = p
-  while a > 0 and charClass(runeBefore(s, a)) == cls: a = prevBoundary(s, a)
-  var b = nextBoundary(s, p)
-  while b < s.len and charClass(runeAt(s, b)) == cls: b = nextBoundary(s, b)
-  (a, b)
-
-func identRangeIn*(s: string, i: int): (int, int) =
-  ## The identifier touching `i` (also when the caret is just after it);
-  ## (i, i) when there is none.
-  let p = snapIndex(s, i)
-  var a = p
-  var b = p
-  while a > 0 and isIdentRune(runeBefore(s, a)): a = prevBoundary(s, a)
-  while b < s.len and isIdentRune(runeAt(s, b)): b = nextBoundary(s, b)
-  (a, b)
 
 func indentWidth*(line: string, tabWidth: int): int =
   ## Screen width of the leading whitespace; -1 if the line is blank.
@@ -440,6 +285,25 @@ proc fireChanged(m: CodeModel, first, oldN, newN: int) =
   let ls = m.listeners          # a listener may (un)subscribe while running
   for l in ls: l.cb(first, oldN, newN)
 
+proc noteChange(m: CodeModel, first, oldN, newN: int) =
+  ## Records a change of the lines. Several changes (the ops of one undo step)
+  ## merge into the one range that covers them all; `flushChanged` notifies.
+  if not m.hasPend:
+    m.pend = (first, oldN, newN)
+    m.hasPend = true
+    return
+  let (f1, o1, n1) = m.pend
+  let lower = min(f1, first)
+  let upper = max(f1 + n1, first + oldN)       # in the lines after the first change
+  m.pend = (lower, upper - lower - (n1 - o1), upper + (newN - oldN) - lower)
+
+proc flushChanged(m: CodeModel) =
+  ## Notifies the listeners of the recorded changes. Called once the selection
+  ## is final, so a listener sees a consistent model.
+  if m.hasPend:
+    m.hasPend = false
+    m.fireChanged(m.pend.first, m.pend.oldN, m.pend.newN)
+
 proc fireSel(m: CodeModel) =
   if m.onSelection != nil: m.onSelection()
 
@@ -474,48 +338,23 @@ proc selectAll*(m: CodeModel) = m.setSelection(sel((0, 0), m.docEnd))
 
 # -------------------------------------------------------------- raw editing
 
-proc deleteLines(lines: var seq[string], first, last: int) =
-  let n = last - first + 1
-  if n <= 0: return
-  for i in last + 1 ..< lines.len: lines[i - n] = move lines[i]
-  lines.setLen(lines.len - n)
-
-proc insertLines(lines: var seq[string], parts: seq[string], at: int) =
-  let n = parts.len
-  if n == 0: return
-  let old = lines.len
-  lines.setLen(old + n)
-  for i in countdown(old - 1, at): lines[i + n] = move lines[i]
-  for i in 0 ..< n: lines[at + i] = parts[i]
-
 proc spliceRaw(m: CodeModel, a, b: CodePos, repl: string): CodePos =
-  ## Replaces [a, b) by `repl` ("\n" separated, valid UTF-8), fires the change
-  ## and returns the end of the inserted text. No history, no selection.
+  ## Replaces [a, b) by `repl` ("\n" separated, valid UTF-8), records the
+  ## change (see `flushChanged`) and returns the end of the inserted text. No
+  ## history, no selection.
   let oldN = b.line - a.line + 1
-  if repl.find('\n') < 0:
-    if oldN == 1 and a.line == b.line:
-      let l = m.lines[a.line]
-      m.lines[a.line] = l[0 ..< a.col] & repl & l[b.col .. ^1]
-    else:
-      m.lines[a.line] = m.lines[a.line][0 ..< a.col] & repl & m.lines[b.line][b.col .. ^1]
-      m.lines.deleteLines(a.line + 1, b.line)
-    result = (a.line, a.col + repl.len)
-    m.fireChanged(a.line, oldN, 1)
-    return
-  var parts = splitOn(repl, '\n')
-  parts[0] = m.lines[a.line][0 ..< a.col] & parts[0]
+  let head = m.lines[a.line][0 ..< a.col]
+  let tail = m.lines[b.line][b.col .. ^1]
+  if oldN == 1 and repl.find('\n') < 0:           # the common keystroke
+    m.lines[a.line] = head & repl & tail
+    m.noteChange(a.line, 1, 1)
+    return (a.line, a.col + repl.len)
+  var parts = splitAtNewlines(repl)
+  parts[0] = head & parts[0]
   result = (a.line + parts.high, parts[^1].len)
-  parts[^1].add m.lines[b.line][b.col .. ^1]
-  let newN = parts.len
-  if newN == oldN:
-    for i in 0 ..< newN: m.lines[a.line + i] = move parts[i]
-  elif newN < oldN:
-    for i in 0 ..< newN: m.lines[a.line + i] = move parts[i]
-    m.lines.deleteLines(a.line + newN, b.line)
-  else:
-    for i in 0 ..< oldN: m.lines[a.line + i] = move parts[i]
-    m.lines.insertLines(parts[oldN .. ^1], b.line + 1)
-  m.fireChanged(a.line, oldN, newN)
+  parts[^1].add tail
+  m.lines.replaceRange(a.line, oldN, parts)
+  m.noteChange(a.line, oldN, parts.len)
 
 # ------------------------------------------------------------------ history
 
@@ -536,9 +375,21 @@ proc endGroup*(m: CodeModel) =
 
 func inGroup*(m: CodeModel): bool = m.groupDepth > 0
 
-proc pushStep(m: CodeModel, op: Op) =
-  m.undoStack.add UndoStep(ops: @[op], selBefore: m.sels)
+template withGroup*(m: CodeModel, body: untyped) =
+  ## Runs `body` as one undo step; the group is closed even if `body` raises.
+  m.beginGroup()
+  try: body
+  finally: m.endGroup()
+
+proc discardRedo(m: CodeModel) =
+  ## A new edit ends the redo branch; a save point inside it becomes unreachable.
+  if m.redoStack.len == 0: return
+  if m.savedStep > m.undoStack.len: m.savedStep = -1
   m.redoStack.setLen 0
+
+proc pushStep(m: CodeModel, op: Op) =
+  m.discardRedo()
+  m.undoStack.add UndoStep(ops: @[op], selBefore: m.sels)
   if m.undoStack.len > m.maxUndo:
     m.undoStack.delete 0
     if m.savedStep >= 0: dec m.savedStep
@@ -556,13 +407,13 @@ proc recordOp(m: CodeModel, op: Op, kind: EditKind, a: CodePos, cls: CharClass) 
       m.pushStep op
       m.newStepPending = false
     else:
+      m.discardRedo()
       m.undoStack[^1].ops.add op
-      m.redoStack.setLen 0
     merged = true
   elif kind != ekOther and m.lastKind == kind and m.undoStack.len > 0 and
        m.redoStack.len == 0:
     let ok = case kind
-      of ekTyping: op.removed.len == 0 and a == m.lastPos and cls == m.lastClass
+      of ekTyping: op.removed.find('\n') < 0 and a == m.lastPos and cls == m.lastClass
       of ekDelBack: op.inserted.len == 0 and op.removed.find('\n') < 0 and
                     endOfInsert(a, op.removed) == m.lastPos
       of ekDelFwd: op.inserted.len == 0 and op.removed.find('\n') < 0 and a == m.lastPos
@@ -596,16 +447,21 @@ proc edit*(m: CodeModel, a, b: CodePos, s: string, kind: EditKind,
   discard m.spliceRaw(a, b, ins)
   m.sels = @[m.snapSel(selAfter)]
   m.undoStack[^1].selAfter = m.sels
+  m.flushChanged()
   m.fireSel()
   true
+
+proc insertionEnd*(start: CodePos, s: string): CodePos =
+  ## Where the end of `s` lies after `edit` inserted it at `start` (line
+  ## endings normalised and invalid UTF-8 repaired the way `edit` does).
+  endOfInsert(start, normalizeInput(s))
 
 proc replace*(m: CodeModel, a, b: CodePos, s: string, kind = ekOther): bool =
   ## `edit` with the caret placed after the inserted text.
   var a = m.snapPos(a)
   var b = m.snapPos(b)
   if b < a: swap a, b
-  let e = endOfInsert(a, normalizeInput(s))
-  m.edit(a, b, s, kind, sel(e))
+  m.edit(a, b, s, kind, sel(insertionEnd(a, s)))
 
 proc insert*(m: CodeModel, p: CodePos, s: string): bool = m.replace(p, p, s)
 proc delete*(m: CodeModel, a, b: CodePos): bool = m.replace(a, b, "")
@@ -673,6 +529,7 @@ proc undo*(m: CodeModel): bool =
   for i in 0 ..< m.sels.len: m.sels[i] = m.snapSel(m.sels[i])
   m.redoStack.add st
   m.fModified = m.savedStep != m.undoStack.len
+  m.flushChanged()
   m.fireSel()
   true
 
@@ -685,6 +542,7 @@ proc redo*(m: CodeModel): bool =
   for i in 0 ..< m.sels.len: m.sels[i] = m.snapSel(m.sels[i])
   m.undoStack.add st
   m.fModified = m.savedStep != m.undoStack.len
+  m.flushChanged()
   m.fireSel()
   true
 
@@ -738,8 +596,7 @@ proc loadText*(m: CodeModel, data: string): LoadReport =
     start = e + 1
   if fixLines:
     for i in 0 ..< newLines.len:
-      if firstInvalidUtf8(newLines[i]) >= 0:
-        newLines[i] = fixUtf8(newLines[i], invalid)
+      newLines[i] = repairUtf8(newLines[i], invalid)
   m.lines = move newLines
   m.fLineEnding = if crlf > lf: leCRLF else: leLF
   m.fMixed = crlf > 0 and lf > 0

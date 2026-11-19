@@ -320,3 +320,10 @@ suite "memomodel editing":
     check m.text == "x\ncd\n12"
     m.insertLine(3, "")
     check m.text == "x\ncd\n12"
+
+test "setText reports whether the text changed":
+  let m = newMemoModel("a\nb")
+  check not m.setText("a\r\nb")           # compared after normalising
+  check m.setText("a\nc")
+  check m.setText("")
+  check not m.setText("")

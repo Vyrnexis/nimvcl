@@ -1,6 +1,6 @@
 ## EditModel tests: pure Nim, no SDL.
 import std/[unittest, unicode]
-import nimvcl/controls/editmodel
+import nimvcl/controls/[editmodel, textutil]
 
 proc mk(s: string, caret = -1): EditModel =
   result = newEditModel(s)
@@ -402,3 +402,29 @@ suite "editmodel: password":
     let a = Rune('*')
     for i in [0, 1, 3, 6]:
       check m.toModelIndex(m.toDisplayIndex(i, a), a) == i
+
+suite "textutil":
+  test "invalid UTF-8 is dropped or replaced":
+    check cleanUtf8("a\xFFb\xC3\xA9\xE2\x82") == "ab\xC3\xA9"
+    var n = 0
+    check repairUtf8("a\xFFb", n) == "a\xEF\xBF\xBDb" and n == 1
+    check cleanUtf8("fine é") == "fine é"
+    check firstInvalidUtf8("ok\xC0\x80") == 2
+
+  test "spliceSeq moves the tail once and keeps or resets the entries":
+    var a = @[1, 2, 3, 4, 5]
+    a.spliceSeq(1, 2, 4)                       # 2, 3 -> four entries
+    check a == @[1, 2, 3, 0, 0, 4, 5]
+    a.spliceSeq(1, 4, 1)
+    check a == @[1, 2, 4, 5]
+    a.respliceSeq(1, 1, 2)
+    check a == @[1, 0, 0, 4, 5]
+    var l = @["a", "b", "c"]
+    l.replaceRange(1, 1, ["x", "y", "z"])
+    check l == @["a", "x", "y", "z", "c"]
+
+  test "word movement is shared by every model":
+    check wordLeftIn("foo  bar", 8) == 5
+    check wordRightIn("foo  bar", 0) == 5
+    check wordRangeIn("foo  bar", 4) == (3, 5)
+    check identRangeIn("a.foo_1", 4) == (2, 7)

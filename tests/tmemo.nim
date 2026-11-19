@@ -149,6 +149,14 @@ suite "memo":
     f.key(keyDown); f.key(keyDown); f.key(keyDown)
     check m.caretPos == (2, 8)
 
+  test "Shift+Backspace deletes like Backspace":
+    let f = newShown()
+    let m = f.mkMemo("abc")
+    m.setFocus()
+    m.caretPos = (0, 3)
+    f.key(keyBackspace, {ssShift})
+    check m.text == "ab"
+
   test "backspace joins lines, delete pulls the next line up":
     let f = newShown()
     let m = f.mkMemo("ab\ncd")

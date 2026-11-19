@@ -17,8 +17,8 @@
 ## * Positions are `CodePos` with byte columns, always on codepoint
 ##   boundaries.
 
-import std/[unicode, strutils]
-import ./[codemodel, minire]
+import std/strutils
+import ./[codemodel, minire, textutil]
 export minire.RegexError
 
 type
@@ -40,13 +40,6 @@ type
 
 proc memchr(s: pointer, c: cint, n: csize_t): pointer {.importc, header: "<string.h>".}
 
-func runeAt(s: string, i: int): Rune =
-  var r: Rune
-  fastRuneAt(s, i, r, false)
-  r
-
-func runeBefore(s: string, i: int): Rune = runeAt(s, prevBoundary(s, i))
-
 func isWordCharAt(s: string, i: int, before: bool): bool =
   if before:
     if i <= 0: return false
@@ -60,8 +53,7 @@ proc newSearcher*(pattern: string, opts = SearchOptions()): Searcher =
   ## pattern is malformed.
   result = Searcher(pattern: pattern, opts: opts)
   if opts.regex:
-    let p = if opts.wholeWord: "\\b(?:" & pattern & ")\\b" else: pattern
-    result.re = compileRegex(p, opts.ignoreCase)
+    result.re = compileRegex(pattern, opts.ignoreCase, opts.wholeWord)
   else:
     result.lowered = if opts.ignoreCase: pattern.toLowerAscii else: pattern
     if pattern.len > 0:
@@ -136,7 +128,7 @@ proc lastInLine(s: Searcher, line: string, startLimit: int, lm: var LineMatch): 
     if cur.a >= startLimit: break
     lm = cur
     result = true
-    from0 = if cur.b > cur.a: cur.b else: nextBoundary(line, cur.a + 1)
+    from0 = if cur.b > cur.a: cur.b else: nextBoundary(line, cur.a)
     if cur.b == cur.a and cur.a >= line.len: break
 
 # ------------------------------------------------------------- model search
@@ -226,43 +218,27 @@ proc replaceMatch*(s: Searcher, m: CodeModel, mt: Match, replacement: string): b
 
 proc replaceAll*(s: Searcher, m: CodeModel, replacement: string,
                  a: CodePos = (0, 0), b: CodePos = (-1, -1)): int =
-  ## Replaces every match inside [a, b] (default: everything) as ONE undo step
-  ## and returns how many were replaced. Nothing happens when the model is
-  ## read-only. The selection is left where the edits put it.
+  ## Replaces every match inside [a, b] (default: everything) as ONE edit (one
+  ## undo step, one change notification) and returns how many matches were
+  ## replaced. Nothing happens when the model is read-only. The selection is
+  ## left where it was.
   if s.pattern.len == 0 or m.readOnly: return 0
+  let e = if b.line < 0: m.docEnd else: m.snapPos(b)
   let st = m.snapPos(a)
-  var endLine = if b.line < 0: m.docEnd.line else: m.snapPos(b).line
-  let endCol = if b.line < 0: m.docEnd.col else: m.snapPos(b).col
-  var cur = st.line
-  m.beginGroup()
-  try:
-    while cur <= endLine and cur < m.lineCount:
-      let ln = m.line(cur)
-      var parts = ""
-      var first = -1
-      var lastEnd = 0
-      var count = 0
-      var lm: LineMatch
-      var c = if cur == st.line: st.col else: 0
-      while c <= ln.len and s.matchInLine(ln, c, lm):
-        if cur == endLine and lm.b > endCol: break
-        if first < 0: first = lm.a
-        else: parts.add ln[lastEnd ..< lm.a]
-        parts.add(if s.opts.regex: expandReplacement(lm.rm, ln, replacement) else: replacement)
-        lastEnd = lm.b
-        inc count
-        if lm.b > lm.a: c = lm.b
-        else: c = if lm.a >= ln.len: ln.len + 1 else: nextBoundary(ln, lm.a)
-      if count == 0:
-        inc cur
-        continue
-      let before = m.lineCount
-      let a0: CodePos = (cur, first)
-      let b0: CodePos = (cur, lastEnd)
-      if m.replaceInGroup(a0, b0, parts):
-        result += count
-      let extra = m.lineCount - before
-      endLine += extra
-      cur += 1 + extra
-  finally:
-    m.endGroup()
+  var spanStart, lastEnd: CodePos       # from the first match to the end of the last
+  var outText = ""
+  var lm: LineMatch
+  for l in st.line .. e.line:
+    let ln = m.line(l)
+    var c = if l == st.line: st.col else: 0
+    while c <= ln.len and s.matchInLine(ln, c, lm):
+      if l == e.line and lm.b > e.col: break
+      if result == 0: spanStart = (l, lm.a)
+      else: outText.add m.textBetween(lastEnd, (l, lm.a))
+      outText.add(if s.opts.regex: expandReplacement(lm.rm, ln, replacement)
+                  else: replacement)
+      lastEnd = (l, lm.b)
+      inc result
+      if lm.b > lm.a: c = lm.b
+      else: c = if lm.a >= ln.len: ln.len + 1 else: nextBoundary(ln, lm.a)
+  if result > 0: discard m.replaceInGroup(spanStart, lastEnd, outText)

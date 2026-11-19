@@ -283,6 +283,89 @@ suite "codemodel undo":
     discard m.undo()
     check m.text == "abc\ndef" and m.selections.len == 2
 
+suite "codemodel: save point, notifications, groups":
+  test "a save point inside a discarded redo branch is unreachable":
+    let m = mk("")
+    discard m.insert((0, 0), "a")
+    m.markSaved()
+    discard m.undo()
+    discard m.insert((0, 0), "x")
+    discard m.replace((0, 1), (0, 1), "yy")
+    check m.text == "xyy" and m.modified
+    discard m.undo()
+    check m.text == "x" and m.modified          # differs from the saved "a"
+    discard m.undo()
+    check m.modified
+    discard m.redo()
+    discard m.redo()
+    check m.modified
+
+  test "a save point still reachable through undo and redo":
+    let m = mk("")
+    discard m.insert((0, 0), "a")
+    m.markSaved()
+    discard m.insert((0, 1), " b")
+    discard m.undo()
+    check not m.modified
+    discard m.redo()
+    check m.modified
+    discard m.undo()
+    check not m.modified
+
+  test "listeners see the final selection, and a group notifies once per undo":
+    let m = mk("abc\ndef\nghi")
+    var seen: seq[CodePos]
+    var calls = 0
+    discard m.addChangeListener(proc(f, o, n: int) =
+      inc calls
+      seen.add m.caret
+      check m.caret.line < m.lineCount and m.caret.col <= m.lineLen(m.caret.line))
+    m.setCaret((2, 3))
+    discard m.delete((0, 0), (2, 3))             # caret goes to (0, 0)
+    check seen == @[(0, 0)]
+    discard m.undo()
+    check seen[^1] == (2, 3)
+    m.beginGroup()
+    discard m.replaceInGroup((0, 0), (0, 1), "X")
+    discard m.replaceInGroup((2, 0), (2, 1), "Y\nZ")
+    m.endGroup()
+    calls = 0
+    seen.setLen 0
+    var ev: seq[(int, int, int)]
+    discard m.addChangeListener(proc(f, o, n: int) = ev.add (f, o, n))
+    discard m.undo()
+    check calls == 1 and m.text == "abc\ndef\nghi"
+    check ev == @[(0, 4, 3)]                      # covers both edits
+    discard m.redo()
+    check calls == 2 and m.text == "Xbc\ndef\nY\nZhi"
+    check ev[^1] == (0, 3, 4)
+
+  test "withGroup closes the group when the body raises":
+    let m = mk("a")
+    try:
+      m.withGroup:
+        discard m.insert((0, 1), "b")
+        raise newException(ValueError, "boom")
+    except ValueError: discard
+    check not m.inGroup
+    discard m.insert((0, 2), "c")
+    discard m.undo()
+    check m.text == "ab"
+
+  test "overwrite typing is one undo step":
+    let m = mk("xyz")
+    for i in 0 ..< 3: discard m.replace((0, i), (0, i + 1), "abc"[i .. i], ekTyping)
+    check m.text == "abc"
+    discard m.undo()
+    check m.text == "xyz" and not m.canUndo
+
+  test "insertionEnd matches what edit does with CR and bad bytes":
+    let m = mk("")
+    check insertionEnd((0, 0), "a\r\nb") == (1, 1)
+    check insertionEnd((0, 0), "\xFF") == (0, 3)
+    discard m.edit((0, 0), (0, 0), "\xFF", ekOther, sel(insertionEnd((0, 0), "\xFF")))
+    check m.caret == (0, 3)
+
 suite "codemodel fuzz":
   test "random edits match a flat string; undo/redo are exact":
     for seed in 1 .. 200:

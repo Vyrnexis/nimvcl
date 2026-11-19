@@ -25,7 +25,7 @@
 import std/[algorithm]
 import ../graphics/[color, font]
 import ../core/theme
-import ./codemodel
+import ./[codemodel, textutil]
 
 type
   TokenKind* = enum
@@ -81,22 +81,11 @@ method commentToken*(h: Highlighter): string {.base.} =
 
 # ------------------------------------------------------------------- cache
 
-proc spliceSeq[T](s: var seq[T], first, oldN, newN: int) =
-  ## Replaces s[first ..< first+oldN] by `newN` default entries.
-  let tail = s.len - (first + oldN)
-  if newN > oldN:
-    s.setLen s.len + (newN - oldN)
-    for i in countdown(tail - 1, 0): s[first + newN + i] = move s[first + oldN + i]
-  elif newN < oldN:
-    for i in 0 ..< tail: s[first + newN + i] = move s[first + oldN + i]
-    s.setLen s.len - (oldN - newN)
-  for i in first ..< first + newN: reset s[i]
-
 proc modelChanged(h: Highlighter, first, oldN, newN: int) =
-  h.toks.spliceSeq(first, oldN, newN)
-  h.endState.spliceSeq(first, oldN, newN)
-  h.startUsed.spliceSeq(first, oldN, newN)
-  h.lexed.spliceSeq(first, oldN, newN)
+  h.toks.respliceSeq(first, oldN, newN)
+  h.endState.respliceSeq(first, oldN, newN)
+  h.startUsed.respliceSeq(first, oldN, newN)
+  h.lexed.respliceSeq(first, oldN, newN)
   h.clean = min(h.clean, first)
 
 proc resetCache(h: Highlighter) =

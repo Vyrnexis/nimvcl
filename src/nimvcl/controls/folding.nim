@@ -13,17 +13,19 @@
 ##   `#endregion`, `// region`, ...), nested; the end marker line is hidden.
 ##
 ## Incremental: the per-line facts (indent width, brackets, marker) are cached
-## and only the lines named by a model change notification are recomputed;
-## the region list is rebuilt lazily from those facts by one cheap stack pass
-## (integers only), so it costs a few milliseconds on 200k lines and does not
-## re-read any text. Bracket facts also depend on the lexer state, so a line
-## is recomputed when its start state changed (e.g. a `#[` was opened above).
+## and only the lines named by a model change notification are recomputed.
+## An edit that keeps the line count and leaves every recomputed fact as it
+## was (typing inside a line) keeps the region list as it is. Otherwise the
+## list is rebuilt lazily from the facts by one stack pass (integers only),
+## which does not re-read any text. Bracket facts also depend on the lexer
+## state, so a line is recomputed when its start state changed (e.g. a `#[`
+## was opened above); the check stops where the states match again.
 ##
 ## Collapsed headers are remembered by line number and shifted by edits above
 ## them; a header that stops being a fold start is expanded automatically.
 
 import std/[algorithm, strutils]
-import ./[codemodel, highlight]
+import ./[codemodel, highlight, textutil]
 
 type
   FoldRegion* = object
@@ -48,8 +50,11 @@ type
     mark: seq[int8]
     fRegions: seq[FoldRegion]
     dirty: bool
+    structural: bool              ## the facts may differ from those the regions come from
+    dirtyLo, dirtyHi: int         ## lines whose facts may need recomputing
     collapsed: seq[int]           ## sorted header lines
     hiddenCache: seq[tuple[a, b: int]]
+    hiddenBefore: seq[int]        ## hidden lines in the ranges before range k
     hiddenDirty: bool
     markerStarts*, markerEnds*: seq[string]
     onChanged*: proc()            ## regions or collapsed set changed
@@ -59,8 +64,10 @@ type
 func firstNonSpace(s: string): int =
   while result < s.len and s[result] in {' ', '\t'}: inc result
 
-proc computeLine(f: FoldMap, i: int) =
+proc computeLine(f: FoldMap, i: int): bool =
+  ## Recomputes the facts of line `i`; true when any of them changed.
   let line = f.model.line(i)
+  let (oldInd, oldMark, oldBrk, oldValid) = (f.ind[i], f.mark[i], f.brk[i], f.valid[i])
   f.ind[i] = int32(indentWidth(line, f.model.tabWidth))
   f.mark[i] = 0
   if fkMarkers in f.fKinds:
@@ -86,16 +93,7 @@ proc computeLine(f: FoldMap, i: int) =
       for c in line:
         if c in {'{', '}', '[', ']', '(', ')'}: f.brk[i].add c
   f.valid[i] = true
-
-proc spliceSeq[T](s: var seq[T], first, oldN, newN: int) =
-  let tail = s.len - (first + oldN)
-  if newN > oldN:
-    s.setLen s.len + (newN - oldN)
-    for i in countdown(tail - 1, 0): s[first + newN + i] = move s[first + oldN + i]
-  elif newN < oldN:
-    for i in 0 ..< tail: s[first + newN + i] = move s[first + oldN + i]
-    s.setLen s.len - (oldN - newN)
-  for i in first ..< first + newN: reset s[i]
+  not oldValid or oldInd != f.ind[i] or oldMark != f.mark[i] or oldBrk != f.brk[i]
 
 proc resetCache(f: FoldMap) =
   let n = f.model.lineCount
@@ -105,17 +103,30 @@ proc resetCache(f: FoldMap) =
   f.brk = newSeq[string](n)
   f.mark = newSeq[int8](n)
   f.dirty = true
+  f.structural = true
+  f.dirtyLo = 0
+  f.dirtyHi = n - 1
   f.hiddenDirty = true
 
 proc modelChanged(f: FoldMap, first, oldN, newN: int) =
-  f.ind.spliceSeq(first, oldN, newN)
-  f.valid.spliceSeq(first, oldN, newN)
-  f.brkState.spliceSeq(first, oldN, newN)
-  f.brk.spliceSeq(first, oldN, newN)
-  f.mark.spliceSeq(first, oldN, newN)
+  let delta = newN - oldN
+  if delta == 0:
+    # the same lines, new text: keep the old facts to see whether they change
+    for i in first ..< first + newN: f.valid[i] = false
+  else:
+    f.ind.respliceSeq(first, oldN, newN)
+    f.valid.respliceSeq(first, oldN, newN)
+    f.brkState.respliceSeq(first, oldN, newN)
+    f.brk.respliceSeq(first, oldN, newN)
+    f.mark.respliceSeq(first, oldN, newN)
+    f.structural = true
+  if f.dirtyHi >= 0:                # shift the pending range past this change
+    if f.dirtyLo >= first + oldN: f.dirtyLo += delta
+    if f.dirtyHi >= first + oldN: f.dirtyHi += delta
+  f.dirtyLo = min(f.dirtyLo, first)
+  f.dirtyHi = max(f.dirtyHi, first + newN - 1)
   f.dirty = true
   f.hiddenDirty = true
-  let delta = newN - oldN
   var keep: seq[int]
   for s in f.collapsed:
     if s < first: keep.add s
@@ -125,13 +136,26 @@ proc modelChanged(f: FoldMap, first, oldN, newN: int) =
 
 # --------------------------------------------------------------- regions
 
-proc rebuild(f: FoldMap) =
+proc refreshFacts(f: FoldMap): bool =
+  ## Recomputes the facts of the lines that changed; true when any fact (or the
+  ## line structure) differs from what the region list was built from.
+  result = f.structural or f.hook != nil
   let n = f.model.lineCount
-  for i in 0 ..< n:
-    if not f.valid[i]: f.computeLine(i)
-    elif fkBrackets in f.fKinds and f.hl != nil and
-         f.brkState[i] != int32(f.hl.stateAtLineStart(i)):
-      f.computeLine(i)
+  let byState = fkBrackets in f.fKinds and f.hl != nil
+  var i = max(f.dirtyLo, 0)
+  while i < n:
+    if not f.valid[i] or (byState and f.brkState[i] != int32(f.hl.stateAtLineStart(i))):
+      if f.computeLine(i): result = true
+    elif i > f.dirtyHi: break          # unchanged text and state: the rest is as well
+    inc i
+  f.dirtyLo = high(int)
+  f.dirtyHi = -1
+  f.structural = false
+
+proc rebuild(f: FoldMap) =
+  f.dirty = false
+  if not f.refreshFacts(): return
+  let n = f.model.lineCount
   var all: seq[FoldRegion]
   if fkIndent in f.fKinds:
     var stack: seq[tuple[line, indent: int]]
@@ -178,7 +202,6 @@ proc rebuild(f: FoldMap) =
   for r in all:           # one region per header: the largest
     if f.fRegions.len == 0 or f.fRegions[^1].startLine != r.startLine:
       f.fRegions.add r
-  f.dirty = false
   # headers that stopped being fold starts are expanded
   var keep: seq[int]
   for s in f.collapsed:
@@ -256,6 +279,11 @@ proc hiddenRanges*(f: FoldMap): lent seq[tuple[a, b: int]] =
       if f.hiddenCache.len > 0 and a <= f.hiddenCache[^1].b:
         if e > f.hiddenCache[^1].b: f.hiddenCache[^1].b = e
       else: f.hiddenCache.add (a, e)
+    f.hiddenBefore.setLen f.hiddenCache.len
+    var sum = 0
+    for k, r in f.hiddenCache:
+      f.hiddenBefore[k] = sum
+      sum += r.b - r.a + 1
     f.hiddenDirty = false
   f.hiddenCache
 
@@ -282,34 +310,51 @@ proc visibleLineCount*(f: FoldMap): int =
   result = f.model.lineCount
   for r in f.hiddenRanges: result -= r.b - r.a + 1
 
+proc hiddenIndex(h: seq[tuple[a, b: int]], line: int): int =
+  ## Index of the range containing `line`, or -1.
+  let k = h.lowerBound(line, proc(r: tuple[a, b: int], v: int): int =
+    if r.b < v: -1 else: 0)
+  if k < h.len and h[k].a <= line: k else: -1
+
 proc lineToRow*(f: FoldMap, line: int): int =
   ## Row of `line` in the folded view; a hidden line maps to the row of the
   ## header that hides it.
-  result = line
-  for r in f.hiddenRanges:
-    if r.a > line: break
-    result -= min(r.b, line) - r.a + 1
+  let h = f.hiddenRanges
+  let k = h.lowerBound(line, proc(r: tuple[a, b: int], v: int): int =
+    if r.a <= v: -1 else: 0)           # k = ranges starting at or before `line`
+  if k == 0: return line
+  result = line - f.hiddenBefore[k - 1] - (min(h[k - 1].b, line) - h[k - 1].a + 1)
 
 proc rowToLine*(f: FoldMap, row: int): int =
   ## First document line shown on `row` of the folded view.
+  let h = f.hiddenRanges
+  # the first row hidden by range k, a - hiddenBefore, never decreases with k
+  var lo = 0
+  var hi = h.len
+  while lo < hi:
+    let mid = (lo + hi) shr 1
+    if h[mid].a - f.hiddenBefore[mid] <= row: lo = mid + 1 else: hi = mid
   result = row
-  for r in f.hiddenRanges:
-    if r.a <= result: result += r.b - r.a + 1
-    else: break
+  if lo > 0: result += f.hiddenBefore[lo - 1] + h[lo - 1].b - h[lo - 1].a + 1
   result = min(result, f.model.lineCount - 1)
 
 proc nextVisibleLine*(f: FoldMap, line: int): int =
   ## The visible line after `line`, or -1 at the end.
+  let h = f.hiddenRanges
   var l = line + 1
-  for r in f.hiddenRanges:
-    if r.a <= l and l <= r.b: l = r.b + 1
+  var k = h.hiddenIndex(l)
+  while k >= 0:                        # adjacent ranges chain
+    l = h[k].b + 1
+    k = h.hiddenIndex(l)
   if l >= f.model.lineCount: -1 else: l
 
 proc prevVisibleLine*(f: FoldMap, line: int): int =
+  let h = f.hiddenRanges
   var l = line - 1
-  for i in countdown(f.hiddenRanges.high, 0):
-    let r = f.hiddenRanges[i]
-    if r.a <= l and l <= r.b: l = r.a - 1
+  var k = h.hiddenIndex(l)
+  while k >= 0:
+    l = h[k].a - 1
+    k = h.hiddenIndex(l)
   l
 
 # ----------------------------------------------------------------- set up
@@ -339,6 +384,7 @@ proc setKinds*(f: FoldMap, k: set[FoldKind]) =
 proc setHook*(f: FoldMap, h: FoldHook) =
   f.hook = h
   f.dirty = true
+  f.structural = true
 
 proc invalidateAll*(f: FoldMap) =
   ## After `tabWidth`, the markers or the language changed.

@@ -1,6 +1,6 @@
 ## Find / replace over a CodeModel, and the regex engine behind it.
 
-import std/[unittest, strutils, random]
+import std/[unittest, strutils, random, times]
 import nimvcl/controls/[codemodel, search, minire]
 
 proc rx(pat: string, ci = false): Regex = compileRegex(pat, ci)
@@ -235,3 +235,68 @@ suite "minire: required literal prefilter":
     check rmatch("foo\\d+bar", "x foo12bar") == "foo12bar"
     check rmatch("[a-z]+_end", "ab no_end") == "no_end"
     check rmatch("[a-z]+_end", "ab no_en") == "<none>"
+
+suite "minire: runaway patterns and empty loops":
+  test "an exponential pattern finishes quickly (one budget per search)":
+    let t0 = cpuTime()
+    check rmatch("(a|aa)+$", 'a'.repeat(200) & "X") == "<none>"
+    check rmatch("(a*)*b", 'a'.repeat(300)) == "<none>"
+    check rmatch("(x+x+)+y", 'x'.repeat(200)) == "<none>"
+    check cpuTime() - t0 < 5.0
+    check rmatch("(a|aa)+$", "aaaaaaaaaaa") == "aaaaaaaaaaa"
+
+  test "a loop whose body matches the empty string still matches":
+    check rmatch("(a*)*b", "b") == "b"
+    check rmatch("(a*)*b", "aab") == "aab"
+    check rmatch("(x?)+y", "y") == "y"
+    check rmatch("(a|b*)*c", "abc") == "abc"
+    check rmatch("(\\s*\\w*)*;", "ab cd ;") == "ab cd ;"
+    check rmatch("(\\d*,?)+x", "1,22,x") == "1,22,x"
+
+  test "captures survive memoisation":
+    var m: RegexMatch
+    check rx("(a+)(b+)").findAt("xxaabbb", 0, m)
+    check m.groups[1] == (2, 4) and m.groups[2] == (4, 7)
+
+  test "oversized repeats are refused before they are built":
+    expect RegexError: discard rx("((ab){1000}){1000}")
+
+suite "search: whole word, empty matches, replace all":
+  test "regex whole word leaves punctuation edges alone":
+    let m = mk("foo(x foo() food")
+    let s = newSearcher("foo\\(", SearchOptions(regex: true, wholeWord: true))
+    check s.ms(m) == @["0:0-4", "0:6-10"]
+    let w = newSearcher("foo|food", SearchOptions(regex: true, wholeWord: true))
+    check w.ms(mk("food foo foods")) == @["0:0-4", "0:5-8"]
+
+  test "findPrev visits every empty match":
+    let m = mk("foo bar")
+    let s = newSearcher("\\b", SearchOptions(regex: true))
+    var f: Match
+    check s.findPrev(m, (0, 6), f) and f.a == (0, 4)
+    check s.findPrev(m, f.a, f) and f.a == (0, 3)
+
+  test "replace all with a newline in the replacement is one edit":
+    let m = mk(";a;b;c;\n;")
+    let ver = m.version
+    var fired = 0
+    discard m.addChangeListener(proc(f, o, n: int) = inc fired)
+    let s = newSearcher(";")
+    check s.replaceAll(m, ";\n") == 5
+    check m.text == ";\na;\nb;\nc;\n\n;\n"
+    check fired == 1 and m.version == ver + 1
+    check m.undo()
+    check m.text == ";a;b;c;\n;" and not m.canUndo
+
+  test "replace all counts replacements that change nothing":
+    let m = mk("a b a")
+    check newSearcher("a").replaceAll(m, "a") == 2
+
+  test "replace all scales linearly with a line-adding replacement":
+    var big = newStringOfCap(400_000)
+    for i in 0 ..< 40_000: big.add "x;\n"
+    let m = mk(big)
+    let t0 = cpuTime()
+    check newSearcher(";").replaceAll(m, ";\n") == 40_000
+    check m.lineCount == 80_001
+    check cpuTime() - t0 < 5.0

@@ -19,11 +19,12 @@
 ##   setText, clear).
 
 import std/unicode
+import ./textutil
+export textutil.snapIndex, textutil.prevBoundary, textutil.nextBoundary,
+       textutil.runeCount
 
 type
   EditCharCase* = enum ecNormal, ecUpperCase, ecLowerCase
-
-  WordClass = enum wcSpace, wcWord, wcOther
 
   OpKind = enum opNone, opType, opDelBack, opDelFwd, opOther
 
@@ -45,51 +46,7 @@ type
 
 const MaxUndoSteps = 500
 
-# ------------------------------------------------------------ utf-8 helpers
-
-func isContinuation(b: char): bool {.inline.} = (ord(b) and 0xC0) == 0x80
-
-func snapIndex*(s: string, i: int): int =
-  ## Clamps to 0 .. s.len and moves back to a codepoint boundary.
-  result = clamp(i, 0, s.len)
-  while result > 0 and result < s.len and isContinuation(s[result]): dec result
-
-func prevBoundary*(s: string, i: int): int =
-  result = i - 1
-  while result > 0 and isContinuation(s[result]): dec result
-  if result < 0: result = 0
-
-func nextBoundary*(s: string, i: int): int =
-  if i >= s.len: return s.len
-  result = i + 1
-  while result < s.len and isContinuation(s[result]): inc result
-
-func runeAt(s: string, i: int): Rune =
-  var r: Rune
-  fastRuneAt(s, i, r, false)
-  r
-
-func runeBefore(s: string, i: int): Rune = runeAt(s, prevBoundary(s, i))
-
-func classOf(r: Rune): WordClass =
-  if r.isWhiteSpace: wcSpace
-  elif r.isAlpha or (int(r) < 128 and char(int(r)) in {'0'..'9', '_'}): wcWord
-  else: wcOther
-
-func runeCount*(s: string): int = unicode.runeLen(s)
-
-func cleanUtf8(s: string): string =
-  ## Drops invalid UTF-8 bytes.
-  if validateUtf8(s) < 0: return s
-  var i = 0
-  while i < s.len:
-    let b = ord(s[i])
-    let n = if b < 0x80: 1 elif b >= 0xF0: 4 elif b >= 0xE0: 3 elif b >= 0xC2: 2 else: 0
-    if n > 0 and i + n <= s.len and validateUtf8(s[i ..< i + n]) < 0:
-      result.add s[i ..< i + n]
-      i += n
-    else:
-      inc i
+# ------------------------------------------------------------------ helpers
 
 func sanitize(s: string): string =
   ## Removes control characters (newlines, tabs, DEL, C1) and invalid UTF-8.
@@ -103,14 +60,6 @@ func applyCase(s: string, cc: EditCharCase): string =
   of ecNormal: s
   of ecUpperCase: s.toUpper
   of ecLowerCase: s.toLower
-
-func truncateRunes(s: string, n: int): string =
-  var count = 0
-  var i = 0
-  while i < s.len and count < n:
-    i = nextBoundary(s, i)
-    inc count
-  s[0 ..< i]
 
 # ------------------------------------------------------------ construction
 
@@ -152,41 +101,17 @@ func nextRune*(m: EditModel, i: int): int = nextBoundary(m.fText, snapIndex(m.fT
 func wordLeftOf*(m: EditModel, i: int): int =
   ## Start of the word before `i` (skips spaces, then one run of letters/digits
   ## or one run of punctuation).
-  let s = m.fText
-  result = snapIndex(s, i)
-  while result > 0 and classOf(runeBefore(s, result)) == wcSpace:
-    result = prevBoundary(s, result)
-  if result > 0:
-    let cls = classOf(runeBefore(s, result))
-    while result > 0 and classOf(runeBefore(s, result)) == cls:
-      result = prevBoundary(s, result)
+  wordLeftIn(m.fText, i)
 
 func wordRightOf*(m: EditModel, i: int): int =
   ## Start of the next word after `i` (skips one run of letters/digits or
   ## punctuation, then spaces).
-  let s = m.fText
-  result = snapIndex(s, i)
-  if result < s.len:
-    let cls = classOf(runeAt(s, result))
-    if cls != wcSpace:
-      while result < s.len and classOf(runeAt(s, result)) == cls:
-        result = nextBoundary(s, result)
-  while result < s.len and classOf(runeAt(s, result)) == wcSpace:
-    result = nextBoundary(s, result)
+  wordRightIn(m.fText, i)
 
 func wordRangeAt*(m: EditModel, i: int): (int, int) =
   ## Byte range of the run (letters/digits, spaces, or punctuation) at `i`.
   ## At the end of the text the run before it is used. (0, 0) when empty.
-  let s = m.fText
-  if s.len == 0: return (0, 0)
-  var p = snapIndex(s, i)
-  if p >= s.len: p = prevBoundary(s, s.len)
-  let cls = classOf(runeAt(s, p))
-  var a = p
-  while a > 0 and classOf(runeBefore(s, a)) == cls: a = prevBoundary(s, a)
-  var b = nextBoundary(s, p)
-  while b < s.len and classOf(runeAt(s, b)) == cls: b = nextBoundary(s, b)
-  (a, b)
+  wordRangeIn(m.fText, i)
 
 # ------------------------------------------------------- caret / selection
 
@@ -271,7 +196,7 @@ proc insert*(m: EditModel, s: string): bool =
   if ins.len == 0: return false
   let hadSel = m.hasSelection
   let single = runeCount(ins) == 1
-  let isWord = single and classOf(runeAt(ins, 0)) == wcWord
+  let isWord = single and charClass(runeAt(ins, 0)) == ccWord
   let coalesce = not hadSel and single and m.lastKind == opType and
                  not (isWord and not m.lastWasWord)
   if not coalesce: m.pushUndo()

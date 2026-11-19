@@ -8,11 +8,18 @@
 ## groups `( )` and `(?: )`, alternation `|`, greedy and lazy quantifiers
 ## `* + ? {n} {n,} {n,m}` (`*?`, `+?`, `??`, `{n,m}?`), escapes `\t \n \r \xHH
 ## \uHHHH` and `\` + punctuation. Not supported: backreferences, lookaround,
-## possessive quantifiers. A runaway pattern (exponential backtracking) gives
-## up after a step budget and reports no match instead of hanging.
+## possessive quantifiers. Matching is linear in (pattern size x line length):
+## the VM remembers which (instruction, position) states it has already
+## explored, so alternation and nested quantifiers cannot backtrack
+## exponentially, and a loop whose body matched the empty string stops there.
+## A generous step budget remains as a last-resort guard.
 ##
 ## `\w` and `\b` use code word characters (letters, digits, `_`); the
-## `caseInsensitive` option folds ASCII letters only.
+## `caseInsensitive` option folds ASCII letters only. With `wholeWord` a match
+## must not start or end inside a word (both neighbours of the edge being word
+## characters), which, unlike wrapping the pattern in `\b`, leaves a pattern
+## that begins or ends with punctuation alone and still lets the engine
+## backtrack to another match at the same start.
 
 import std/[unicode, strutils]
 import ./codemodel
@@ -44,7 +51,7 @@ type
     prog: seq[Instr]
     classes: seq[tuple[items: seq[ClassItem], negate: bool]]
     groups*: int              ## number of capture groups
-    ci: bool
+    ci, wholeWord: bool
     lead: int                 ## byte every match starts with, or -1
     required: string          ## literal every match contains ("" = none)
     scratchCaps: seq[int]
@@ -57,6 +64,7 @@ type
 const
   StepBudget = 3_000_000
   MaxStack = 2_000_000
+  MemoMaxBits = 32 * 1024 * 1024     # largest visited-state table (4 MiB)
   Inf = high(int)
 
 # ------------------------------------------------------------------- parser
@@ -245,7 +253,6 @@ proc parseAtom(p: var Parser): seq[Instr] =
 
 proc parseSeq(p: var Parser): seq[Instr] =
   while p.i < p.s.len and p.s[p.i] notin {'|', ')'}:
-    var atomStart = p.i
     var a = p.parseAtom()
     # quantifier
     while p.i < p.s.len:
@@ -275,11 +282,10 @@ proc parseSeq(p: var Parser): seq[Instr] =
       if p.peekc == '?':
         lazy = true
         inc p.i
-      if a.len > 0 and a[0].kind in {ikBol, ikEol, ikWordB, ikNotWordB} and a.len == 1:
-        discard                                 # quantified anchor: harmless
+      # check the size before building the copies
+      if (a.len + 1) * max(1, (if hi == Inf: lo else: hi)) > 20000:
+        fail("pattern too large")
       a = repeatFrag(a, lo, hi, lazy)
-      if a.len > 20000: fail("pattern too large")
-    discard atomStart
     result.add a
 
 proc parseAlt(p: var Parser): seq[Instr] =
@@ -321,9 +327,11 @@ proc requiredLiteral(prog: seq[Instr]): string =
     if ok and lit.len > result.len: result = lit
     i = j
 
-proc compileRegex*(pattern: string, caseInsensitive = false): Regex =
+proc compileRegex*(pattern: string, caseInsensitive = false,
+                   wholeWord = false): Regex =
   ## Raises `RegexError` for a malformed pattern.
-  var p = Parser(s: pattern, re: Regex(ci: caseInsensitive, lead: -1))
+  var p = Parser(s: pattern,
+                 re: Regex(ci: caseInsensitive, wholeWord: wholeWord, lead: -1))
   let body = p.parseAlt()
   if p.i < p.s.len: fail("unmatched )")
   p.re.groups = p.ngroups
@@ -343,15 +351,19 @@ type Ctx = object
   s: ptr UncheckedArray[char]
   n: int
   caps: seq[int]
-  steps: int
+  steps: int                  # forward steps in this findAt call (all start offsets)
+  budget: int                 # steps allowed before giving up
+  memoAt: int                 # step count at which the visited table starts
+  memo: seq[uint64]           # visited (position, instruction) states; empty = off
+  memoOff: bool               # table would be too large: rely on the budget only
+  aborted: bool               # the budget or the stack limit was hit
 
 func lowerAscii(c: char): char {.inline.} =
   if c in {'A'..'Z'}: char(ord(c) + 32) else: c
 
 func classHas(re: Regex, ci: int, r: int): bool =
-  let cl = re.classes[ci]
   var hit = false
-  for (lo, hi) in cl.items:
+  for (lo, hi) in re.classes[ci].items:
     if lo >= 0:
       if r >= lo and r <= hi: hit = true
       elif re.ci and r < 128 and r >= 0:
@@ -370,7 +382,7 @@ func classHas(re: Regex, ci: int, r: int): bool =
       of -5: hit = hit or not isWord
       else: hit = hit or not isSpace
     if hit: break
-  hit != cl.negate
+  hit != re.classes[ci].negate
 
 func decode(c: Ctx, i: int, r: var int): int {.inline.} =
   ## Length of the codepoint at `i` (valid UTF-8 guaranteed) and its value.
@@ -378,12 +390,10 @@ func decode(c: Ctx, i: int, r: var int): int {.inline.} =
   if b < 0x80:
     r = b
     return 1
-  var rr: Rune
   let l = if b >= 0xF0: 4 elif b >= 0xE0: 3 else: 2
-  var tmp = newString(l)
-  for k in 0 ..< l: tmp[k] = (if i + k < c.n: c.s[i + k] else: '\0')
-  fastRuneAt(tmp, 0, rr, false)
-  r = int(rr)
+  r = b and (0x7F shr l)                 # payload bits of the lead byte
+  for k in 1 ..< l:
+    r = (r shl 6) or (if i + k < c.n: ord(c.s[i + k]) and 0x3F else: 0)
   l
 
 func prevBoundary(s: ptr UncheckedArray[char], i, n: int): int =
@@ -415,6 +425,27 @@ func isWordAt(c: Ctx, i: int): bool =
     discard c.decode(j, r)
     charClass(Rune(r)) == ccWord
   else: charClass(Rune(ord(c.s[j]))) == ccWord
+
+func insideWord(c: Ctx, i: int): bool {.inline.} =
+  ## Both neighbours of position `i` are word characters.
+  c.isWordAt(i - 1) and c.isWordAt(i)
+
+proc firstVisit(c: var Ctx, pc, i: int): bool {.inline.} =
+  ## Marks the state (pc, i) as explored; false if it already was. Reaching
+  ## a state again means its first exploration failed (a match would have
+  ## ended the search) or is still in progress, i.e. a loop went round
+  ## without consuming input; either way this path cannot succeed.
+  if c.memo.len == 0: return true
+  let k = i * c.re.prog.len + pc
+  let bit = 1'u64 shl (k and 63)
+  if (c.memo[k shr 6] and bit) != 0: return false
+  c.memo[k shr 6] = c.memo[k shr 6] or bit
+  true
+
+proc startMemo(c: var Ctx) =
+  let bits = (c.n + 1) * c.re.prog.len
+  if bits > MemoMaxBits: c.memoOff = true
+  else: c.memo = newSeq[uint64]((bits + 63) shr 6)
 
 proc run(c: var Ctx, stack: var seq[Bt], start: int): bool =
   ## Iterative backtracking VM (an explicit stack: no recursion limit).
@@ -457,7 +488,10 @@ proc run(c: var Ctx, stack: var seq[Bt], start: int): bool =
       if not resumed: return false
       continue
     inc c.steps
-    if c.steps > StepBudget or stack.len > MaxStack: return false
+    if c.steps == c.memoAt and not c.memoOff: c.startMemo()
+    if c.steps > c.budget or stack.len > MaxStack:
+      c.aborted = true
+      return false
     let ins = prog[pc]
     case ins.kind
     of ikChar, ikAny, ikClass:
@@ -467,6 +501,7 @@ proc run(c: var Ctx, stack: var seq[Bt], start: int): bool =
         i += l
         inc pc
     of ikSplit:
+      if not c.firstVisit(pc, i): failed = true; continue
       stack.add Bt(kind: btBranch, pc: pc + ins.y, i: i)
       pc += ins.x
     of ikJmp: pc += ins.x
@@ -482,6 +517,7 @@ proc run(c: var Ctx, stack: var seq[Bt], start: int): bool =
       let b = c.isWordAt(i - 1) != c.isWordAt(i)
       if b != (ins.kind == ikWordB): failed = true else: inc pc
     of ikRep:
+      if not c.firstVisit(pc, i): failed = true; continue
       let atom = prog[pc + 1]
       var count = 0
       var j = i
@@ -505,14 +541,18 @@ proc run(c: var Ctx, stack: var seq[Bt], start: int): bool =
       i = j
       pc += 2
     of ikMatch:
-      return true
+      if c.re.wholeWord and c.insideWord(i): failed = true
+      else: return true
 
 proc findAt*(re: Regex, s: string, start: int, m: var RegexMatch): bool =
   ## The first match starting at byte `start` or later. `s` must be valid
   ## UTF-8 (the model guarantees it).
   if start > s.len: return false
   if re.required.len > 0 and s.find(re.required, start) < 0: return false
-  var c = Ctx(re: re, n: s.len, caps: move re.scratchCaps)
+  let states = (s.len + 1) * re.prog.len
+  var c = Ctx(re: re, n: s.len, caps: move re.scratchCaps,
+              budget: max(StepBudget, 4 * states),
+              memoAt: 256 + states div 128)   # tiny searches never pay for the table
   if c.caps.len != 2 * (re.groups + 1): c.caps = newSeq[int](2 * (re.groups + 1))
   var stack = move re.scratchStack
   defer:
@@ -526,14 +566,13 @@ proc findAt*(re: Regex, s: string, start: int, m: var RegexMatch): bool =
       if k < 0: return false
       i = k
     for k in 0 ..< c.caps.len: c.caps[k] = -1
-    c.steps = 0
-    if c.run(stack, i):
+    if not (re.wholeWord and c.insideWord(i)) and c.run(stack, i):
       m.a = c.caps[0]
       m.b = c.caps[1]
       m.groups.setLen(re.groups + 1)
       for g in 0 .. re.groups: m.groups[g] = (c.caps[2 * g], c.caps[2 * g + 1])
       return true
-    if i >= s.len: break
+    if c.aborted or i >= s.len: break
     inc i
     while i < s.len and (ord(s[i]) and 0xC0) == 0x80: inc i
   false

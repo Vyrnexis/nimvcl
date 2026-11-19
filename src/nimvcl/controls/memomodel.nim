@@ -31,14 +31,14 @@
 ##   keeps its own pixel column instead.
 
 import std/[unicode, strutils]
-import ./editmodel
-export editmodel.snapIndex, editmodel.prevBoundary, editmodel.nextBoundary,
-       editmodel.runeCount
+import ./textutil
+export textutil.snapIndex, textutil.prevBoundary, textutil.nextBoundary,
+       textutil.runeCount, textutil.runeColOf, textutil.byteOfRuneCol,
+       textutil.wordLeftIn, textutil.wordRightIn, textutil.wordRangeIn
 
 type
   MemoPos* = tuple[line, col: int]
 
-  WordClass = enum wcSpace, wcWord, wcOther
   OpKind = enum opNone, opType, opDelBack, opDelFwd
 
   Op = object
@@ -69,30 +69,6 @@ const MaxUndoSteps = 1000
 func `<`*(a, b: MemoPos): bool = a.line < b.line or (a.line == b.line and a.col < b.col)
 func `<=`*(a, b: MemoPos): bool = not (b < a)
 
-func runeAt(s: string, i: int): Rune =
-  var r: Rune
-  fastRuneAt(s, i, r, false)
-  r
-
-func runeBefore(s: string, i: int): Rune = runeAt(s, prevBoundary(s, i))
-
-func classOf(r: Rune): WordClass =
-  if r.isWhiteSpace: wcSpace
-  elif r.isAlpha or (int(r) < 128 and char(int(r)) in {'0'..'9', '_'}): wcWord
-  else: wcOther
-
-func cleanUtf8(s: string): string =
-  if validateUtf8(s) < 0: return s
-  var i = 0
-  while i < s.len:
-    let b = ord(s[i])
-    let n = if b < 0x80: 1 elif b >= 0xF0: 4 elif b >= 0xE0: 3 elif b >= 0xC2: 2 else: 0
-    if n > 0 and i + n <= s.len and validateUtf8(s[i ..< i + n]) < 0:
-      result.add s[i ..< i + n]
-      i += n
-    else:
-      inc i
-
 func sanitize*(s: string): string =
   ## Newlines normalised to "\n"; control characters except TAB, DEL, C1 and
   ## invalid UTF-8 removed.
@@ -110,73 +86,6 @@ func sanitize*(s: string): string =
       inc i                                   # C1 control
     else: result.add c
     inc i
-
-func truncateRunes(s: string, n: int): string =
-  var count = 0
-  var i = 0
-  while i < s.len and count < n:
-    i = nextBoundary(s, i)
-    inc count
-  s[0 ..< i]
-
-func endOfInsert(start: MemoPos, s: string): MemoPos =
-  var nl = 0
-  var lastNl = -1
-  for i in 0 ..< s.len:
-    if s[i] == '\n':
-      inc nl
-      lastNl = i
-  if nl == 0: (start.line, start.col + s.len)
-  else: (start.line + nl, s.len - lastNl - 1)
-
-func runeColOf*(line: string, col: int): int =
-  ## Rune column of byte index `col`.
-  var i = 0
-  while i < col and i < line.len:
-    i = nextBoundary(line, i)
-    inc result
-
-func byteOfRuneCol*(line: string, rc: int): int =
-  var n = 0
-  while result < line.len and n < rc:
-    result = nextBoundary(line, result)
-    inc n
-
-# --------------------------------------------------------------- word logic
-
-func wordLeftIn*(s: string, i: int): int =
-  ## Start of the word before `i` within one line.
-  result = snapIndex(s, i)
-  while result > 0 and classOf(runeBefore(s, result)) == wcSpace:
-    result = prevBoundary(s, result)
-  if result > 0:
-    let cls = classOf(runeBefore(s, result))
-    while result > 0 and classOf(runeBefore(s, result)) == cls:
-      result = prevBoundary(s, result)
-
-func wordRightIn*(s: string, i: int): int =
-  ## Start of the next word after `i` within one line.
-  result = snapIndex(s, i)
-  if result < s.len:
-    let cls = classOf(runeAt(s, result))
-    if cls != wcSpace:
-      while result < s.len and classOf(runeAt(s, result)) == cls:
-        result = nextBoundary(s, result)
-  while result < s.len and classOf(runeAt(s, result)) == wcSpace:
-    result = nextBoundary(s, result)
-
-func wordRangeIn*(s: string, i: int): (int, int) =
-  ## The run (letters/digits, spaces, punctuation) at `i`; at the end of the
-  ## line the run before it. (0, 0) for an empty line.
-  if s.len == 0: return (0, 0)
-  var p = snapIndex(s, i)
-  if p >= s.len: p = prevBoundary(s, s.len)
-  let cls = classOf(runeAt(s, p))
-  var a = p
-  while a > 0 and classOf(runeBefore(s, a)) == cls: a = prevBoundary(s, a)
-  var b = nextBoundary(s, p)
-  while b < s.len and classOf(runeAt(s, b)) == cls: b = nextBoundary(s, b)
-  (a, b)
 
 # ------------------------------------------------------------------ queries
 
@@ -252,18 +161,9 @@ proc flushChanged(m: MemoModel) =
 proc fireSel(m: MemoModel) =
   if m.onSelection != nil: m.onSelection()
 
-proc splitLines(s: string): seq[string] =
-  result = @[]
-  var start = 0
-  for i in 0 ..< s.len:
-    if s[i] == '\n':
-      result.add s[start ..< i]
-      start = i + 1
-  result.add s[start .. ^1]
-
 proc newMemoModel*(text = ""): MemoModel =
   result = MemoModel(fDesiredCol: -1)
-  result.lines = splitLines(sanitize(text))
+  result.lines = splitAtNewlines(sanitize(text))
   for l in result.lines: result.fRunes += runeCount(l)
   result.fRunes += result.lines.len - 1
 
@@ -358,21 +258,6 @@ proc moveWordRight*(m: MemoModel, extend = false) =
 
 # ------------------------------------------------------------------ editing
 
-proc deleteSeq(lines: var seq[string], first, last: int) =
-  ## Removes lines first..last (inclusive).
-  let n = last - first + 1
-  if n <= 0: return
-  for i in last + 1 ..< lines.len: lines[i - n] = move lines[i]
-  lines.setLen(lines.len - n)
-
-proc insertSeq(lines: var seq[string], parts: seq[string], at: int) =
-  let n = parts.len
-  if n == 0: return
-  let old = lines.len
-  lines.setLen(old + n)
-  for i in countdown(old - 1, at): lines[i + n] = move lines[i]
-  for i in 0 ..< n: lines[at + i] = parts[i]
-
 proc spliceLines(m: MemoModel, a, b: MemoPos, repl: string): MemoPos =
   ## Raw replacement of [a, b) by `repl`; returns the end of the inserted text.
   ## Updates the rune count and records the change (`flushChanged` fires
@@ -388,32 +273,18 @@ proc spliceLines(m: MemoModel, a, b: MemoPos, repl: string): MemoPos =
   let tail = m.lines[b.line][b.col .. ^1]
   let oldN = b.line - a.line + 1
   let insRunes = runeCount(repl) # newlines are one rune each
-  if repl.find('\n') < 0:
-    let nl = head & repl & tail
-    if oldN == 1: m.lines[a.line] = nl
-    else:
-      m.lines[a.line] = nl
-      m.lines.deleteSeq(a.line + 1, b.line)
-    result = (a.line, a.col + repl.len)
-    m.fRunes += insRunes - removedRunes
-    m.pend = (a.line, oldN, 1)
+  m.fRunes += insRunes - removedRunes
+  if oldN == 1 and repl.find('\n') < 0:          # the common keystroke
+    m.lines[a.line] = head & repl & tail
+    m.pend = (a.line, 1, 1)
     m.hasPend = true
-    return
-  var parts = splitLines(repl)
+    return (a.line, a.col + repl.len)
+  var parts = splitAtNewlines(repl)
   parts[0] = head & parts[0]
   result = (a.line + parts.high, parts[^1].len)
   parts[^1].add tail
-  m.fRunes += insRunes - removedRunes
-  let newN = parts.len
-  if newN == oldN:
-    for i in 0 ..< newN: m.lines[a.line + i] = move parts[i]
-  elif newN < oldN:
-    for i in 0 ..< newN: m.lines[a.line + i] = move parts[i]
-    m.lines.deleteSeq(a.line + newN, b.line)
-  else:
-    for i in 0 ..< oldN: m.lines[a.line + i] = move parts[i]
-    m.lines.insertSeq(parts[oldN .. ^1], b.line + 1)
-  m.pend = (a.line, oldN, newN)
+  m.lines.replaceRange(a.line, oldN, parts)
+  m.pend = (a.line, oldN, parts.len)
   m.hasPend = true
 
 proc pushOp(m: MemoModel, op: Op) =
@@ -485,7 +356,7 @@ proc insert*(m: MemoModel, s: string): bool =
     ins = truncateRunes(ins, max(m.fMaxLength - (m.fRunes - selRunes), 0))
   if ins.len == 0: return false
   let single = runeCount(ins) == 1 and ins != "\n"
-  let isWord = single and classOf(runeAt(ins, 0)) == wcWord
+  let isWord = single and charClass(runeAt(ins, 0)) == ccWord
   let kind = if single: opType else: opNone
   # a letter after a non-letter starts a new step: break coalescing first
   if single and isWord and not m.lastWasWord: m.lastKind = opNone
@@ -535,13 +406,16 @@ proc deleteLine*(m: MemoModel): bool =
   else: m.edit((l - 1, m.lines[l - 1].len), (l, m.lines[l].len), "", opNone)
   true
 
-proc setText*(m: MemoModel, s: string) =
+proc setText*(m: MemoModel, s: string): bool {.discardable.} =
   ## Programmatic assignment: sanitised, cut to `maxLength`; the caret goes
-  ## to the start; the undo history is cleared. Works when read-only.
+  ## to the start; the undo history is cleared. Works when read-only. True
+  ## when the text differs from the old one.
   var t = sanitize(s)
   if m.fMaxLength > 0: t = truncateRunes(t, m.fMaxLength)
   let oldN = m.lines.len
-  m.lines = splitLines(t)
+  let newLines = splitAtNewlines(t)
+  result = newLines != m.lines
+  m.lines = newLines
   m.fRunes = m.lines.len - 1
   for l in m.lines: m.fRunes += runeCount(l)
   m.fAnchor = (0, 0)
@@ -594,8 +468,8 @@ proc insertLine*(m: MemoModel, i: int, s: string) =
     let room = m.fMaxLength - m.fRunes - 1
     if room < 0: return
     t = truncateRunes(t, room)
-  let parts = splitLines(t)
-  m.lines.insertSeq(parts, i)
+  let parts = splitAtNewlines(t)
+  m.lines.replaceRange(i, 0, parts)
   for p in parts: m.fRunes += runeCount(p) + 1
   m.afterLineApi(i, 0, parts.len)
 

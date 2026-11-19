@@ -135,8 +135,10 @@ type
     fMetSize, fMetScale: float32
     fMaxLine, fMaxLen: int
     fMaxStale: bool
+    fMaxCols: int                 ## visual width of the widest line ...
+    fMaxColsKey: tuple[line, version, tabWidth: int]   ## ... measured for this
     fContentRows: int
-    fDesiredV: int
+    fDesiredX: float32            ## x the caret keeps over a run of Up/Down; < 0: none
     fChanged: bool
     fLastCaret: CodePos
     fLastModified, fLastOverwrite: bool
@@ -163,14 +165,16 @@ type
     fFindText: string
     fFindOpts: SearchOptions
     fSearcher: Searcher
-    fSearcherKey: string
+    fSearcherFor: tuple[text: string, opts: SearchOptions]  ## what `fSearcher` was built from
+    fSearcherGen: int             ## changes whenever the searcher is rebuilt
     fSearchError: string
+    fEmptyHit: tuple[pos: CodePos, version: int]   ## the empty match the last find selected
     fCountMatches: seq[Match]
-    fCountKey: tuple[version: int, key: string]
+    fCountKey: tuple[version, gen: int]
+    findTimer: Timer              ## recounts the matches shortly after typing stops
     fChord: bool
     fGutterHot: bool
     fLineClip: string
-    fSelDirty: bool
     onChange*: NotifyEvent
     onModifiedChanged*: NotifyEvent
     onOverwriteChange*: NotifyEvent
@@ -195,6 +199,8 @@ const
   FoldMaxLines* = 500_000
   MaxVisMatches = 4000
   FindCountCap = 10_000
+  SyncCountLines = 20_000        ## documents above this are recounted after a pause
+  FindCountDelayMs = 150
   ChunkBytes = 256
 
 # ------------------------------------------------------------------ metrics
@@ -373,11 +379,15 @@ proc syncContent(e: CodeEdit) =
   ## Content size from the rows and the widest line.
   if e.fMaxStale and e.fModel.lineCount <= 200_000: e.rescanMax()
   let m = e.fModel
-  var maxCols = 0
   if e.fMaxLen > 0 and e.fMaxLine < m.lineCount:
-    maxCols = visualWidth(m.line(e.fMaxLine), m.tabWidth)
+    # measuring a very long line is not free: once per version of the text
+    let key = (line: e.fMaxLine, version: m.version, tabWidth: m.tabWidth)
+    if key != e.fMaxColsKey:
+      e.fMaxCols = visualWidth(m.line(e.fMaxLine), m.tabWidth)
+      e.fMaxColsKey = key
+  else: e.fMaxCols = 0
   e.fContentRows = e.rowCount
-  e.setContentSize(float64(e.gutterW + 2 * PadX) + float64(maxCols + 2) * float64(e.adv),
+  e.setContentSize(float64(e.gutterW + 2 * PadX) + float64(e.fMaxCols + 2) * float64(e.adv),
                    float64(2 * PadY) + float64(e.fContentRows) * float64(e.rowH))
 
 # ----------------------------------------------------------------- styles
@@ -480,12 +490,12 @@ proc resetBlink(e: CodeEdit) =
 # ------------------------------------------------------------- find helpers
 
 proc ensureSearcher(e: CodeEdit): Searcher =
-  let key = e.fFindText & "\0" & $e.fFindOpts.ignoreCase & $e.fFindOpts.wholeWord &
-            $e.fFindOpts.regex
-  if key == e.fSearcherKey and (e.fSearcher != nil or e.fSearchError.len > 0 or
-                                e.fFindText.len == 0):
+  ## The searcher for the current find text and options (nil: none, or the
+  ## pattern is invalid: see `fSearchError`).
+  if e.fSearcherFor.text == e.fFindText and e.fSearcherFor.opts == e.fFindOpts:
     return e.fSearcher
-  e.fSearcherKey = key
+  e.fSearcherFor = (e.fFindText, e.fFindOpts)
+  inc e.fSearcherGen
   e.fSearcher = nil
   e.fSearchError = ""
   if e.fFindText.len > 0:
@@ -496,16 +506,28 @@ proc ensureSearcher(e: CodeEdit): Searcher =
 proc findBarVisible*(e: CodeEdit): bool = e.fBar != nil and e.fBar.visible
 
 proc updateFindStatus(e: CodeEdit, force = false) =
+  ## `force`: a find action or the debounce timer; otherwise (a model change
+  ## while the bar is open) a big document is recounted later, not per keystroke.
   if not e.findBarVisible: return
   let s = e.ensureSearcher()
   if s == nil:
     if e.fSearchError.len > 0: e.fBar.setStatus("Invalid pattern", true)
     else: e.fBar.setStatus("", false)
     return
-  let key = (version: e.fModel.version, key: e.fSearcherKey)
+  let key = (version: e.fModel.version, gen: e.fSearcherGen)
   if key != e.fCountKey:
-    # a huge document is not rescanned on every keystroke, only on find actions
-    if not force and e.fModel.lineCount > 200_000 and e.fCountKey.key == key.key: return
+    if not force and e.fCountKey.gen == key.gen:      # only the text changed
+      let n = e.fModel.lineCount
+      if n > 200_000: return                          # recounted on find actions only
+      if n > SyncCountLines:
+        if e.findTimer == nil:
+          e.findTimer = newTimer(nil, FindCountDelayMs)
+          e.findTimer.onTimer = proc(t: Timer) =
+            t.enabled = false
+            e.updateFindStatus(true)
+        e.findTimer.enabled = false                    # restart the delay
+        e.findTimer.enabled = true
+        return
     e.fCountKey = key
     e.fCountMatches.setLen 0
     for mt in s.matches(e.fModel):
@@ -513,15 +535,39 @@ proc updateFindStatus(e: CodeEdit, force = false) =
       if e.fCountMatches.len >= FindCountCap: break
   let count = e.fCountMatches.len
   let sl = e.fModel.selection
-  var idx = 0
-  for i, mt in e.fCountMatches:
-    if mt.a == sl.startPos and mt.b == sl.endPos:
-      idx = i + 1
-      break
+  # the matches are sorted: the selected one, if it is a match, is found by bisection
+  let k = e.fCountMatches.lowerBound(sl.startPos,
+            proc(mt: Match, p: CodePos): int = cmp(mt.a, p))
+  let idx = if k < count and e.fCountMatches[k].a == sl.startPos and
+               e.fCountMatches[k].b == sl.endPos: k + 1 else: 0
   if count == 0: e.fBar.setStatus("No results", true)
   elif count >= FindCountCap: e.fBar.setStatus($FindCountCap & "+", false)
   elif idx > 0: e.fBar.setStatus($idx & " of " & $count, false)
   else: e.fBar.setStatus($count & " found", false)
+
+proc ensureWarm(e: CodeEdit) =
+  ## Keeps the background lexer running while some lines of the document have
+  ## no exact lexer state yet (it stops by itself when everything is lexed or
+  ## the editor is not showing; edits and `visibilityChanged` start it again).
+  if e.fHl == nil or e.fModel.lineCount > WarmLimit or
+     e.fHl.cleanCount >= e.fModel.lineCount:
+    if e.warmTimer != nil: e.warmTimer.enabled = false
+    return
+  if e.warmTimer == nil:
+    e.warmTimer = newTimer(nil, 25)
+    e.warmTimer.onTimer = proc(t: Timer) =
+      if e.fHl == nil or not e.isShowing:
+        t.enabled = false
+        return
+      let n = e.fModel.lineCount
+      discard e.fHl.tokens(min(e.fHl.cleanCount + WarmStep, n - 1))
+      if e.fHl.cleanCount >= n: t.enabled = false
+      if e.fApprox: e.invalidate()
+  if e.isShowing and not e.warmTimer.enabled: e.warmTimer.enabled = true
+
+method visibilityChanged*(e: CodeEdit) =
+  procCall visibilityChanged(ScrollingControl(e))
+  e.ensureWarm()
 
 # ----------------------------------------------------------------- touched
 
@@ -532,6 +578,7 @@ proc touched*(e: CodeEdit, follow = true) =
   ## is scrolled into view. The editing methods of `CodeEdit` call it for you.
   e.resetBlink()
   e.syncContent()
+  e.ensureWarm()
   if follow: e.scrollCaretIntoView()
   e.updateIme()
   e.invalidate()
@@ -666,23 +713,6 @@ proc rebuildFold(e: CodeEdit) =
     e.syncContent()
     e.invalidate()
 
-proc ensureWarm(e: CodeEdit) =
-  if e.fHl == nil or e.fModel.lineCount > WarmLimit or
-     e.fHl.cleanCount >= e.fModel.lineCount:
-    if e.warmTimer != nil: e.warmTimer.enabled = false
-    return
-  if e.warmTimer == nil:
-    e.warmTimer = newTimer(nil, 25)
-    e.warmTimer.onTimer = proc(t: Timer) =
-      if e.fHl == nil or not e.isShowing:
-        t.enabled = false
-        return
-      let n = e.fModel.lineCount
-      discard e.fHl.tokens(min(e.fHl.cleanCount + WarmStep, n - 1))
-      if e.fHl.cleanCount >= n: t.enabled = false
-      if e.fApprox: e.invalidate()
-  e.warmTimer.enabled = e.isShowing
-
 # ------------------------------------------------------------- model hooks
 
 proc modelChanged(e: CodeEdit, first, oldN, newN: int) =
@@ -702,7 +732,7 @@ proc modelChanged(e: CodeEdit, first, oldN, newN: int) =
   e.fBrCache.valid = false
 
 proc selectionChanged(e: CodeEdit) =
-  e.fSelDirty = true
+  e.fEmptyHit = ((-1, -1), -1)
   if e.fFold != nil:
     let c = e.fModel.caret
     if e.fFold.isHidden(c.line): e.fFold.expandTo(c.line)
@@ -755,7 +785,7 @@ proc `text=`*(e: CodeEdit, v: string) =
   e.rebuildFold()
   e.fMaxStale = true
   e.rescanMax()
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.fLastCaret = (-1, -1)
   e.scrollTo(0, 0)
   e.ensureWarm()
@@ -933,18 +963,18 @@ proc gotoLine*(e: CodeEdit, line: int, col = 0) =
   let l = clamp(line, 0, e.fModel.lineCount - 1)
   if e.fFold != nil: e.fFold.expandTo(l)
   e.fModel.setCaret((l, col))
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.ensureVisible(l, col, center = true)     # before `touched`, which would scroll minimally
   e.touched(follow = false)
 
 proc `caretPos=`*(e: CodeEdit, p: CodePos) =
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   if e.fFold != nil: e.fFold.expandTo(clamp(p.line, 0, e.fModel.lineCount - 1))
   e.fModel.setCaret(p)
   e.touched()
 
 proc `selection=`*(e: CodeEdit, s: Selection) =
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.fModel.setSelection(s)
   e.touched()
 
@@ -960,7 +990,7 @@ proc replaceRange*(e: CodeEdit, a, b: CodePos, text: string,
   ## `onChange` fires. By default the caret ends after the inserted text; with
   ## `keepSelection` the selection stays where it was (adjusted to the new
   ## text). False when read-only or when the text does not change.
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   if not keepSelection:
     result = e.fModel.replace(a, b, text)
   else:
@@ -968,17 +998,16 @@ proc replaceRange*(e: CodeEdit, a, b: CodePos, text: string,
     var b = e.fModel.snapPos(b)
     if b < a: swap a, b
     let before = e.fModel.selection
-    result = e.fModel.replaceInGroup(a, b, text)
-    if result:
-      # carry the selection along: positions after the edit shift with it,
-      # positions inside the replaced range go to the end of the new text
-      let stop = endOfInsert(a, text.replace("\r\n", "\n").replace('\r', '\n'))
-      proc carry(p: CodePos): CodePos =
-        if p <= a: p
-        elif p < b: stop
-        elif p.line == b.line: (stop.line, stop.col + p.col - b.col)
-        else: (p.line + stop.line - b.line, p.col)
-      e.fModel.setSelection(sel(carry(before.anchor), carry(before.caret)))
+    # carry the selection along: positions after the edit shift with it,
+    # positions inside the replaced range go to the end of the new text
+    let stop = insertionEnd(a, text)
+    proc carry(p: CodePos): CodePos =
+      if p <= a: p
+      elif p < b: stop
+      elif p.line == b.line: (stop.line, stop.col + p.col - b.col)
+      else: (p.line + stop.line - b.line, p.col)
+    result = e.fModel.edit(a, b, text, ekOther,
+                           sel(carry(before.anchor), carry(before.caret)))
   e.touched(follow = not keepSelection)
 
 proc insertAt*(e: CodeEdit, p: CodePos, text: string,
@@ -997,7 +1026,7 @@ proc endUndoGroup*(e: CodeEdit) =
 
 proc selectAll*(e: CodeEdit) =
   e.fModel.selectAll()
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.touched()
 
 # ------------------------------------------------------------------- commands
@@ -1006,12 +1035,12 @@ proc indentUnit(e: CodeEdit): string = indentUnit(e.fInsertSpaces, e.fModel.tabW
 
 proc undo*(e: CodeEdit): bool {.discardable.} =
   result = e.fModel.undo()
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.touched()
 
 proc redo*(e: CodeEdit): bool {.discardable.} =
   result = e.fModel.redo()
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.touched()
 
 proc copyToClipboard*(e: CodeEdit) =
@@ -1036,7 +1065,7 @@ proc deleteLine*(e: CodeEdit) =
   e.fMarkers = keep
   if not deleteLines(e.fModel, f, last): e.fMarkers = before
   else:
-    e.fDesiredV = -1
+    e.fDesiredX = -1
     e.touched()
 
 proc cutToClipboard*(e: CodeEdit) =
@@ -1045,7 +1074,7 @@ proc cutToClipboard*(e: CodeEdit) =
   if m.hasSelection:
     editClipboardSet(m.selectedText)
     discard m.deleteSelection()
-    e.fDesiredV = -1
+    e.fDesiredX = -1
     e.touched()
   else:
     e.copyToClipboard()
@@ -1056,14 +1085,13 @@ proc pasteFromClipboard*(e: CodeEdit) =
   let s = editClipboardGet()
   if s.len == 0: return
   let m = e.fModel
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   if s == e.fLineClip and not m.hasSelection:
     # a line copied without selection pastes as a whole line above the caret
     let c = m.caret
-    m.beginGroup()
-    discard m.replaceInGroup((c.line, 0), (c.line, 0), s)
-    m.setCaret((c.line + 1, c.col))
-    m.endGroup()
+    m.withGroup:
+      discard m.replaceInGroup((c.line, 0), (c.line, 0), s)
+      m.setCaret((c.line + 1, c.col))
   else:
     discard m.typeText(s)
   e.touched()
@@ -1079,11 +1107,14 @@ proc outdent*(e: CodeEdit) =
   if outdentLines(e.fModel, f, l, e.fModel.tabWidth):
     e.touched()
 
+proc commentSelection(e: CodeEdit, mode: CommentMode) =
+  let (f, l) = selectedLines(e.fModel)
+  if commentLines(e.fModel, f, l, e.lineComment, mode):
+    e.touched()
+
 proc toggleComment*(e: CodeEdit) =
   ## Comments or uncomments the selected lines with `lineComment`.
-  let (f, l) = selectedLines(e.fModel)
-  if toggleLineComment(e.fModel, f, l, e.lineComment):
-    e.touched()
+  e.commentSelection(cmToggle)
 
 proc duplicateLine*(e: CodeEdit) =
   let (f, l) = selectedLines(e.fModel)
@@ -1091,7 +1122,7 @@ proc duplicateLine*(e: CodeEdit) =
   for ln in f .. l:
     if e.isCollapsed(ln): last = max(last, e.fFold.foldEnd(ln))
   if duplicateLines(e.fModel, f, last):
-    e.fDesiredV = -1
+    e.fDesiredX = -1
     e.touched()
 
 proc moveLines(e: CodeEdit, up: bool) =
@@ -1189,9 +1220,10 @@ proc setSearch*(e: CodeEdit, pattern: string, opts = SearchOptions()) =
 proc selectMatch(e: CodeEdit, mt: Match) =
   if e.fFold != nil: e.fFold.expandTo(mt.a.line)
   e.fModel.setSelection(sel(mt.a, mt.b))
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.touched(follow = false)
   e.ensureVisible(mt.b.line, mt.b.col, center = true)
+  if mt.a == mt.b: e.fEmptyHit = (mt.a, e.fModel.version)
 
 proc findStep*(e: CodeEdit, forward: bool, fromStart = false): bool {.discardable.} =
   ## Selects the next (previous) match of the current search, wrapping around.
@@ -1199,12 +1231,17 @@ proc findStep*(e: CodeEdit, forward: bool, fromStart = false): bool {.discardabl
   ## a pattern, so the match under the caret stays).
   let s = e.ensureSearcher()
   if s == nil: return false
-  let sl = e.fModel.selection
+  let m = e.fModel
+  let sl = m.selection
   var found: Match
   var ok: bool
   if forward:
-    let from0 = if fromStart: sl.startPos else: sl.endPos
-    ok = s.findNext(e.fModel, from0, found)
+    var from0 = if fromStart: sl.startPos else: sl.endPos
+    if not fromStart and e.fEmptyHit == (from0, m.version):
+      # the last step selected an empty match here: move on past it
+      from0 = m.nextPos(from0)
+      if from0 == sl.endPos: from0 = (0, 0)           # at the end of the text
+    ok = s.findNext(m, from0, found)
   else:
     ok = s.findPrev(e.fModel, sl.startPos, found)
   if ok: e.selectMatch(found)
@@ -1229,7 +1266,7 @@ proc replaceCurrent*(e: CodeEdit, replacement: string): bool {.discardable.} =
   if s == nil: return false
   let sl = e.fModel.selection
   var mt: Match
-  if not sl.isEmpty and s.findNext(e.fModel, sl.startPos, mt, wrap = false) and
+  if s.findNext(e.fModel, sl.startPos, mt, wrap = false) and
      mt.a == sl.startPos and mt.b == sl.endPos:
     result = s.replaceMatch(e.fModel, mt, replacement)
     e.touched()
@@ -1243,13 +1280,14 @@ proc replaceAll*(e: CodeEdit, pattern, replacement: string,
   let s = e.ensureSearcher()
   if s == nil: return 0
   result = s.replaceAll(e.fModel, replacement)
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.touched(follow = false)
 
 proc positionBar(e: CodeEdit) =
   if e.fBar == nil: return
   let vp = e.viewport
-  e.fBar.setBounds(vp.right - e.fBar.width + 2, vp.y - 2, e.fBar.width, e.fBar.height)
+  e.fBar.setBounds(max(vp.right - e.fBar.width + 2, vp.x), vp.y - 2,
+                   e.fBar.width, e.fBar.height)
 
 proc hideFindBar*(e: CodeEdit) =
   ## Closes the find bar and gives the focus back to the text.
@@ -1329,14 +1367,14 @@ proc moveHoriz(e: CodeEdit, forward, word, extend: bool) =
 proc moveRows(e: CodeEdit, delta: int, extend: bool) =
   let m = e.fModel
   let c = m.caret
-  if e.fDesiredV < 0: e.fDesiredV = visualCol(m.line(c.line), c.col, m.tabWidth)
+  if e.fDesiredX < 0: e.fDesiredX = e.xOfCol(m.line(c.line), c.col)
   let row = e.lineRow(c.line)
   let target = row + delta
   if target < 0: m.setCaret((0, 0), extend)
   elif target >= e.rowCount: m.setCaret(m.docEnd, extend)
   else:
     let l = e.rowLine(target)
-    m.setCaret((l, colAtVisual(m.line(l), e.fDesiredV, m.tabWidth, true)), extend)
+    m.setCaret((l, e.colAtX(m.line(l), e.fDesiredX)), extend)
 
 proc pageRows(e: CodeEdit): int = max(int(e.viewport.h / e.rowH) - 1, 1)
 
@@ -1348,8 +1386,9 @@ proc insertNewline(e: CodeEdit) =
   let s = m.selection
   let start = s.startPos
   let ni = newlineInsert(m, e.fHl, start, e.indentUnit, e.indentAfter)
-  if m.replace(start, s.endPos, ni.text) and ni.text.len != ni.caretOffset:
-    m.setCaret((start.line + 1, ni.caretOffset - 1))
+  let caret = if ni.text.len != ni.caretOffset: (start.line + 1, ni.caretOffset - 1)
+              else: insertionEnd(start, ni.text)
+  discard m.edit(start, s.endPos, ni.text, ekOther, sel(caret))
 
 proc insertTab(e: CodeEdit, shift: bool) =
   let m = e.fModel
@@ -1488,7 +1527,7 @@ method doMouseDown*(e: CodeEdit, button: MouseButton, shift: ShiftState,
   if e.composition.len > 0: return
   if button == mbMiddle: return
   let m = e.fModel
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   let p = e.posAtPoint(x, y)
   if button == mbRight:
     let s = m.selection
@@ -1627,22 +1666,8 @@ proc chordKey(e: CodeEdit, key: var Key, shift: ShiftState): bool =
   if ssCtrl notin shift: return false
   if key == '0'.key: e.foldAll()
   elif key == 'j'.key: e.unfoldAll()
-  elif key == 'c'.key:
-    let tok = e.lineComment
-    let (f, l) = selectedLines(e.fModel)
-    var all = true
-    for i in f .. l:
-      let ln = e.fModel.line(i)
-      if firstNonBlank(ln) < ln.len and not ln.continuesWith(tok, firstNonBlank(ln)): all = false
-    if not all or tok.len == 0: e.toggleComment()
-  elif key == 'u'.key:
-    let tok = e.lineComment
-    let (f, l) = selectedLines(e.fModel)
-    var all = true
-    for i in f .. l:
-      let ln = e.fModel.line(i)
-      if firstNonBlank(ln) < ln.len and not ln.continuesWith(tok, firstNonBlank(ln)): all = false
-    if all and tok.len > 0: e.toggleComment()
+  elif key == 'c'.key: e.commentSelection(cmAdd)
+  elif key == 'u'.key: e.commentSelection(cmRemove)
   else: return false
   key = Key(0)
   true
@@ -1671,7 +1696,7 @@ method doKeyDown*(e: CodeEdit, key: var Key, shift: ShiftState) =
   var handled = true
   var follow = true
   var touchedAlready = false
-  if not keepV: e.fDesiredV = -1
+  if not keepV: e.fDesiredX = -1
   if key == keyLeft: e.moveHoriz(false, ctrl, shf)
   elif key == keyRight: e.moveHoriz(true, ctrl, shf)
   elif key == keyUp and ctrl and not shf:
@@ -1749,7 +1774,7 @@ method doKeyPress*(e: CodeEdit, text: var string) =
   var t = text
   t = t.replace("\t", "")                     # Tab is a key, handled in doKeyDown
   if t.len > 0 and not e.readOnly:
-    e.fDesiredV = -1
+    e.fDesiredX = -1
     e.typeChars(t)
   if had or t.len > 0: e.touched()
 
@@ -2162,7 +2187,7 @@ proc initCodeEdit*(e: CodeEdit, owner: Component = nil) =
   e.fHiLine = true
   e.fHiBrackets = true
   e.fAutoHl = true
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.fFindOpts = SearchOptions(ignoreCase: true)
   e.fLastCaret = (0, 0)
   e.fMaxLen = 0
@@ -2179,6 +2204,7 @@ proc initCodeEdit*(e: CodeEdit, owner: Component = nil) =
   discard e.fModel.addChangeListener(proc(first, oldN, newN: int) =
     ed.modelChanged(first, oldN, newN))
   e.fModel.onSelection = proc() = ed.selectionChanged()
+  e.fEmptyHit = ((-1, -1), -1)
 
 proc newCodeEdit*(parent: Container = nil, text = "", left = 0'f32, top = 0'f32,
                   width = -1'f32, height = -1'f32): CodeEdit {.discardable.} =
@@ -2207,7 +2233,7 @@ proc loadFromFile*(e: CodeEdit, path: string): LoadReport {.discardable.} =
   e.rebuildFold()
   e.fMaxStale = true
   e.rescanMax()
-  e.fDesiredV = -1
+  e.fDesiredX = -1
   e.fLastCaret = (-1, -1)
   e.scrollTo(0, 0)
   e.ensureWarm()

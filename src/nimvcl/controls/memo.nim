@@ -59,7 +59,7 @@
 import std/[unicode, monotimes, times, strutils]
 import ../graphics/context
 import ../core/[timer, form]
-import ./common, ./scrolling, ./memomodel, ./edit
+import ./common, ./scrolling, ./memomodel, ./edit, ./textutil
 export memomodel.MemoPos, scrolling
 
 type
@@ -241,21 +241,6 @@ proc computeBreaks(e: Memo, s: string, w: float32): seq[int32] =
     start = b
 
 # ---------------------------------------------------------- generic helpers
-
-proc spliceSeq[T](s: var seq[T], first, oldN, newN: int) =
-  ## Makes room for `newN` entries in place of `oldN` at `first` (the entries
-  ## in range keep their values; new ones are default).
-  if oldN == newN: return
-  if newN < oldN:
-    let d = oldN - newN
-    for i in first + oldN ..< s.len: s[i - d] = move s[i]
-    s.setLen(s.len - d)
-  else:
-    let d = newN - oldN
-    let old = s.len
-    s.setLen(old + d)
-    for i in countdown(old - 1, first + oldN): s[i + d] = move s[i]
-    for i in first + oldN ..< first + newN: s[i] = default(T)
 
 # ------------------------------------------------------------ rows (Fenwick)
 
@@ -674,9 +659,7 @@ proc `text=`*(e: Memo, v: string) =
   ## Replaces the text (caret to the start, undo history cleared, scrolled to
   ## the top). Fires `onChange` when the text differs.
   e.fMaxDirty = true
-  let old = e.model.text
-  e.model.setText(v)
-  let same = e.model.text == old        # compared after sanitising / maxLength
+  let same = not e.model.setText(v)     # compared after sanitising / maxLength
   if same: e.fChanged = false
   e.fPristine = e.model.text.len == 0
   e.touched()
@@ -1022,7 +1005,7 @@ method doKeyDown*(e: Memo, key: var Key, shift: ShiftState) =
     if ctrl: m.moveDocEnd(shf)
     elif e.fWrap: e.visualHomeEnd(false, shf)
     else: m.moveEnd(shf)
-  elif key == keyBackspace and not shf:
+  elif key == keyBackspace:
     e.fEol = false
     discard m.deleteBackward(word = ctrl)
   elif key == keyDelete:
@@ -1160,7 +1143,6 @@ method paint*(e: Memo, c: Canvas) =
         let (a, b) = e.vlineBounds(line, k, text.len)
         let y = e.rowTop(row)
         if y + rh > vp.y:
-          let vt = text[a ..< b]
           var lo = 0
           var hi = 0
           var brk = false
@@ -1179,7 +1161,7 @@ method paint*(e: Memo, c: Canvas) =
             if hi > lo:
               e.drawRun(c, text, lo, hi, o.x + e.widthTabs(text, a, lo), y, selTxt)
               e.drawRun(c, text, hi, b, o.x + e.widthTabs(text, a, hi), y, textCol)
-          elif vt.len > 0:
+          elif b > a:
             e.drawRun(c, text, a, b, o.x, y, textCol)
           if composing and line == e.compLine:
             let ca = max(e.compCol, a)

@@ -430,6 +430,95 @@ suite "codeedit":
     f.key('/'.key, {ssCtrl})
     check e.lineAt(1) == "    // # b"
 
+  test "Ctrl+K Ctrl+C only comments, Ctrl+K Ctrl+U only uncomments":
+    let f = newShown()
+    let e = f.mk("a\n# b\nc", "nim")
+    e.selectAll()
+    f.ctrl('k')
+    f.ctrl('u')                                     # not all commented: nothing
+    check e.lines == @["a", "# b", "c"]
+    f.ctrl('k')
+    f.ctrl('c')
+    check e.lines == @["# a", "# # b", "# c"]
+    f.ctrl('k')
+    f.ctrl('c')                                     # all commented: nothing
+    check e.lines == @["# a", "# # b", "# c"]
+    f.ctrl('k')
+    f.ctrl('u')
+    check e.lines == @["a", "# b", "c"]
+
+  test "redo restores the caret an edit followed by setCaret left (Enter between brackets)":
+    let f = newShown()
+    let e = f.mk("f()", "nim")
+    e.caretPos = (0, 2)
+    f.key(keyEnter)
+    let after = e.caretPos
+    check e.lines.len == 3 and after.line == 1
+    e.undo()
+    check e.lines == @["f()"]
+    e.redo()
+    check e.lines.len == 3 and e.caretPos == after
+
+  test "replaceRange keeps the selection through undo and redo":
+    let f = newShown()
+    let e = f.mk("abc def")
+    e.select((0, 4), (0, 7))
+    e.replaceRange((0, 0), (0, 0), "XX", keepSelection = true)
+    check e.selection == sel((0, 6), (0, 9))
+    e.undo()
+    check e.selection == sel((0, 4), (0, 7))
+    e.redo()
+    check e.selection == sel((0, 6), (0, 9))
+    e.replaceRange((0, 0), (0, 0), "\xFF", keepSelection = true)   # repaired to U+FFFD
+    check e.lineAt(0) == "\xEF\xBF\xBDXXabc def" and e.selection == sel((0, 9), (0, 12))
+
+  test "Up and Down follow the pixel column across wide characters":
+    let f = newShown()
+    let e = f.mk("abcdefghijkl\n世界世界世界世界\nabcdefghijkl")
+    e.caretPos = (0, 6)
+    let x0 = e.pointOfPos((0, 6)).x
+    f.key(keyDown)
+    check e.caretPos.line == 1
+    let dx = abs(e.pointOfPos(e.caretPos).x - x0)
+    check dx <= e.charWidth * 2                     # the nearest slot, not the same cell count
+    f.key(keyDown)
+    check e.caretPos.line == 2
+    check abs(e.pointOfPos(e.caretPos).x - x0) < 1
+    f.key(keyUp)
+    f.key(keyUp)
+    check e.caretPos == (0, 6)
+
+  test "F3 moves past an empty match; Replace can replace one":
+    let f = newShown()
+    let e = f.mk("ab\ncd\nef")
+    check e.find("^", SearchOptions(regex: true))
+    check e.caretPos == (0, 0)
+    check e.findNext() and e.caretPos == (1, 0)
+    check e.findNext() and e.caretPos == (2, 0)
+    check e.findNext() and e.caretPos == (0, 0)     # wraps
+    check e.replaceCurrent("> ")                    # replaces the empty match, selects the next
+    check e.lines == @["> ab", "cd", "ef"] and e.caretPos == (1, 0)
+    check e.find("$", SearchOptions(regex: true), forward = true)
+    var last = e.caretPos
+    var seen = 0
+    for i in 0 ..< 3:
+      check e.findNext()
+      if e.caretPos != last: inc seen
+      last = e.caretPos
+    check seen == 3
+
+  test "the background lexer starts again after an edit":
+    let f = newShown()
+    var s = ""
+    for i in 0 ..< 3000: s.add "let v" & $i & " = 1\n"
+    let e = f.mk(s, "nim")
+    e.highlighter.lexAll()
+    e.warmTimer.enabled = false                     # what it does once everything is lexed
+    e.caretPos = (0, 0)
+    f.typeText("x")
+    check e.highlighter.cleanCount < e.lineCount
+    check e.warmTimer.enabled
+
   test "Insert toggles overwrite mode (block caret)":
     let f = newShown()
     let e = f.mk("abcd")

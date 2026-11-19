@@ -53,42 +53,46 @@ proc indentLines*(m: CodeModel, first, last: int, unit: string): bool =
   ## Adds `unit` at the start of every non-empty line in `first .. last`.
   if m.readOnly or unit.len == 0: return false
   var s = m.selection
-  m.beginGroup()
-  for l in first .. min(last, m.lineCount - 1):
-    if m.lineLen(l) == 0: continue
-    if m.replaceInGroup((l, 0), (l, 0), unit):
-      result = true
-      s.anchor = shifted(s.anchor, l, 0, unit.len)
-      s.caret = shifted(s.caret, l, 0, unit.len)
-  if result: m.setSelection(s)
-  m.endGroup()
+  m.withGroup:
+    for l in first .. min(last, m.lineCount - 1):
+      if m.lineLen(l) == 0: continue
+      if m.replaceInGroup((l, 0), (l, 0), unit):
+        result = true
+        s.anchor = shifted(s.anchor, l, 0, unit.len)
+        s.caret = shifted(s.caret, l, 0, unit.len)
+    if result: m.setSelection(s)
 
 proc outdentLines*(m: CodeModel, first, last: int, tabWidth: int): bool =
   ## Removes one indent level (a TAB, or up to `tabWidth` spaces) from every
   ## line in `first .. last`.
   if m.readOnly: return false
   var s = m.selection
-  m.beginGroup()
-  for l in first .. min(last, m.lineCount - 1):
-    let ln = m.line(l)
-    var n = 0
-    if ln.len > 0 and ln[0] == '\t': n = 1
-    else:
-      while n < ln.len and n < max(tabWidth, 1) and ln[n] == ' ': inc n
-    if n == 0: continue
-    if m.replaceInGroup((l, 0), (l, n), ""):
-      result = true
-      s.anchor = shifted(s.anchor, l, 0, -n)
-      s.caret = shifted(s.caret, l, 0, -n)
-  if result: m.setSelection(s)
-  m.endGroup()
+  m.withGroup:
+    for l in first .. min(last, m.lineCount - 1):
+      let ln = m.line(l)
+      var n = 0
+      if ln.len > 0 and ln[0] == '\t': n = 1
+      else:
+        while n < ln.len and n < max(tabWidth, 1) and ln[n] == ' ': inc n
+      if n == 0: continue
+      if m.replaceInGroup((l, 0), (l, n), ""):
+        result = true
+        s.anchor = shifted(s.anchor, l, 0, -n)
+        s.caret = shifted(s.caret, l, 0, -n)
+    if result: m.setSelection(s)
 
 # ------------------------------------------------------------------ comments
 
-proc toggleLineComment*(m: CodeModel, first, last: int, token: string): bool =
+type CommentMode* = enum
+  cmToggle      ## uncomment when every non-blank line is commented, else comment
+  cmAdd         ## comment unless every non-blank line is already commented
+  cmRemove      ## uncomment, only when every non-blank line is commented
+
+proc commentLines*(m: CodeModel, first, last: int, token: string,
+                   mode = cmToggle): bool =
   ## Comments the lines (the token goes at the smallest indentation of the
-  ## non-blank lines) or, when every non-blank line is already commented,
-  ## removes the token and one following space.
+  ## non-blank lines) or removes the token and one following space, as `mode`
+  ## says; "every line commented" ignores blank lines.
   if m.readOnly or token.len == 0: return false
   let hi = min(last, m.lineCount - 1)
   var allCommented = true
@@ -101,28 +105,32 @@ proc toggleLineComment*(m: CodeModel, first, last: int, token: string): bool =
     anyText = true
     minIndent = min(minIndent, f)
     if not ln.continuesWith(token, f): allCommented = false
-  if not anyText: return false
+  if not anyText or (mode == cmAdd and allCommented) or
+     (mode == cmRemove and not allCommented): return false
   var s = m.selection
-  m.beginGroup()
-  for l in first .. hi:
-    let ln = m.line(l)
-    let f = firstNonBlank(ln)
-    if f >= ln.len: continue
-    if allCommented:
-      var n = token.len
-      if f + n < ln.len and ln[f + n] == ' ': inc n
-      if m.replaceInGroup((l, f), (l, f + n), ""):
-        result = true
-        s.anchor = shifted(s.anchor, l, f, -n)
-        s.caret = shifted(s.caret, l, f, -n)
-    else:
-      let ins = token & " "
-      if m.replaceInGroup((l, minIndent), (l, minIndent), ins):
-        result = true
-        s.anchor = shifted(s.anchor, l, minIndent, ins.len)
-        s.caret = shifted(s.caret, l, minIndent, ins.len)
-  if result: m.setSelection(s)
-  m.endGroup()
+  m.withGroup:
+    for l in first .. hi:
+      let ln = m.line(l)
+      let f = firstNonBlank(ln)
+      if f >= ln.len: continue
+      if allCommented:
+        var n = token.len
+        if f + n < ln.len and ln[f + n] == ' ': inc n
+        if m.replaceInGroup((l, f), (l, f + n), ""):
+          result = true
+          s.anchor = shifted(s.anchor, l, f, -n)
+          s.caret = shifted(s.caret, l, f, -n)
+      else:
+        let ins = token & " "
+        if m.replaceInGroup((l, minIndent), (l, minIndent), ins):
+          result = true
+          s.anchor = shifted(s.anchor, l, minIndent, ins.len)
+          s.caret = shifted(s.caret, l, minIndent, ins.len)
+    if result: m.setSelection(s)
+
+proc toggleLineComment*(m: CodeModel, first, last: int, token: string): bool =
+  ## `commentLines` in toggle mode.
+  m.commentLines(first, last, token, cmToggle)
 
 # ----------------------------------------------------------- whole lines
 

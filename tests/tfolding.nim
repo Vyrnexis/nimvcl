@@ -179,3 +179,69 @@ suite "bracket matching":
     let m = newCodeModel(s)
     check findMatchingBracket(m, nil, (0, 0)).found
     check not findMatchingBracket(m, nil, (0, 0), maxLines = 10).found
+
+suite "folding: incremental facts and row mapping":
+  proc naiveRow(hidden: seq[(int, int)], line: int): int =
+    result = line
+    for (a, b) in hidden:
+      if a <= line: result -= min(b, line) - a + 1
+
+  test "row mapping agrees with a linear scan over many collapsed regions":
+    var src = ""
+    for i in 0 ..< 60: src.add "r" & $i & ":\n  a\n  b\n"
+    let m = newCodeModel(src)
+    let f = newFoldMap(m)
+    for i in countup(0, 59, 3): discard f.collapse(i * 3)
+    let hidden = block:
+      var h: seq[(int, int)]
+      for r in f.hiddenRanges: h.add (r.a, r.b)
+      h
+    check hidden.len == 20
+    var rows: seq[int]
+    for l in 0 ..< m.lineCount:
+      check f.lineToRow(l) == naiveRow(hidden, l)
+      if not f.isHidden(l): rows.add l
+    check f.visibleLineCount == rows.len
+    for r in 0 ..< rows.len: check f.rowToLine(r) == rows[r]
+    var l = 0
+    var seen = 0
+    while l >= 0:
+      inc seen
+      let n = f.nextVisibleLine(l)
+      if n >= 0: check f.prevVisibleLine(n) == l
+      l = n
+    check seen == rows.len
+
+  test "typing inside a line keeps the regions; an indent change updates them":
+    let m = newCodeModel("a:\n  b\n  c\nd")
+    let f = newFoldMap(m)
+    check f.regs == @[(0, 2)]
+    discard m.insert((1, 3), "xyz")
+    check f.regs == @[(0, 2)]
+    discard m.insert((3, 0), "  ")
+    check f.regs == @[(0, 3)]
+    discard m.delete((1, 0), (1, 2))
+    check f.regs == newFoldMap(m).regs
+
+  test "incremental regions equal a fresh build after random edits":
+    for kinds in [{fkIndent}, {fkBrackets}, {fkIndent, fkBrackets, fkMarkers}]:
+      for seed in 1 .. 40:
+        var rng = initRand(seed)
+        let hl = newNimHighlighter()
+        let m = newCodeModel("proc a() =\n  if x:\n    f(1,\n      2)\n  # c\nproc b() = discard\n")
+        hl.attach(m)
+        let f = newFoldMap(m, hl, kinds)
+        let frags = ["  ", "(", ")", "\n", "x", "#[", "]#", "\"", "\n  ", "{", "}", "#region", "#endregion"]
+        for step in 0 ..< 25:
+          let l = rng.rand(m.lineCount - 1)
+          let c = min(rng.rand(8), m.lineLen(l))
+          let frag = frags[rng.rand(frags.high)]
+          if rng.rand(3) == 0 and m.lineLen(l) > c:
+            discard m.delete((l, c), (l, m.nextPos((l, c)).col))
+          else: discard m.insert((l, c), frag)
+          if rng.rand(5) == 0: discard m.undo()
+          if rng.rand(2) == 0:
+            let fresh = newFoldMap(m, hl, kinds)
+            check f.regs == fresh.regs
+        let fresh = newFoldMap(m, hl, kinds)
+        check f.regs == fresh.regs
