@@ -430,6 +430,27 @@ suite "main menu":
     Application.theme = themeLight()
     check x.f.paintIfDirty() or true
 
+  test "a freed PopupMenu neither re-registers nor fires its shortcuts":
+    let x = build()
+    let pm = newPopupMenu(x.f)
+    pm.addItem("&Copy", mk("pcopy"), shortcut("Ctrl+K"))
+    let panel = newPanel(x.f, "ctx", 20, 80, 200, 150)
+    attachPopupMenu(panel, pm)
+    log = @[]
+    pm.free()
+    check panel.popupMenu == nil
+    x.f.win.click(60, 120, mbRight)
+    check chainLen(x.f) == 0
+    x.f.tap('k', {ssCtrl})
+    check log.len == 0
+
+  test "MenuItem[] and delete ignore out-of-range indices":
+    let root = newMenuItem("r")
+    root.addItem("a")
+    check root[1] == nil and root[-1] == nil
+    root.delete(5)
+    check root.count == 1
+
   test "popup(): onPopup runs before the visible-items check (review 3)":
     let x = build()
     let pm = newPopupMenu(x.f)
