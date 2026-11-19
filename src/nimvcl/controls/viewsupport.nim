@@ -1,19 +1,11 @@
 ## Small drawing / input helpers shared by `TreeView` and `ListView`.
 
-import std/[monotimes, strutils]
 import ./common, ./checkbox, ./listbox
-export checkbox.CheckBoxState, listbox.ItemState, listbox.ItemStates
+export checkbox.CheckBoxState, listbox.ItemState, listbox.ItemStates,
+       listbox.nowMs, listbox.prefixIC
 
 const CheckSize* = 14'f32      ## side of the check boxes drawn inside the views
 
-proc nowMs*(): int64 = getMonoTime().ticks div 1_000_000
-
-func prefixIC*(s, lowerPrefix: string): bool =
-  ## `s` starts with `lowerPrefix` (ASCII case-insensitive).
-  if s.len < lowerPrefix.len: return false
-  for j in 0 ..< lowerPrefix.len:
-    if toLowerAscii(s[j]) != lowerPrefix[j]: return false
-  true
 
 proc drawCheckGlyph*(c: Canvas, box: RectF, state: CheckBoxState, t: Theme,
                      enabled = true) =

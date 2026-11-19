@@ -473,6 +473,20 @@ proc itemAt*(lv: ListView, p: PointF): int =
     i = int(floor(cx / float64(lv.cellW))) * rpc + row
   if i < 0 or i >= lv.count: -1 else: i
 
+proc dragTarget(lv: ListView, p: PointF): int =
+  ## The item a drag selection extends to: the one under `p`, else the first /
+  ## last item when the pointer is before / past the items.
+  let vp = lv.viewport
+  let q = pointF(min(max(p.x, vp.x), vp.right - 1), min(max(p.y, vp.y), vp.bottom - 1))
+  result = lv.itemAt(q)
+  if result >= 0 or lv.count == 0: return
+  let last = lv.itemRect(lv.count - 1)
+  let first = lv.itemRect(0)
+  if q.y >= last.bottom or (lv.fStyle == vsList and q.x >= last.right):
+    result = lv.count - 1
+  elif q.y < first.y or (lv.fStyle == vsList and q.x < first.x):
+    result = 0
+
 proc lastMousePos*(lv: ListView): PointF =
   ## Client position of the last mouse move / press (for `onDblClick` etc.).
   pointF(lv.fMouseX, lv.fMouseY)
@@ -779,6 +793,7 @@ proc insertItem(lv: ListView, index: int, caption: string,
   lv.renumber(i + 1)
   lv.refresh()
   lv.layoutEdit()                        # the edited item may have moved
+  lv.hotUpdate()
 
 proc deleteItem(lv: ListView, i: int) =
   if lv.fOwnerData or i < 0 or i >= lv.fItems.len: return
@@ -803,6 +818,7 @@ proc deleteItem(lv: ListView, i: int) =
   if wasSel or wasFocus: lv.touch()
   lv.refresh()
   lv.scrollBy(0, 0)
+  lv.hotUpdate()
   lv.notify(v, SelSnap())
 
 proc clearItems(lv: ListView) =
@@ -1200,6 +1216,7 @@ method doMouseMove*(lv: ListView, shift: ShiftState, x, y: float32) =
   lv.fMouseX = x
   lv.fMouseY = y
   let p = pointF(x, y)
+  if lv.fResizeCol >= lv.fColumns.len: lv.fResizeCol = -1   # a handler removed it
   if lv.fResizeCol >= 0:
     if ssLeft in shift:
       let c = lv.fColumns[lv.fResizeCol]
@@ -1209,7 +1226,7 @@ method doMouseMove*(lv: ListView, shift: ShiftState, x, y: float32) =
     else:
       lv.fResizeCol = -1
   elif lv.fDragging and ssLeft in shift and lv.count > 0:
-    let i = lv.itemAt(p)
+    let i = lv.dragTarget(p)
     if i >= 0 and i != lv.fIndex:
       let v = lv.fVer
       let sn = lv.snap()

@@ -145,6 +145,25 @@ suite "listbox":
     f.tap(keySpace)
     check lb.selectedIndices == @[2, 3]
 
+  test "the hover row follows the pointer after an insert or delete":
+    let f = newShown()
+    let lb = mkList(f, 10)
+    var hot = -1
+    lb.style = lbOwnerDraw
+    lb.onDrawItem = proc(s: Control, c: Canvas, i: int, r: RectF, st: ItemStates) =
+      if isHot in st: hot = i
+    f.moveTo(rowX, rowY(3))
+    discard f.paintIfDirty()
+    check hot == 3
+    lb.insert(0, "new")
+    hot = -1
+    discard f.paintIfDirty()
+    check hot == 3                       # the pointer did not move: row 3 is still under it
+    lb.delete(0)
+    hot = -1
+    discard f.paintIfDirty()
+    check hot == 3
+
   test "drag selects":
     let f = newShown()
     let lb = mkList(f, 20)

@@ -96,7 +96,7 @@ const
   ItemPadding = 8'f32
   DragScrollMs = 45
 
-proc nowMs(): int64 = getMonoTime().ticks div 1_000_000
+proc nowMs*(): int64 = getMonoTime().ticks div 1_000_000
 
 # ----------------------------------------------------------------- basics
 
@@ -351,6 +351,7 @@ proc insert*(lb: ListBox, index: int, s: string) =
   lb.shiftIndices(i, 1)
   lb.fItems.insert(s, i)
   lb.refresh()
+  lb.updateHot()                         # the row under a still pointer changed
 
 proc add*(lb: ListBox, s: string) =
   if lb.isVirtual: return
@@ -372,6 +373,7 @@ proc delete*(lb: ListBox, i: int) =
   if wasSel or wasFocus: lb.touch()
   lb.refresh()
   lb.scrollBy(0, 0)         # re-clamp
+  lb.updateHot()
   lb.notify(v)
 
 proc clear*(lb: ListBox) =
@@ -582,7 +584,8 @@ proc moveFocus(lb: ListBox, target: int, shift: ShiftState) =
   lb.makeVisible(target)
   lb.notify(v)
 
-func prefixIC(s, lowerPrefix: string): bool =
+func prefixIC*(s, lowerPrefix: string): bool =
+  ## `s` starts with `lowerPrefix` (ASCII case-insensitive; the prefix is already lower case).
   if s.len < lowerPrefix.len: return false
   for j in 0 ..< lowerPrefix.len:
     if toLowerAscii(s[j]) != lowerPrefix[j]: return false

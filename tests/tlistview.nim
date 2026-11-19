@@ -928,3 +928,14 @@ suite "listview (selection model)":
     let ms = float((getMonoTime() - t0).inNanoseconds) / 1e6
     check added == 2_000_000 and removed == 2_000_000
     echo "  [listview perf] select all / clear of 2M virtual rows with handlers: ", ms, " ms"
+
+  test "drag selection past the last row selects up to it":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 5)
+    lv.multiSelect = true
+    let p1 = lv.fpos(ctr(lv.captionRect(1)))
+    f.feed(ekMouseDown, p1.x, p1.y)
+    let below = lv.fpos(pointF(ctr(lv.captionRect(1)).x, lv.clientRect.bottom - 3))
+    f.feed(ekMouseMove, below.x, below.y, shift = {ssLeft})
+    f.feed(ekMouseUp, below.x, below.y)
+    check lv.selectedIndices == @[1, 2, 3, 4]

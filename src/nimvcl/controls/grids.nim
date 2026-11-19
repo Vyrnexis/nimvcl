@@ -1156,6 +1156,7 @@ method sizeChanged*(g: StringGrid) =
   for r in 0 ..< g.fData.len:
     if g.fData[r].len > g.colCount: g.fData[r].setLen(g.colCount)
   if g.fSortCol >= g.colCount: g.fSortCol = -1
+  if g.fAligns.len > g.colCount: g.fAligns.setLen(g.colCount)
 
 func cells*(g: StringGrid): CellsProxy = CellsProxy(g: g)
 proc `[]`*(p: CellsProxy, col, row: int): string = p.g.cellOf(col, row)
