@@ -15,7 +15,7 @@ nimflags=(); names=()
 for a in "$@"; do
   case "$a" in -*) nimflags+=("$a");; *) names+=("$(basename "$a" .nim)");; esac
 done
-flags=(--hints:off --warnings:off "${nimflags[@]}" --outdir:"$out" --nimcache:"$out/cache")
+flags=(--hints:off --warnings:off ${nimflags[@]+"${nimflags[@]}"} --outdir:"$out" --nimcache:"$out/cache")
 fail=0
 run() {   # run <test file>
   local name; name=$(basename "$1" .nim)
