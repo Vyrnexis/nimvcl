@@ -103,6 +103,9 @@ var
   initialized = false
   cjkFile = ""
 
+func `==`*(a, b: FontSpec): bool =
+  a.family == b.family and a.size == b.size and a.style == b.style and a.color == b.color
+
 func font*(family = "", size = DefaultFontSize, style: set[FontStyle] = {}): FontSpec =
   ## Builds a `FontSpec`.
   FontSpec(family: family, size: size, style: style)

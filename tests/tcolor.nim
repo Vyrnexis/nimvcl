@@ -1,7 +1,16 @@
 import std/unittest
-import nimvcl/graphics/color
+import nimvcl/graphics/[color, font]
 
 suite "color":
+  test "equality of colors and font specs":
+    check rgb(1, 2, 3) == rgb(1, 2, 3)
+    check rgb(1, 2, 3) != rgba(1, 2, 3, 4)
+    check font("sans", 12) == font("sans", 12)
+    check font("sans", 12) != font("sans", 13)
+    check font("sans", 12) != font("sans", 12, {fsBold})
+    var f = font("sans", 12)
+    f.color = rgb(1, 2, 3)
+    check f != font("sans", 12)
   test "hex parse":
     check parseColor("#ff8000") == rgb(255, 128, 0)
     check parseColor("ff8000") == rgb(255, 128, 0)

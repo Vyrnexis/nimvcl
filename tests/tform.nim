@@ -259,6 +259,25 @@ suite "mouse routing":
     check take().len == 0
     f.destroy()
 
+  test "event observers can be removed, also while they run":
+    let f = newShown()
+    var first, second = 0
+    var removeFirst: EventObserver
+    let b = proc(f: Form, pe: PlatformEvent) = inc second
+    removeFirst = proc(f: Form, pe: PlatformEvent) =
+      inc first
+      Application.removeEventObserver(removeFirst)
+    Application.addEventObserver(removeFirst)
+    Application.addEventObserver(b)
+    f.moveTo(5, 5)
+    f.moveTo(6, 6)
+    check first == 1
+    check second == 2                    # the next observer still ran each time
+    Application.removeEventObserver(b)
+    f.moveTo(7, 7)
+    check second == 2
+    f.destroy()
+
   test "double click":
     let f = newShown()
     discard probe(f, "a", 10, 10, 100, 50)
