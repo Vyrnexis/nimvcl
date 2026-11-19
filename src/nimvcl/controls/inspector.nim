@@ -67,6 +67,7 @@ type
     value: PropValue
     mixed: bool
     modified: bool
+    overridden: bool          ## `isOverridden` said yes (filled with `modified`)
 
   EditKind = enum ekNone, ekText, ekCombo
 
@@ -79,6 +80,8 @@ type
   HandlerListEvent* = proc(sender: Control, target: Obj, event: string): seq[string]
   ChoicesEvent* = proc(sender: Control, target: Obj, prop: string): seq[Obj]
   FontFamiliesEvent* = proc(sender: Control, target: Obj): seq[string]
+  ContextMenuEvent* = proc(sender: Control, prop: string, p: PointF)
+  OverriddenEvent* = proc(prop: string): bool
 
   ObjectInspector* = ref object of ScrollingControl
     fTargets: seq[Obj]
@@ -124,6 +127,17 @@ type
       ## shown. When nil the named objects of the target's form are offered
       ## (found by walking up from the target), which is wrong for a target
       ## shown inside a design surface: a designer supplies its form's objects.
+    onContextMenu*: ContextMenuEvent
+      ## A right click was released over the inspector. The row under the cursor
+      ## was selected when the button went down; `prop` is its dotted property
+      ## name ("" over a category, empty space or the header) and `p` the point
+      ## in the inspector's client coordinates (`clientToForm` for a popup).
+      ## Called before the control's own `popupMenu` is served, so the host can
+      ## adjust that menu for the row.
+    isOverridden*: OverriddenEvent
+      ## Host predicate: the value of property `prop` (dotted) differs from the
+      ## ancestor's (an inherited form). Such rows show their name in bold. The
+      ## answer is cached per row until the next `refresh` / rebuild.
     onGetFontFamilies*: FontFamiliesEvent
       ## The family names of the host's project fonts, offered under "Project" in
       ## the `font.family` drop-down. When nil the families registered with
@@ -229,6 +243,8 @@ proc rowValue(ins: ObjectInspector, i: int): lent Row =
     ins.fRows[i].value = v
     ins.fRows[i].mixed = mixed
     ins.fRows[i].modified = modified
+    ins.fRows[i].overridden = ins.isOverridden != nil and info.name.len > 0 and
+                              ins.isOverridden(info.name)
     ins.fRows[i].shown = true
   ins.fRows[i]
 
@@ -462,6 +478,11 @@ proc valueTextOf*(ins: ObjectInspector, name: string): string =
   if i < 0 or ins.fRows[i].kind != rkProp: return ""
   let (v, mixed) = ins.valueOf(ins.fRows[i].info)
   if mixed: "" else: valueText(ins.fRows[i].info, v)
+
+proc overridden*(ins: ObjectInspector, name: string): bool =
+  ## Whether `isOverridden` flags property `name` (cached like the value).
+  let i = ins.findRowByKey(name)
+  i >= 0 and ins.fRows[i].kind == rkProp and ins.rowValue(i).overridden
 
 proc isBold*(ins: ObjectInspector, name: string): bool =
   ## Whether the value of `name` differs from a fresh instance (drawn bold).
@@ -922,7 +943,8 @@ method paint*(ins: ObjectInspector, c: Canvas) =
                     if sel and focused: t.selectionText else: t.textMuted)
       nx += IndentW
       let leafName = row.info.name[row.info.name.rfind('.') + 1 .. ^1]
-      c.textRect(leafName, fnt, rectF(nx, rr.y, max(nr.right - nx - 4, 0), rr.h),
+      let nameFont = if ins.isOverridden != nil and ins.rowValue(i).overridden: bold else: fnt
+      c.textRect(leafName, nameFont, rectF(nx, rr.y, max(nr.right - nx - 4, 0), rr.h),
                  if sel and focused and enabled: t.selectionText
                  elif not enabled: t.textDisabled else: t.text, taLeft, vaCenter)
       # value cell
@@ -1022,6 +1044,13 @@ method doMouseDown*(ins: ObjectInspector, button: MouseButton, shift: ShiftState
             ins.handleDouble(i)
           else:
             ins.beginEdit(i)
+  elif button == mbRight:
+    ins.setFocus()
+    if ins.fEditKind != ekNone:
+      if not ins.commitEdit(): ins.cancelEdit()
+    if y >= TopH:
+      let i = ins.rowAt(y)
+      if i >= 0: ins.selectRow i
   procCall doMouseDown(Control(ins), button, shift, x, y)
 
 proc cycleValue(ins: ObjectInspector, row: Row) =
@@ -1064,6 +1093,10 @@ method doMouseUp*(ins: ObjectInspector, button: MouseButton, shift: ShiftState,
                   x, y: float32) =
   ins.fDragSplit = false
   procCall doMouseUp(Control(ins), button, shift, x, y)
+  if button == mbRight and ins.onContextMenu != nil:
+    let i = if y >= TopH: ins.rowAt(y) else: -1
+    ins.onContextMenu(ins, (if i >= 0 and ins.fRows[i].kind == rkProp: ins.fRows[i].key else: ""),
+                      pointF(x, y))
 
 method doMouseMove*(ins: ObjectInspector, shift: ShiftState, x, y: float32) =
   if ins.fDragSplit and ssLeft in shift:

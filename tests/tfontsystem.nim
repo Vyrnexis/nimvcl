@@ -93,6 +93,41 @@ suite "fonts from memory":
     destroyRenderer(rend)
     destroySurface(surf)
 
+  test "unregisterFontFamily drops the family and flushes the caches":
+    let reg = readFile(CompiledFonts / "NotoSans-Regular.ttf")
+    unregisterFontFamily("never registered")                   # safe
+    registerFontFamilyData("Gone Family", reg)
+    check "gone family" in registeredFontFamilies()
+    doAssert initSdl(InitFlags(0)), sdlError()
+    doAssert initTtf(), sdlError()
+    let surf = createSurface(200, 60, PIXELFORMAT_RGBA32)
+    let rend = createSoftwareRenderer(surf)
+    let ctx = newRenderContext(rend, 1.0)
+    let c = beginFrame(ctx)
+    c.drawText("Hello", font("Gone Family", 16), 4, 4, clBlack)
+    c.endFrame()
+    check ctx.fontCount > 0
+    let epoch = fontRegistryEpoch()
+    unregisterFontFamily("GONE family")                        # case-insensitive
+    check fontRegistryEpoch() > epoch
+    check "gone family" notin registeredFontFamilies()
+    check fontSource(font("Gone Family")) == "embedded"        # back to the fallback
+    let c2 = beginFrame(ctx)                                   # flushes what used it
+    check ctx.fontCount == 0 and ctx.textCount == 0
+    check c2.measureText("Hello", font("Gone Family", 16)).w > 10
+    c2.endFrame()
+    unregisterFontFamily("gone family")                        # twice is fine
+    ctx.close()
+    destroyRenderer(rend)
+    destroySurface(surf)
+
+  test "unregistering a replaced bundled family restores it":
+    let reg = readFile(CompiledFonts / "NotoSans-Regular.ttf")
+    registerFontFamilyData("sans", reg)
+    check fontSource(font("sans")) == "registered"
+    unregisterFontFamily("sans")
+    check fontSource(font("sans")) == "embedded"
+
   test "fontFileInfo reads family and style from a file":
     let i = fontFileInfo(CompiledFonts / "NotoSans-Bold.ttf")
     check i.family.len > 0

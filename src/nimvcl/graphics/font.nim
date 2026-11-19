@@ -194,6 +194,31 @@ proc addFallbackFontFile*(path: string) =
     fallbackFiles.add path
     inc fallbackEpoch
 
+proc unregisterFontFamily*(family: string) =
+  ## Drops a family added with `registerFontFamily` / `registerFontFamilyData`
+  ## (case-insensitive); a bundled family of the same name comes back. Safe for
+  ## unknown names. Rendering contexts flush their opened fonts and text caches
+  ## using it at the start of the next frame (the registry epoch changes). The
+  ## memory of font data is kept, since open fonts may still read it.
+  let key = family.toLowerAscii
+  if key notin userFamilies: return
+  userFamilies.excl key
+  for variant in ["regular", "bold", "italic", "bolditalic"]:
+    let name = "user/" & key & "/" & variant
+    if name in memoryFonts:
+      retiredFonts.add memoryFonts[name]
+      memoryFonts.del name
+  families.del key
+  case key   # a bundled family that was replaced comes back
+  of "sans":
+    families[key] = FontFiles(regular: bundledFont("NotoSans-Regular.ttf"),
+                              bold: bundledFont("NotoSans-Bold.ttf"),
+                              italic: bundledFont("NotoSans-Italic.ttf"))
+  of "mono":
+    families[key] = FontFiles(regular: bundledFont("NotoSansMono-Regular.ttf"))
+  else: discard
+  inc fallbackEpoch
+
 proc winFontsDir(): string =
   ## `%WINDIR%\\Fonts` ("" off Windows, so the candidates never match there).
   when defined(windows): getEnv("WINDIR", "C:\\Windows") / "Fonts"

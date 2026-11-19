@@ -527,3 +527,49 @@ suite "ObjectInspector editors":
       check "finite" in r.ins.lastError
       check b.width == w
       r.ins.cancelEdit()
+
+  test "a right click selects the row under the cursor and reports it":
+    let r = rig()
+    let b = r.mkButton()
+    r.ins.inspect(b)
+    r.f.settle
+    r.ins.selectProp("caption")
+    var got: seq[string]
+    var pts: seq[PointF]
+    r.ins.onContextMenu = proc(s: Control, prop: string, p: PointF) =
+      got.add prop
+      pts.add p
+    r.f.settle
+    let p = r.namePoint("left")
+    r.f.feed(ekMouseDown, p.x, p.y, button = mbRight)
+    check r.ins.selectedProp == "left"
+    r.f.feed(ekMouseUp, p.x, p.y, button = mbRight)
+    check got == @["left"]
+    check pts.len == 1 and pts[0].x > 0
+    # over a category: the row is selected, the host hears ""
+    let cat = r.ins.rowRect(0)
+    let cp = r.ins.clientToForm(pointF(cat.x + 40, cat.y + cat.h / 2))
+    r.f.feed(ekMouseDown, cp.x, cp.y, button = mbRight)
+    r.f.feed(ekMouseUp, cp.x, cp.y, button = mbRight)
+    check got == @["left", ""]
+    check not r.ins.editing
+
+  test "isOverridden marks rows, cached until refresh":
+    let r = rig()
+    let b = r.mkButton()
+    r.ins.inspect(b)
+    var calls = 0
+    var over = true
+    r.ins.isOverridden = proc(prop: string): bool =
+      inc calls
+      over and prop == "caption"
+    check r.ins.overridden("caption")
+    check not r.ins.overridden("left")
+    let n = calls
+    check r.ins.overridden("caption")
+    check calls == n                       # cached
+    over = false
+    check r.ins.overridden("caption")      # still the cached answer
+    r.ins.refresh()
+    check not r.ins.overridden("caption")
+    r.f.settle                             # painting with the predicate set works

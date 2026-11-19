@@ -9,6 +9,12 @@ between minor versions.
 
 ### Added
 
+- `ObjectInspector`: a right click selects the row under the cursor, and
+  `onContextMenu(prop, point)` lets the host show its popup for that row;
+  `isOverridden(prop)` (host predicate, cached per row) draws properties that
+  differ from the ancestor's value with a bold name.
+- `unregisterFontFamily(name)` drops a registered family and flushes the cached
+  fonts and texts that used it (a replaced bundled family comes back).
 - Design-time gaps closed (Object Inspector, form files, `loadForm`):
   `StringGrid.cells` with a cell editor dialog, `colWidths` / `rowHeights`;
   `Edit.passwordChar`; `Button.images`, `imageIndex` and `imageAlignment`
