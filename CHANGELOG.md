@@ -5,6 +5,58 @@ All notable changes to nimvcl are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0 the API can still change
 between minor versions.
 
+## [0.1.4] - 2026-11-19
+
+Fixes from a full code review: logic first, then structure and speed.
+
+### Fixed
+
+- Regex search: patterns with nested repetition (`(a|aa)+$`) no longer take
+  seconds or minutes; groups that can match empty (`(a*)*b`) now match.
+  Whole word works with patterns that start or end with punctuation.
+- Find: F3 and Replace move past an empty match; Find Previous no longer skips
+  positions.
+- Undo past a save point followed by a new edit no longer reports the text as
+  unmodified.
+- Object Inspector: leaving an unchanged editor no longer writes it back (a
+  mixed multi-selection value was wiped), and committing on blur no longer
+  steals focus from the clicked control.
+- Form files: `TabControl.tabIndex` and other properties that depend on
+  others survive save and load (properties can declare `after` dependencies);
+  NaN/inf and out-of-range integers are rejected with a clear error; an
+  inherited control under a non-inherited parent is rejected.
+- Designer: Esc during a rubber band restores the selection; a second button
+  during a drag no longer corrupts it; undo after restoring a deleted
+  container works; pictures are copied into the project only on OK.
+- A modal opened from a mouse handler no longer leaves capture stuck; a click
+  is not delivered to a control the mouse-up handler removed.
+- Freeing a control stops the timers it owns; SDL timer events are coalesced.
+- `Button.modalResult` is set before `onClick`, so a handler can veto it.
+- Actions: freeing an Action or ActionList restores upgraded tool buttons;
+  `onUpdate` handlers may change the lists safely.
+- Docking: Ctrl+Tab reaches a PageControl inside a dock panel; appending to a
+  group lands last; an emptied floating window is freed after its event.
+- A freed PopupMenu no longer keeps firing its shortcuts.
+- StringGrid: row heights follow insert, delete and sort.
+- TreeView: `selectNode` respects a refused expansion; paint no longer
+  changes layout.
+- ListView: deleting an unselected, unfocused item no longer fires onChange.
+
+### Changed
+
+- Replace all builds the new text once: one edit and one undo step (40k
+  lines: 29 s to under 0.1 s).
+- Layout no longer repaints the whole form; font resolution is cached and
+  fallback fonts open only for non-ASCII text.
+- Action updates run from a registry of action lists instead of walking every
+  form after each event batch.
+- Tab strips, grid sorting, multi-selection and the Object Inspector paint
+  path avoid repeated work.
+- Shared code: `textutil` (UTF-8 and word helpers), `ClickableControl`
+  (hover/press/activation for Button, CheckBox, RadioButton, ToolButton),
+  `ImageListRef` (one image-list subscription for all controls),
+  `indexset` (selection as sorted runs).
+
 ## [0.1.3] - 2026-11-19
 
 ### Added
