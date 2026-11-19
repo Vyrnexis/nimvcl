@@ -7,7 +7,8 @@ import nimvcl/core/[types, control, form, application, input, layout]
 import nimvcl/platform/[events, window]
 import nimvcl/controls/[common, button, checkbox, edit, panel, progressbar, trackbar,
                         spinedit, splitter, statusbar, toolbar, pagecontrol,
-                        flowpanel, label]
+                        flowpanel, label, imagelist]
+import nimvcl/graphics/[image, color]
 
 func `==`(a, b: RectF): bool =
   a.x == b.x and a.y == b.y and a.w == b.w and a.h == b.h
@@ -887,3 +888,47 @@ suite "standard controls":
     discard f.paintIfDirty()
     il2.add newImage(16, 16, rgb(0, 0, 255))
     check not f.ui.needsPaint
+
+suite "button images":
+  Application.init()
+
+  test "images, imageIndex and imageAlignment: size, repaint and cleanup":
+    let f = newShown(300, 200)
+    let il = newImageList(16, 16)
+    il.add newImage(16, 16, rgb(255, 0, 0))
+    let b = newButton(f, "Open", 10, 10)
+    f.lay
+    let plain = b.preferredSize
+    check b.imageIndex == -1 and b.images == nil and b.imageAlignment == iaLeft
+    b.images = il
+    check b.preferredSize == plain               # imageIndex -1: no image
+    b.imageIndex = 0
+    check b.preferredSize.w == plain.w + 16 + 6
+    b.imageAlignment = iaTop
+    check b.preferredSize.w == plain.w and b.preferredSize.h > plain.h
+    b.imageAlignment = iaRight
+    discard f.paintIfDirty()
+    check not f.ui.needsPaint
+    il.add newImage(16, 16, rgb(0, 255, 0))      # a change of the list repaints
+    check f.ui.needsPaint
+    discard f.paintIfDirty()
+    b.imageIndex = 1
+    check f.ui.needsPaint
+    b.imageIndex = 7                             # no such image: laid out as without one
+    check b.preferredSize == plain
+    b.caption = ""
+    b.imageIndex = 0
+    check b.preferredSize.w == 64'f32            # the image alone: the minimum width
+    discard f.paintIfDirty()                     # paints every alignment
+    for a in ImageAlignment:
+      b.imageAlignment = a
+      discard f.paintIfDirty()
+    b.enabled = false
+    discard f.paintIfDirty()
+    check il.listenerCount == 1
+    b.images = nil
+    check il.listenerCount == 0
+    b.images = il
+    b.free
+    check il.listenerCount == 0
+    f.freeWindow()
