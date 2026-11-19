@@ -157,29 +157,31 @@ suite "picture dialog":
     let host = newPropEditorHost(ctx() / "proj")
     let d = newPictureDlg(host, nil)
     check d.loadFile(ctx() / "proj" / "img" / "r.png")
-    check d.picked.source == "img/r.png"
     check d.preview.picture == d.picked
+    check d.commit.source == "img/r.png"
     check d.pathLbl.caption == "img/r.png"
 
   test "a file outside is copied into images/":
     let host = newPropEditorHost(ctx() / "proj")
     let d = newPictureDlg(host, nil)
     check d.loadFile(nfmDir / "images" / "blue.png")
-    check d.picked.source == "images/blue.png"
+    # nothing is copied while the dialog is open (Cancel leaves the project alone)
+    check not fileExists(ctx() / "proj" / "images" / "blue.png")
+    check d.commit.source == "images/blue.png"
     check fileExists(ctx() / "proj" / "images" / "blue.png")
     # the same file again: no second copy; a different file of that name: a new one
     check d.loadFile(nfmDir / "images" / "blue.png")
-    check d.picked.source == "images/blue.png"
+    check d.commit.source == "images/blue.png"
     writeFile(ctx() / "other.png", readFile(nfmDir / "images" / "red.png"))
     copyFile(ctx() / "other.png", ctx() / "blue.png")
     check d.loadFile(ctx() / "blue.png")
-    check d.picked.source == "images/blue_1.png"
+    check d.commit.source == "images/blue_1.png"
 
   test "imagesDir chooses the copy target":
     let host = newPropEditorHost(ctx() / "proj", ctx() / "proj" / "art")
     let d = newPictureDlg(host, nil)
     check d.loadFile(nfmDir / "images" / "yellow.bmp")
-    check d.picked.source == "art/yellow.bmp"
+    check d.commit.source == "art/yellow.bmp"
 
   test "a bad file keeps the old picture and shows an error":
     let host = newPropEditorHost(ctx() / "proj")
@@ -212,7 +214,7 @@ suite "picture dialog":
     for _ in 0 ..< 20:
       Application.processMessages(10)
       if d.picked != nil: break
-    check d.picked != nil and d.picked.source == "images/green.png"
+    check d.picked != nil and d.commit.source == "images/green.png"
     check req.kind == fdkOpen
     check ("Images", "png;jpg;jpeg;bmp;gif") in req.filters
 
@@ -313,7 +315,8 @@ suite "editors through the inspector":
     check il.count == 2
     check il.image(0).source == "images/green.png"
     check il.image(1).source == "images/blue.png"
-    check fileExists(ctx() / "proj" / "images" / "red.png")
+    check not fileExists(ctx() / "proj" / "images" / "red.png")   # dropped before OK: never copied
+    check fileExists(ctx() / "proj" / "images" / "blue.png")
     check ins.valueTextOf("images") == "(2 images)"
     check "images = (" in objectToNfm(Obj(il))
 

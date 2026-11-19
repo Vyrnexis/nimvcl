@@ -104,6 +104,7 @@ type
     hasBefore, hasAfter: bool
     before, after: Placement
     snap: string
+    tree: seq[Control]          ## the deleted control and its descendants (preorder), to remap history on restore
 
   DesignOp = ref object
     items: seq[OpItem]
@@ -144,7 +145,7 @@ type
     fResHandle: DesignHandle
     fResSet: seq[Control]
     fResOrig: seq[OpItem]
-    fBandBase: seq[Control]
+    fSelBeforeBand: seq[Control]  ## the selection a rubber band replaced, back on Esc
     fBandParent: Container
     fBand: RectF
     fCreating: string
@@ -383,7 +384,6 @@ proc prune(d: FormDesigner) =
     d.fSel = keep
 
 proc setSelection(d: FormDesigner, items: seq[Control]) =
-  var items = items
   if items == d.fSel:
     return
   d.fSel = items
@@ -456,12 +456,25 @@ proc applyPlacement(d: FormDesigner, c: Control, pl: Placement) =
   c.setBounds(pl.bounds.x, pl.bounds.y, pl.bounds.w, pl.bounds.h)
 
 proc replaceRef(d: FormDesigner, op: DesignOp, old, nw: Control) =
+  ## `nw` stands in for `old` (a control rebuilt by `restore`) everywhere the
+  ## history or the selection mention it, also as the parent of a placement.
+  let oldBox = if old of Container: Container(old) else: nil
+  let newBox = if nw of Container: Container(nw) else: nil
   for st in [d.fUndo, d.fRedo, @[op]]:
     for o in st:
       for it in o.items.mitems:
         if it.c == old: it.c = nw
+        if oldBox != nil and newBox != nil:
+          if it.before.parent == oldBox: it.before.parent = newBox
+          if it.after.parent == oldBox: it.after.parent = newBox
   for c in d.fSel.mitems:
     if c == old: c = nw
+
+proc subtreeOf(c: Control): seq[Control] =
+  ## `c` and the controls below it, in preorder.
+  result = @[c]
+  if c of Container:
+    for k in Container(c).children: result.add subtreeOf(k)
 
 proc detachItem(d: FormDesigner, op: DesignOp, i: int) =
   ## Takes the control out of the design (delete, undo of create).
@@ -470,9 +483,12 @@ proc detachItem(d: FormDesigner, op: DesignOp, i: int) =
     let k = d.fTiles.find(NonVisualTile(c))
     if k >= 0: d.fTiles.delete k
     return
+  # a deleted control's owner is kept for the undo; the component of a tile
+  # stays with its owner (the host saves from `nonVisuals`)
   op.items[i].owner = c.owner
   if d.snapshot != nil and d.restore != nil:
     op.items[i].snap = d.snapshot(c)
+    op.items[i].tree = subtreeOf(c)
     c.free()
   else:
     if c.parent != nil: c.parent.removeControl(c)
@@ -489,7 +505,12 @@ proc attachItem(d: FormDesigner, op: DesignOp, i: int, pl: Placement) =
   if d.restore != nil and op.items[i].snap.len > 0:
     let nc = d.restore(op.items[i].snap, pl.parent, pl.index)
     if nc != nil:
-      d.replaceRef(op, c, nc)
+      # the rebuilt subtree replaces the freed one in the history
+      let fresh = subtreeOf(nc)
+      let old = op.items[i].tree
+      if fresh.len == old.len:
+        for k in 0 ..< old.len: d.replaceRef(op, old[k], fresh[k])
+      else: d.replaceRef(op, c, nc)
       c = nc
       if c.parent != pl.parent: pl.parent.insertControl(c, pl.index)
       c.setBounds(pl.bounds.x, pl.bounds.y, pl.bounds.w, pl.bounds.h)
@@ -828,7 +849,7 @@ proc endDrag(d: FormDesigner) =
   d.fTarget = nil
   d.fResSet.setLen 0
   d.fResOrig.setLen 0
-  d.fBandBase.setLen 0
+  d.fSelBeforeBand.setLen 0
   d.fBandParent = nil
   d.fBand = rectF(0, 0, 0, 0)
   d.refresh()
@@ -845,7 +866,10 @@ proc updateMove(d: FormDesigner, p: PointF, shift: ShiftState) =
   let rawDy = p.y - d.fStart.y
   var target = d.scope
   if not d.fMoveSet[0].isTile:
-    target = d.dropTarget(p, d.fMoveSet)
+    # a control of the ancestor form stays where the ancestor put it: a form
+    # file has no way to say that it lives in another container
+    target = if d.fMoveSet.anyIt(it.inherited): d.fMoveSet[0].parent
+             else: d.dropTarget(p, d.fMoveSet)
   var grp = d.fMoveOrig[0]
   for r in d.fMoveOrig:
     let x0 = min(grp.x, r.x)
@@ -886,8 +910,8 @@ proc updateMove(d: FormDesigner, p: PointF, shift: ShiftState) =
   var dx = gx - grp.x
   var dy = gy - grp.y
   if d.fMoveSet[0].isTile:   # tiles stay inside the design root
-    dx = max(min(dx, d.scope.width - TileSize - grp.right + grp.w), -grp.x)
-    dy = max(min(dy, d.scope.height - TileSize - grp.bottom + grp.h), -grp.y)
+    dx = max(min(dx, d.scope.width - grp.right), -grp.x)
+    dy = max(min(dy, d.scope.height - grp.bottom), -grp.y)
   # guides: matching edges/centres with siblings
   var guides: seq[RectF]
   if d.snapLines and not free:
@@ -997,7 +1021,7 @@ proc cancelDrag*(d: FormDesigner) =
   of dmResize:
     for it in d.fResOrig: d.applyPlacement(it.c, it.before)
   of dmBand:
-    d.setSelection(d.fBandBase)
+    d.setSelection(d.fSelBeforeBand)
   else: discard
   d.endDrag()
 
@@ -1005,7 +1029,7 @@ proc updateBand(d: FormDesigner, p: PointF, shift: ShiftState) =
   let x0 = min(d.fStart.x, p.x)
   let y0 = min(d.fStart.y, p.y)
   d.fBand = rectF(x0, y0, abs(p.x - d.fStart.x), abs(p.y - d.fStart.y))
-  var hits = d.fBandBase
+  var hits: seq[Control]
   let par = d.fBandParent
   for ch in par.children:
     if not d.shown(ch) or ch.isInternal: continue
@@ -1033,10 +1057,10 @@ proc updateCursor(d: FormDesigner, p: PointF) =
 
 method designMouseDown*(d: FormDesigner, p: PointF, button: MouseButton,
                         shift: ShiftState, clicks: int) =
+  if d.fMode != dmNone: return      # a second button during a drag changes nothing
   d.fStart = p
   d.fLast = p
   d.fMoved = false
-  if d.fMode != dmNone: return
   if button == mbRight:
     if d.fCreating.len > 0:
       d.cancelCreate()
@@ -1068,6 +1092,7 @@ method designMouseDown*(d: FormDesigner, p: PointF, button: MouseButton,
     # rubber band (select the container itself until it grows)
     d.fBandParent = Container(c)
     d.fMode = dmBand
+    d.fSelBeforeBand = d.fSel
     d.select(c)
     return
   if c in d.fSel:
@@ -1246,12 +1271,16 @@ proc paintGrid(d: FormDesigner, cv: Canvas, t: Theme) =
   for ch in d.scope.children:
     if ch.visible and not ch.isInternal: covered.add ch.visualRect
   var y = ceil(clip.y / g) * g
+  var row: seq[RectF]               # the covered rectangles this row of dots meets
   while y < clip.bottom:
+    row.setLen 0
+    for r in covered:
+      if y >= r.y and y < r.bottom: row.add r
     var x = ceil(clip.x / g) * g
     while x < clip.right:
       var hidden = false
-      for r in covered:
-        if r.contains(pointF(x, y)):
+      for r in row:
+        if x >= r.x and x < r.right:
           hidden = true
           break
       if not hidden: cv.fillRect(rectF(x, y, 1, 1), col)
