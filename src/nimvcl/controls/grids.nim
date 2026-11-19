@@ -1087,6 +1087,44 @@ proc `borderStyle=`*(x: DrawGrid, v: BorderStyle) =
   x.fBorder = v
   x.invalidate()
 
+# --------------------------------------------------- design-time text forms
+
+func parseSizeList(v: string): seq[float32] =
+  for part in v.split({',', ' ', ';'}):
+    if part.len == 0: continue
+    try: result.add float32(parseFloat(part))
+    except ValueError: result.add -1
+
+func formatSize(f: float32): string =
+  if f == float32(int(f)): $int(f) else: $f
+
+proc axisText(a: AxisSizes): string =
+  if a.overrideCount == 0: return ""
+  var parts: seq[string]
+  for i in 0 ..< a.count: parts.add formatSize(a.size(i))
+  parts.join(", ")
+
+proc colWidthsText*(g: DrawGrid): string =
+  ## The column widths as text, "64, 120, 64" (what a form file stores for
+  ## `colWidths`); "" while every column has the default width.
+  g.fCols.axisText
+
+proc `colWidthsText=`*(g: DrawGrid, v: string) =
+  ## Sets the width of every column from the list `v` (a missing or invalid
+  ## entry means `defaultColWidth`); set it after `colCount`.
+  let w = parseSizeList(v)
+  for c in 0 ..< g.colCount:
+    g.setColWidth(c, if c < w.len and w[c] >= 0: w[c] else: g.defaultColWidth)
+
+proc rowHeightsText*(g: DrawGrid): string =
+  ## Like `colWidthsText` for the row heights (`rowHeights` in a form file).
+  g.fRows.axisText
+
+proc `rowHeightsText=`*(g: DrawGrid, v: string) =
+  let h = parseSizeList(v)
+  for r in 0 ..< g.rowCount:
+    g.setRowHeight(r, if r < h.len and h[r] >= 0: h[r] else: g.defaultRowHeight)
+
 proc initDrawGrid*(g: DrawGrid, owner: Component = nil) =
   g.initScrollingControl(owner)
   g.fBorder = bsSingle
@@ -1382,3 +1420,29 @@ proc newStringGrid*(parent: Container = nil, left = 0'f32, top = 0'f32,
   new result
   result.initStringGrid(parent)
   result.placeControl(parent, left, top, width, height)
+
+# --------------------------------------------------- design-time text form
+
+proc cellLines*(g: StringGrid): seq[string] =
+  ## The cell contents as rows of text: one entry per row, its cells separated
+  ## by tab characters (what a form file stores for `cells`). Trailing empty
+  ## cells and rows are left out; a tab or line break inside a cell is stored
+  ## as a space.
+  for r in 0 ..< min(g.fData.len, g.rowCount):
+    var cells: seq[string]
+    for c in 0 ..< min(g.fData[r].len, g.colCount):
+      cells.add g.fData[r][c].multiReplace(("\t", " "), ("\n", " "), ("\r", " "))
+    while cells.len > 0 and cells[^1].len == 0: cells.setLen(cells.len - 1)
+    result.add cells.join("\t")
+  while result.len > 0 and result[^1].len == 0: result.setLen(result.len - 1)
+
+proc `cellLines=`*(g: StringGrid, v: seq[string]) =
+  ## Replaces all cells by the rows of `v` (see `cellLines`); text outside the
+  ## grid is dropped, so set it after `colCount` and `rowCount`.
+  g.endEdit(false)
+  g.fData.setLen(0)
+  for r, line in v:
+    if r >= g.rowCount: break
+    let cellTexts = line.split('\t')
+    for c, text in cellTexts: g.putCell(c, r, text)
+  g.invalidate()

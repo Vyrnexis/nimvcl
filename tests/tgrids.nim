@@ -1022,3 +1022,51 @@ suite "grids (review fixes)":
     g.selectCell(2, 1)
     g.insertRow(4)                               # below: unchanged
     check g.row == 1
+
+suite "StringGrid design-time text forms":
+  Application.init()
+
+  test "cellLines: rows of tab-separated cells, trailing empties trimmed":
+    let g = newStringGrid(nil)
+    g.colCount = 4
+    g.rowCount = 5
+    g.cells[0, 0] = "Name"
+    g.cells[1, 0] = "Qty"
+    g.cells[0, 1] = "Nut"
+    g.cells[2, 1] = "x\ty\nz"                # tab and newline become spaces
+    g.cells[3, 3] = "far"
+    check g.cellLines == @["Name\tQty", "Nut\t\tx y z", "", "\t\t\tfar"]
+    var empty = newStringGrid(nil)
+    check empty.cellLines.len == 0
+
+  test "cellLines= replaces the cells and drops what is outside the grid":
+    let g = newStringGrid(nil)
+    g.colCount = 3
+    g.rowCount = 3
+    g.cells[2, 2] = "old"
+    g.cellLines = @["a\tb\tc\td", "", "e", "f", "g"]
+    check g.cells[0, 0] == "a" and g.cells[2, 0] == "c"
+    check g.cells[2, 2] == "" and g.cells[0, 2] == "e"
+    check g.cellLines == @["a\tb\tc", "", "e"]
+    g.cellLines = @[]
+    check g.cellLines.len == 0
+
+  test "colWidthsText / rowHeightsText":
+    let g = newStringGrid(nil)
+    g.colCount = 3
+    check g.colWidthsText == "" and g.rowHeightsText == ""
+    g.colWidths[1] = 120
+    g.colWidths[2] = 33.5
+    check g.colWidthsText == "64, 120, 33.5"
+    let h = newStringGrid(nil)
+    h.colCount = 3
+    h.colWidthsText = g.colWidthsText
+    check h.colWidths[0] == 64 and h.colWidths[1] == 120 and h.colWidths[2] == 33.5
+    h.colWidthsText = "40"                    # missing entries: the default width
+    check h.colWidths[0] == 40 and h.colWidths[1] == 64 and h.colWidths[2] == 64
+    h.colWidthsText = ""
+    check h.colWidthsText == ""
+    h.rowHeights[2] = 40
+    check h.rowHeightsText == "24, 24, 40, 24, 24"
+    h.rowHeightsText = "x, 30"                 # an unreadable entry: the default
+    check h.rowHeights[0] == 24 and h.rowHeights[1] == 30 and h.rowHeightsText == "24, 30, 24, 24, 24"

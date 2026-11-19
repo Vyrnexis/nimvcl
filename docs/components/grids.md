@@ -41,13 +41,14 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 | `colCount`, `rowCount` | int | Size, including fixed cells |
 | `fixedCols`, `fixedRows` | int | Frozen header cells |
 | `defaultColWidth`, `defaultRowHeight` | float32 | Defaults (64 and 24) |
-| `colWidths[c]`, `rowHeights[r]` | float32 | Per-slot overrides |
+| `colWidths[c]`, `rowHeights[r]` | float32 | Per-slot overrides. In a form file `colWidths = '64, 120, 64'` / `rowHeights = '24, 40'` (every slot, comma-separated; not written while all are the default) |
 | `options` | `GridOptions` | `goRangeSelect`, `goRowSelect`, `goColSizing`, `goRowSizing`, `goColMoving`, `goEditing`, `goTabs`, `goAlwaysShowEditor` |
 | `col`, `row` | int | Current cell (never a fixed one) |
 | `selection` | `GridRect` | Selected range (inclusive) |
 | `horzLines`, `vertLines`, `hotTrack` | bool | Look |
 | `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
 | `StringGrid.cells[c, r]` | string | Cell text. Also `rows[r]`, `cols[c]` as `seq[string]` |
+| `StringGrid.cellLines` | `seq[string]` | The cells as text, one row per entry, cells separated by tabs (the `cells` property of a form file). Set it after `colCount` / `rowCount` |
 | `StringGrid.colAlignments[c]` | `HAlign` | Column text alignment |
 | `StringGrid.sortOnHeaderClick` | bool | Click a header to sort |
 | `color` | Color | Own background: the cell area; fixed (header) cells are a shade of it. Set it and `parentColor` turns off |
@@ -113,5 +114,27 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 * Scrolling is exact for millions of rows: positions are float64 inside
   (`scrollPosY`, `contentH`), `cellRect` / `cellAt` / `topRow` agree at any
   offset.
+
+## At design time
+
+`fixedCols`, `fixedRows`, `colCount`, `rowCount`, `defaultColWidth`,
+`defaultRowHeight`, `colWidths` and `rowHeights` are ordinary properties. A
+StringGrid's `cells` opens a dialog (`StringGridDlgForm` of
+`nimvcl/controls/propeditors`): an editable grid (type, Tab and arrows move,
+Ctrl+V pastes a block) with Add / Delete row and column; OK applies `colCount`,
+`rowCount` and the cells. In the form file `cells` is a string list, one entry
+per row with its cells separated by a tab (`\t`); trailing empty cells and rows
+are left out, and a tab or line break inside a cell is saved as a space:
+
+```
+cells = (
+  'Item\tQty\tPrice'
+  'Pen\t12'
+)
+```
+
+`cells`, `colWidths` and `rowHeights` are applied after `colCount` and
+`rowCount`. In code the text forms are `cellLines`, `colWidthsText` and
+`rowHeightsText`.
 
 [Back to the index](../README.md)
