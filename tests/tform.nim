@@ -242,6 +242,42 @@ suite "mouse routing":
     check f.ui.focusedControl == nil
     f.destroy()
 
+  test "a disabled control swallows the mouse: the parent gets nothing":
+    let f = newShown()
+    let outer = probe(f, "outer", 10, 10, 200, 100, focusable = true)
+    let a = probe(outer, "a", 10, 10, 50, 30, focusable = true)
+    a.enabled = false
+    f.moveTo(25, 25)
+    f.click(25, 25)
+    f.feed(ekMouseWheel, 25, 25)
+    check take().len == 0
+    check f.ui.hovered == nil
+    check f.ui.focusedControl == nil
+    outer.enabled = false          # a disabled container blocks its children too
+    a.enabled = true
+    f.click(25, 25)
+    check take().len == 0
+    f.destroy()
+
+  test "event observers can be removed, also while they run":
+    let f = newShown()
+    var first, second = 0
+    var removeFirst: EventObserver
+    let b = proc(f: Form, pe: PlatformEvent) = inc second
+    removeFirst = proc(f: Form, pe: PlatformEvent) =
+      inc first
+      Application.removeEventObserver(removeFirst)
+    Application.addEventObserver(removeFirst)
+    Application.addEventObserver(b)
+    f.moveTo(5, 5)
+    f.moveTo(6, 6)
+    check first == 1
+    check second == 2                    # the next observer still ran each time
+    Application.removeEventObserver(b)
+    f.moveTo(7, 7)
+    check second == 2
+    f.destroy()
+
   test "double click":
     let f = newShown()
     discard probe(f, "a", 10, 10, 100, 50)
@@ -535,3 +571,33 @@ suite "application":
   test "clipboard round trip":
     Application.clipboard = "nimvcl"
     check Application.clipboard == "nimvcl"
+
+suite "form icon and menu":
+  Application.init()
+
+  test "icon: kept, applied to the window when it exists and when it is created":
+    let f = newForm(nil, 200, 100)
+    check f.icon == nil
+    let img = newImage(16, 16, rgb(200, 0, 0))
+    f.icon = img                               # before the window exists
+    check f.icon == img
+    f.show()                                   # creates the window with the icon
+    check f.hasWindow
+    f.icon = newImage(32, 32, rgb(0, 0, 200))  # while shown
+    check f.icon.width == 32
+    f.icon = nil                               # clearing keeps the window alive
+    check f.icon == nil and f.hasWindow
+    f.freeWindow()
+
+  test "menu: assigning a MainMenu makes it the form's bar; nil removes it":
+    let f = newForm(nil, 300, 200)
+    let mm = newMainMenu(nil)
+    mm.addItem("File")
+    check f.menu == nil
+    f.menu = mm
+    check f.menu == mm and mm.parent == Container(f) and mm.align == alTop
+    let other = newMainMenu(nil)
+    f.menu = other
+    check f.menu == other and mm.parent == nil
+    f.menu = nil
+    check f.menu == nil

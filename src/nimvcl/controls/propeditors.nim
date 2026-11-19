@@ -20,6 +20,16 @@
 ## * **Image list** (`ImageList.images`): `ImageListDlgForm`, a list with
 ##   thumbnails and Add (several files at once) / Delete / Up / Down; the
 ##   added files are imported on OK (`commit`).
+## * **String grid cells** (`StringGrid.cells`): `StringGridDlgForm`, an
+##   editable grid of the cells (type into it, Tab / arrows move, Ctrl+V pastes
+##   a block) with Add / Delete row and column; OK also applies the new
+##   `colCount` / `rowCount`.
+## * **List and tree items** (`ListView.items`, `TreeView.items`):
+##   `ItemsDlgForm`, like Delphi's Items Editor: the items with Add, Add child
+##   (tree), Delete, Up, Down, Indent / Outdent (tree), and for the selected
+##   item its caption, sub-items (list), image index, selected image index
+##   (tree) and check state. OK applies `items`, `itemImages`,
+##   `itemSelectedImages` and `checkedItems` together.
 ## * **Collection** (`pkCollection`): `CollectionDlgForm`, the list of items
 ##   with Add / Delete / Up / Down and an Object Inspector for the selected
 ##   item (which itself offers these editors, so a menu item's sub-items
@@ -49,7 +59,8 @@ import std/[os, strutils, sequtils]
 import ../graphics/[color, geometry, canvas, image]
 import ../core/[types, component, control, form, theme]
 import ../dsl/[formmacro, props_std]
-import ./[common, label, button, edit, memo, listbox, imagectl, dialogs, inspector]
+import ./[common, label, button, edit, memo, listbox, imagectl, dialogs, inspector,
+          grids, listview, treeview, spinedit, checkbox, viewsupport]
 export props_std
 
 type
@@ -451,6 +462,394 @@ proc newImageListDlg*(host: PropEditorHost, images: seq[Image], width, height: f
   d.downBtn.onClick = proc(s: Control) = d.moveSelected(1)
   d.syncList(0)
 
+
+# ------------------------------------------------------------ grid cells
+
+form StringGridDlgForm:
+  borderStyle = bsSizeable
+  position = poScreenCenter
+  Label hintLbl:
+    caption = "Type into the cells"
+    muted = true
+  StringGrid grid:
+    options = {goColSizing, goRangeSelect, goEditing, goTabs}
+  Button addRowBtn:
+    caption = "Add row"
+  Button delRowBtn:
+    caption = "Delete row"
+  Button addColBtn:
+    caption = "Add column"
+  Button delColBtn:
+    caption = "Delete column"
+  Button okBtn:
+    caption = "OK"
+    modalResult = mrOk
+  Button cancelBtn:
+    caption = "Cancel"
+    isCancel = true
+    modalResult = mrCancel
+  proc fit(self: StringGridDlgForm) =
+    let w = 640'f32
+    let h = 440'f32
+    self.hintLbl.setBounds(Pad, Pad, w - 2 * Pad, 18)
+    let bx = w - Pad - BtnW - 20
+    self.grid.setBounds(Pad, Pad + 24, bx - Pad - Gap, h - Pad * 2 - 24 - BtnH - Gap * 2)
+    var y = Pad + 24
+    for b in [self.addRowBtn, self.delRowBtn, self.addColBtn, self.delColBtn]:
+      b.setBounds(bx, y, BtnW + 20, BtnH)
+      y += BtnH + Gap
+    let by = h - Pad - BtnH
+    self.cancelBtn.setBounds(w - Pad - BtnW, by, BtnW, BtnH)
+    self.okBtn.setBounds(w - Pad - 2 * BtnW - Gap, by, BtnW, BtnH)
+    self.setBounds(self.left, self.top, w, h)
+
+proc cellsOf*(d: StringGridDlgForm): seq[string] =
+  ## The cells as typed, in the form `StringGrid.cells` stores them (an edit in
+  ## progress is committed first).
+  d.grid.endEdit(true)
+  d.grid.cellLines
+
+proc colCountOf*(d: StringGridDlgForm): int = d.grid.colCount
+proc rowCountOf*(d: StringGridDlgForm): int = d.grid.rowCount
+
+proc addRow*(d: StringGridDlgForm) =
+  ## Appends an empty row (below the current one when it is not the last).
+  d.grid.endEdit(true)
+  let at = if d.grid.row >= d.grid.fixedRows and d.grid.row < d.grid.rowCount - 1:
+             d.grid.row + 1 else: d.grid.rowCount
+  d.grid.insertRow(at)
+  d.grid.row = min(at, d.grid.rowCount - 1)
+
+proc deleteRow*(d: StringGridDlgForm) =
+  ## Removes the current row (a fixed row cannot be removed).
+  d.grid.endEdit(false)
+  d.grid.deleteRow(d.grid.row)
+
+proc addColumn*(d: StringGridDlgForm) =
+  d.grid.endEdit(true)
+  d.grid.colCount = d.grid.colCount + 1
+
+proc deleteColumn*(d: StringGridDlgForm) =
+  ## Removes the current column (cells to its right move left).
+  d.grid.endEdit(false)
+  let c = d.grid.col
+  if c < d.grid.fixedCols or c >= d.grid.colCount: return
+  for r in 0 ..< d.grid.rowCount:
+    for k in c ..< d.grid.colCount - 1:
+      d.grid.cells[k, r] = d.grid.cells[k + 1, r]
+  d.grid.colCount = d.grid.colCount - 1
+
+proc newStringGridDlg*(colCount, rowCount, fixedCols, fixedRows: int, cells: seq[string],
+                       colWidths = "", title = "String grid"): StringGridDlgForm =
+  ## The dialog without showing it; the grid is a working copy.
+  result = newStringGridDlgForm()
+  let d = result
+  d.caption = title
+  d.fit()
+  d.grid.colCount = colCount
+  d.grid.rowCount = rowCount
+  d.grid.fixedCols = fixedCols
+  d.grid.fixedRows = fixedRows
+  d.grid.colWidthsText = colWidths
+  d.grid.cellLines = cells
+  d.addRowBtn.onClick = proc(s: Control) = d.addRow()
+  d.delRowBtn.onClick = proc(s: Control) = d.deleteRow()
+  d.addColBtn.onClick = proc(s: Control) = d.addColumn()
+  d.delColBtn.onClick = proc(s: Control) = d.deleteColumn()
+
+# ------------------------------------------------------------ item lists
+
+type
+  ItemRec* = object
+    ## One item of the items editor.
+    text*: string
+    subs*: seq[string]          ## ListView sub-items
+    image*, selImage*: int      ## -1: none
+    checked*: bool
+    level*: int                 ## TreeView nesting (0: top level)
+
+proc parseItemRecs*(tree: bool, lines, images, selImages, checked: seq[string]): seq[ItemRec] =
+  ## The items of a ListView (`tree` false) or TreeView from the property
+  ## values `items`, `itemImages`, `itemSelectedImages` and `checkedItems`.
+  for l in lines:
+    var r = ItemRec(image: -1, selImage: -1)
+    if tree:
+      var depth = 0
+      while depth * 2 + 1 < l.len and l[depth * 2] == ' ' and l[depth * 2 + 1] == ' ': inc depth
+      r.level = min(depth, if result.len == 0: 0 else: result[^1].level + 1)
+      r.text = l[depth * 2 .. ^1]
+    else:
+      let p = l.split('\t')
+      r.text = p[0]
+      r.subs = p[1 .. ^1]
+    result.add r
+  let img = parseImageIndexLines(images, result.len)
+  let sel = parseImageIndexLines(selImages, result.len)
+  let chk = parseIndexLines(checked, result.len)
+  for i in 0 ..< result.len:
+    result[i].image = img[i]
+    result[i].selImage = sel[i]
+    result[i].checked = i in chk
+
+func itemLinesOf*(tree: bool, recs: seq[ItemRec]): seq[string] =
+  for r in recs:
+    result.add (if tree: repeat("  ", r.level) & r.text else: r.text & r.subs.mapIt('\t' & it).join)
+
+func imagesOf*(recs: seq[ItemRec], selected = false): seq[string] =
+  imageIndexLines(recs.mapIt(if selected: it.selImage else: it.image))
+
+func checkedOf*(recs: seq[ItemRec]): seq[string] =
+  var v: seq[int]
+  for i, r in recs:
+    if r.checked: v.add i
+  indexLines(v)
+
+form ItemsDlgForm:
+  borderStyle = bsSingle
+  position = poScreenCenter
+  var tree = false
+  var recs: seq[ItemRec]
+  var syncing = false           ## the controls are being refilled: their change events are ignored
+  ListBox list:
+    multiSelect = false
+  Button addBtn:
+    caption = "Add"
+  Button childBtn:
+    caption = "Add child"
+  Button delBtn:
+    caption = "Delete"
+  Button upBtn:
+    caption = "Up"
+  Button downBtn:
+    caption = "Down"
+  Button inBtn:
+    caption = "Indent"
+  Button outBtn:
+    caption = "Outdent"
+  Label capLbl:
+    caption = "Caption"
+  Edit capEdit:
+    discard
+  Label subLbl:
+    caption = "Sub-items (one per line)"
+  Memo subMemo:
+    wantReturns = true
+  Label imgLbl:
+    caption = "Image index"
+  SpinEdit imgSpin:
+    minValue = -1
+    maxValue = 9999
+  Label selLbl:
+    caption = "Selected image index"
+  SpinEdit selSpin:
+    minValue = -1
+    maxValue = 9999
+  CheckBox chkBox:
+    caption = "Checked"
+  Button okBtn:
+    caption = "OK"
+    modalResult = mrOk
+  Button cancelBtn:
+    caption = "Cancel"
+    isCancel = true
+    modalResult = mrCancel
+  proc fit(self: ItemsDlgForm) =
+    let w = 640'f32
+    let h = 440'f32
+    let lw = 250'f32
+    let bw = (lw - Gap * 2) / 3
+    self.list.setBounds(Pad, Pad, lw, h - Pad * 3 - BtnH * 3 - Gap * 3)
+    var y = Pad + self.list.height + Gap
+    var x = Pad
+    for b in [self.addBtn, self.childBtn, self.delBtn]:
+      b.setBounds(x, y, bw, BtnH)
+      x += bw + Gap
+    y += BtnH + Gap
+    x = Pad
+    for b in [self.upBtn, self.downBtn, self.inBtn, self.outBtn]:
+      b.setBounds(x, y, (lw - Gap * 3) / 4, BtnH)
+      x += (lw - Gap * 3) / 4 + Gap
+    let rx = Pad * 2 + lw
+    let rw = w - rx - Pad
+    y = Pad
+    self.capLbl.setBounds(rx, y, rw, 18)
+    self.capEdit.setBounds(rx, y + 20, rw, 26)
+    y += 56
+    if self.tree:
+      self.subLbl.visible = false
+      self.subMemo.visible = false
+    else:
+      self.subLbl.setBounds(rx, y, rw, 18)
+      self.subMemo.setBounds(rx, y + 20, rw, 120)
+      y += 150
+    self.imgLbl.setBounds(rx, y, rw / 2, 18)
+    self.imgSpin.setBounds(rx, y + 20, 100, 26)
+    if self.tree:
+      self.selLbl.setBounds(rx + 120, y, rw - 120, 18)
+      self.selSpin.setBounds(rx + 120, y + 20, 100, 26)
+      y += 56
+    else:
+      self.selLbl.visible = false
+      self.selSpin.visible = false
+      y += 56
+    self.chkBox.setBounds(rx, y, 160, 24)
+    let by = h - Pad - BtnH
+    self.cancelBtn.setBounds(w - Pad - BtnW, by, BtnW, BtnH)
+    self.okBtn.setBounds(w - Pad - 2 * BtnW - Gap, by, BtnW, BtnH)
+    self.setBounds(self.left, self.top, w, h)
+
+func blockEnd(d: ItemsDlgForm, i: int): int =
+  ## One past the last row of the subtree of row `i`.
+  result = i + 1
+  while result < d.recs.len and d.recs[result].level > d.recs[i].level: inc result
+
+proc itemLabel(d: ItemsDlgForm, r: ItemRec): string =
+  repeat("  ", r.level) & (if r.text.len > 0: r.text else: "(empty)")
+
+proc selectedIndex*(d: ItemsDlgForm): int =
+  ## The selected row (-1: none).
+  if d.list.itemIndex in 0 ..< d.recs.len: d.list.itemIndex else: -1
+
+proc syncDetails(d: ItemsDlgForm) =
+  let i = d.selectedIndex
+  d.syncing = true
+  for c in [Control(d.capEdit), d.subMemo, d.imgSpin, d.selSpin, d.chkBox, d.delBtn]:
+    c.enabled = i >= 0
+  d.childBtn.enabled = d.tree
+  if i >= 0:
+    let r = d.recs[i]
+    d.capEdit.text = r.text
+    d.subMemo.text = r.subs.join("\n")
+    d.imgSpin.value = r.image
+    d.selSpin.value = r.selImage
+    d.chkBox.checked = r.checked
+  else:
+    d.capEdit.text = ""
+    d.subMemo.text = ""
+    d.imgSpin.value = -1
+    d.selSpin.value = -1
+    d.chkBox.checked = false
+  d.upBtn.enabled = i > 0
+  d.downBtn.enabled = i >= 0 and i < d.recs.high
+  d.inBtn.enabled = d.tree and i > 0 and d.recs[i].level <= d.recs[i - 1].level
+  d.outBtn.enabled = d.tree and i >= 0 and d.recs[i].level > 0
+  d.syncing = false
+
+proc syncList*(d: ItemsDlgForm, select = -2) =
+  ## Re-reads the rows into the list box.
+  let keep = if select == -2: d.list.itemIndex else: select
+  var names: seq[string]
+  for r in d.recs: names.add d.itemLabel(r)
+  d.syncing = true
+  d.list.items = names
+  d.list.itemIndex = if d.recs.len == 0: -1 else: clamp(keep, 0, d.recs.high)
+  d.syncing = false
+  d.syncDetails()
+
+proc addItem*(d: ItemsDlgForm, child = false): int {.discardable.} =
+  ## "Add" (a sibling after the selected item and its sub-items) or "Add child"
+  ## (the last child of the selected item); selects the new item.
+  let sel = d.selectedIndex
+  var at = d.recs.len
+  var level = 0
+  if sel >= 0:
+    at = d.blockEnd(sel)
+    level = if child and d.tree: d.recs[sel].level + 1 else: d.recs[sel].level
+  d.recs.insert(ItemRec(text: "Item " & $(d.recs.len + 1), image: -1, selImage: -1,
+                        level: level), at)
+  d.syncList(at)
+  at
+
+proc deleteItem*(d: ItemsDlgForm) =
+  ## Removes the selected item with its sub-items.
+  let i = d.selectedIndex
+  if i < 0: return
+  d.recs.delete(i ..< d.blockEnd(i))
+  d.syncList(i)
+
+proc moveItem*(d: ItemsDlgForm, delta: int) =
+  ## "Up" (-1) / "Down" (+1): past the previous / next item of the same level
+  ## (with its sub-items).
+  let i = d.selectedIndex
+  if i < 0: return
+  let e = d.blockEnd(i)
+  let block0 = d.recs[i ..< e]
+  let lvl = d.recs[i].level
+  if delta < 0:
+    var p = i - 1
+    while p >= 0 and d.recs[p].level > lvl: dec p
+    if p < 0 or d.recs[p].level < lvl: return
+    d.recs.delete(i ..< e)
+    d.recs.insert(block0, p)
+    d.syncList(p)
+  else:
+    if e >= d.recs.len or d.recs[e].level < lvl: return
+    let n = d.blockEnd(e)
+    d.recs.delete(i ..< e)
+    d.recs.insert(block0, n - block0.len)
+    d.syncList(n - block0.len)
+
+proc indentItem*(d: ItemsDlgForm, delta: int) =
+  ## "Indent" (+1: becomes a child of the item above) / "Outdent" (-1) for the
+  ## selected item with its sub-items; tree only.
+  let i = d.selectedIndex
+  if not d.tree or i < 0: return
+  if delta > 0 and (i == 0 or d.recs[i].level > d.recs[i - 1].level): return
+  if delta < 0 and d.recs[i].level == 0: return
+  for k in i ..< d.blockEnd(i): d.recs[k].level += (if delta > 0: 1 else: -1)
+  d.syncList(i)
+
+proc commitText(d: ItemsDlgForm) =
+  let i = d.selectedIndex
+  if d.syncing or i < 0: return
+  d.recs[i].text = d.capEdit.text
+  d.syncing = true
+  d.list.items[i] = d.itemLabel(d.recs[i])
+  d.syncing = false
+
+proc itemLines*(d: ItemsDlgForm): seq[string] = itemLinesOf(d.tree, d.recs)
+  ## The edited `items` value.
+proc itemImages*(d: ItemsDlgForm): seq[string] = imagesOf(d.recs)
+proc itemSelectedImages*(d: ItemsDlgForm): seq[string] = imagesOf(d.recs, true)
+proc checkedItems*(d: ItemsDlgForm): seq[string] = checkedOf(d.recs)
+
+proc newItemsDlg*(tree: bool, lines, images, selImages, checked: seq[string],
+                  title = "Items"): ItemsDlgForm =
+  ## The dialog without showing it (`tree`: a TreeView's nodes, else a
+  ## ListView's items).
+  result = newItemsDlgForm()
+  let d = result
+  d.tree = tree
+  d.caption = title
+  d.recs = parseItemRecs(tree, lines, images, selImages, checked)
+  d.fit()
+  for b in [Control(d.childBtn), d.inBtn, d.outBtn]: b.visible = tree
+  d.list.onChange = proc(s: Control) =
+    if not d.syncing: d.syncDetails()
+  d.addBtn.onClick = proc(s: Control) = d.addItem()
+  d.childBtn.onClick = proc(s: Control) = d.addItem(child = true)
+  d.delBtn.onClick = proc(s: Control) = d.deleteItem()
+  d.upBtn.onClick = proc(s: Control) = d.moveItem(-1)
+  d.downBtn.onClick = proc(s: Control) = d.moveItem(1)
+  d.inBtn.onClick = proc(s: Control) = d.indentItem(1)
+  d.outBtn.onClick = proc(s: Control) = d.indentItem(-1)
+  d.capEdit.onChange = proc(s: Control) = d.commitText()
+  d.subMemo.onChange = proc(s: Control) =
+    let i = d.selectedIndex
+    if d.syncing or i < 0: return
+    var t = d.subMemo.text
+    d.recs[i].subs = if t.len == 0: @[] else: t.splitLines
+  d.imgSpin.onChange = proc(s: Control) =
+    let i = d.selectedIndex
+    if not d.syncing and i >= 0: d.recs[i].image = d.imgSpin.value
+  d.selSpin.onChange = proc(s: Control) =
+    let i = d.selectedIndex
+    if not d.syncing and i >= 0: d.recs[i].selImage = d.selSpin.value
+  d.chkBox.onChange = proc(s: Control) =
+    let i = d.selectedIndex
+    if not d.syncing and i >= 0: d.recs[i].checked = d.chkBox.checked
+  d.syncList(0)
+
 # -------------------------------------------------------------- collection
 
 form CollectionDlgForm:
@@ -605,6 +1004,33 @@ proc editExtra*(ins: ObjectInspector, host: PropEditorHost, target: Obj, prop: s
   if info == nil: return
   let v = info.get(target)
   let title = (let n = objectName(target); (if n.len > 0: n & "." else: "") & prop)
+  proc strs(name: string): seq[string] =
+    let p = ci.findProp(name)
+    if p != nil and p.kind == pkStrings: p.get(target).strs else: @[]
+  proc intOf(name: string): int =
+    let p = ci.findProp(name)
+    if p != nil: int(p.get(target).i) else: 0
+  if info.kind == pkStrings and prop == "items" and
+     (target of ListView or target of TreeView):
+    let tree = target of TreeView
+    let d = newItemsDlg(tree, v.strs, strs("itemImages"), strs("itemSelectedImages"),
+                        strs("checkedItems"), title)
+    if host.run(d) == mrOk:
+      ins.setValue("items", pvStrings(d.itemLines))
+      ins.setValue("itemImages", pvStrings(d.itemImages))
+      if tree: ins.setValue("itemSelectedImages", pvStrings(d.itemSelectedImages))
+      ins.setValue("checkedItems", pvStrings(d.checkedItems))
+    return
+  if info.kind == pkStrings and prop == "cells" and target of StringGrid:
+    let wp = ci.findProp("colWidths")
+    let d = newStringGridDlg(intOf("colCount"), intOf("rowCount"), intOf("fixedCols"),
+                             intOf("fixedRows"), v.strs,
+                             if wp != nil: wp.get(target).s else: "", title)
+    if host.run(d) == mrOk:
+      ins.setValue("colCount", pvInt(d.colCountOf))
+      ins.setValue("rowCount", pvInt(d.rowCountOf))
+      ins.setValue("cells", pvStrings(d.cellsOf))
+    return
   case info.kind
   of pkStrings:
     let d = newStringListDlg(title, v.strs)

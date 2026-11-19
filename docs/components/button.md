@@ -25,11 +25,18 @@ closeBtn.isCancel = true                     # Esc clicks it
 | `isCancel` | bool | Esc clicks this button |
 | `modalResult` | `ModalResult` | When set, a click also closes a modal form with this result |
 | `flat` | bool | No face until hovered |
+| `images` | [ImageList](imagelist.md) | Icons for `imageIndex` |
+| `imageIndex` | int | Icon drawn next to the caption (-1: none); faded while disabled |
+| `imageAlignment` | `ImageAlignment` | Side of the caption: `iaLeft` (default), `iaRight`, `iaTop`, `iaBottom` |
 | `autoSize` | bool | Width follows the caption |
 | `enabled` | bool | Disabled buttons ignore input |
 | `action` | Action | Share caption, hint and enabled with an [Action](../guide/actions.md) |
 | `color` | Color | Own background: the face; hover, pressed and disabled are shades of it, and the text contrasts with it. Set it and `parentColor` turns off |
 | `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
+
+At design time `images` is chosen from the form's ImageLists in the inspector,
+`imageIndex` and `imageAlignment` are plain values; all three are saved in the
+form file (`images = icons`, `imageIndex = 1`, `imageAlignment = iaRight`).
 
 ## Events
 

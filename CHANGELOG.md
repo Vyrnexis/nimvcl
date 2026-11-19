@@ -5,6 +5,20 @@ All notable changes to nimvcl are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0 the API can still change
 between minor versions.
 
+## [Unreleased]
+
+### Added
+
+- Design-time gaps closed (Object Inspector, form files, `loadForm`):
+  `StringGrid.cells` with a cell editor dialog, `colWidths` / `rowHeights`;
+  `Edit.passwordChar`; `Button.images`, `imageIndex` and `imageAlignment`
+  (an icon next to the caption); `Form.menu` and `Form.icon` (window icon);
+  per-item images and check boxes for `ListView` and `TreeView`
+  (`itemImages`, `itemSelectedImages`, `checkedItems`) with an items editor
+  dialog (Add, Add child, Indent, Outdent, Up, Down).
+- Property registry: `hide a, b` keeps a stored property out of the inspector.
+- `ObjectInspector.setValue` also sets properties the inspector does not list.
+
 ## [0.1.4] - 2026-11-19
 
 Fixes from a full code review: logic first, then structure and speed.

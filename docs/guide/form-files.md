@@ -86,7 +86,8 @@ String escapes: `\\` `\'` `\n` `\r` `\t` `\0` and `\xHH`. A string ends on its
 line, so write `\n` for a line break; non-ASCII text stays as it is (UTF-8).
 
 String lists (`ComboBox.items`, `ListBox.items`, `Memo.lines`, `TabControl.tabs`,
-and the rows of `ListView.items` / the outline of `TreeView.items`, see below):
+and the rows of `ListView.items` / `StringGrid.cells` / the outline of
+`TreeView.items`, see below):
 
 ```
 items = (
@@ -97,7 +98,7 @@ items = (
 
 ### Pictures
 
-`ImageControl.picture`, `ToolButton.image` and `ImageList.images` are written
+`ImageControl.picture`, `ToolButton.image`, `Form.icon` and `ImageList.images` are written
 as paths relative to the folder of the `.nfm` (forward slashes). `loadNfm` reads
 them from disk (relative to the `.nfm`, or to `NfmOptions.baseDir`); `loadForm`
 embeds the file bytes in the program (`staticRead`) so a shipped binary needs no
@@ -106,9 +107,41 @@ at run time gives a warning in `NfmOptions.warnings` and a blank image that keep
 the path. An image made in code has no path (`img.source` is ""): it is not
 written. `loadImage(path)` records its path.
 
+### Item data
+
 `ListView.items` is one string per row, the cells separated by a tab
 character; `TreeView.items` is an outline, one node per entry, indented by two
-spaces per level. Item images, check states and expansion are not stored.
+spaces per level; `StringGrid.cells` is one string per row, the cells separated
+by tabs. Per-item data are parallel string lists, written after `items`:
+
+| Property | Class | Content |
+|---|---|---|
+| `itemImages` | `ListView`, `TreeView` | the `imageIndex` of each item (in order); trailing "none" (-1) entries are left out |
+| `itemSelectedImages` | `TreeView` | the `selectedIndex` of each node |
+| `checkedItems` | `ListView`, `TreeView` | the indexes of the checked items (a grayed tree node is derived from its children) |
+
+```
+items = (
+  'Root'
+  '  Child'
+)
+itemImages = (
+  '0'
+  '1'
+)
+checkedItems = (
+  '1'
+)
+```
+
+`DrawGrid.colWidths` / `rowHeights` are one string, "64, 120, 64", listing every
+column or row (not written while all have the default size). Expansion of tree
+nodes is not stored.
+
+`Form.menu` (a `MainMenu`), `Button.images` (an `ImageList`) are object
+references by name, `Button.imageIndex` / `imageAlignment` plain values and
+`Edit.passwordChar` a one-character string (`password = true` stands for the
+default bullet).
 
 ### Sub-properties
 
@@ -197,7 +230,7 @@ class, in registry order: ancestors' properties first (`left`, `top`, `width`,
 property line (it is in the `object` line). Properties that are implied by
 others (`parentFont`, `parentColor`, `CheckBox.checked`) are not written, and a
 `ComboBox.text` is left out while an item is selected. The cells of a grid have
-no text form; `DockSite` layouts are saved with `saveLayout` instead. A
+text form in the `cells` list (see "Item data"); `DockSite` layouts are saved with `saveLayout` instead. A
 `popupMenu` is an ordinary object reference (`popupMenu = menu1`); context menus
 are served by the library's own event path, so the control's event fields stay free.
 
@@ -544,6 +577,7 @@ constructor just have to be in scope). The statements:
 | `prop name, Type, getter, setter` | a property with accessor procs `proc(self: T): Type` / `proc(self: T, v: Type)` |
 | `category Layout\|Appearance\|Behaviour\|Data\|Events:` + block | category of the properties inside (default `Behaviour`; a proc-typed property is an event) |
 | `nostore a, b` | never written to a form file (implied by another property) |
+| `hide a, b` | written to form files but not listed by the object inspector (edited together with another property by its dialog) |
 | `skipWhen p, (cond)` | not written while `cond` (over `self`) holds |
 | `defaultWhen p, flag` | counts as default while the bool property `flag` is true |
 
@@ -555,9 +589,9 @@ instance that measures defaults).
 
 ## Limitations
 
-* The registry covers the stock controls. `DockSite` and grid cells are not
-  registered (they are data, not design); `TreeView` / `ListView` items are text
-  lists without images.
+* The registry covers the stock controls. `DockSite` is not registered (its
+  layout is saved with `saveLayout`); the items of `TreeView`, `ListView` and
+  `StringGrid` are text lists (see "Item data").
 * `GridPanel` cell positions of children are not stored (no property for them
   yet).
 * A handler named in a file is bound at run time only for event types whose
@@ -566,5 +600,6 @@ instance that measures defaults).
   the compiler to resolve classes, properties and enum names; a property of a
   custom class needs a plain Nim setter, or one of the special cases of the
   macro (`shortcut`, `GridPanel.columns`/`rows`, `Memo.lines`,
-  `ListView.items`/`TreeView.items`, and string values for `Image` /
+  `ListView.items`/`TreeView.items`, `StringGrid.cells`,
+  `DrawGrid.colWidths`/`rowHeights`, and string values for `Image` /
   `seq[Image]` properties, which are embedded).

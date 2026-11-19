@@ -516,13 +516,6 @@ method revealControl*(c: Container, descendant: Control) {.base.} =
 
 # ----------------------------------------------------------------- setters
 
-func sameFont(a, b: FontSpec): bool =
-  a.family == b.family and a.size == b.size and a.style == b.style and
-    a.color.r == b.color.r and a.color.g == b.color.g and a.color.b == b.color.b and
-    a.color.a == b.color.a
-func sameColor(a, b: Color): bool =
-  a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a
-
 proc recordDesign(c: Control) =
   ## An explicit (non-layout) placement: it becomes the anchor baseline. A
   ## container's own explicit size is its design size until its first layout
@@ -703,7 +696,7 @@ proc fontChanged(c: Control) =
 
 proc `font=`*(c: Control, v: FontSpec) =
   ## Sets an own font (and clears `parentFont`, like VCL).
-  if not c.fParentFont and sameFont(c.fFont, v): return
+  if not c.fParentFont and c.fFont == v: return
   c.fFont = v
   c.fParentFont = false
   c.fontChanged()
@@ -742,7 +735,7 @@ func parentColor*(c: Control): bool = c.fParentColor
 
 proc `color=`*(c: Control, v: Color) =
   ## Sets an own color (and clears `parentColor`).
-  if not c.fParentColor and sameColor(c.fColor, v): return
+  if not c.fParentColor and c.fColor == v: return
   c.fColor = v
   c.fParentColor = false
   c.invalidate()

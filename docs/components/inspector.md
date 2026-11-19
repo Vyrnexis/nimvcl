@@ -94,6 +94,8 @@ attachEditors(inspector, host)          # sets inspector.onEditExtra
 | `seq[string]` | `StringListDlgForm` (`editStringList`) | A memo, one entry per line |
 | `Image` | `PictureDlgForm` | Preview, Load... (a file dialog for PNG/JPG/BMP), Clear, OK, Cancel |
 | `ImageList.images` | `ImageListDlgForm` | Thumbnails; Add... (several files), Delete, Up, Down |
+| `StringGrid.cells` | `StringGridDlgForm` | An editable grid with Add / Delete row and column; OK also sets `colCount` / `rowCount` |
+| `ListView.items`, `TreeView.items` | `ItemsDlgForm` | The Items Editor: Add, Add child / Indent / Outdent (tree), Delete, Up, Down, and per item the caption, sub-items (list), image index, selected image index (tree) and check state; OK sets `items`, `itemImages`, `itemSelectedImages` and `checkedItems` |
 | collection (`pkCollection`) | `CollectionDlgForm` | The items with Add, Delete, Up, Down, and an inspector for the selected item (which offers these editors again, so menu items nest) |
 
 A picked picture goes through `host.importFile`: a file inside `host.baseDir`
@@ -103,7 +105,7 @@ and its relative path is stored. `loadPicture(host, path)` does the same without
 a dialog.
 
 The dialogs are plain forms (`newPictureDlg(host, image)`, `newImageListDlg`,
-`newStringListDlg`, `newCollectionDlg`) whose procs (`loadFile`, `clearPicture`,
+`newStringListDlg`, `newCollectionDlg`, `newStringGridDlg`, `newItemsDlg`) whose procs (`loadFile`, `clearPicture`,
 `addFiles`, `moveSelected`, `addItem`, `deleteItem`, `moveItem`, ...) tests call
 directly; `host.runModal` (default `showModal`) is what `attachEditors` uses to
 run them, so a test replaces it to drive a dialog without showing anything.
@@ -145,7 +147,7 @@ are the object's child nodes in the form file.
 | `selectProp(name)`, `selectedProp()` | Select a row by property name (expands its parents) |
 | `setExpanded(name, on)` | Expand or collapse a composite property or a category (`"cat:Layout"`) |
 | `beginEdit(name, openList = true)`, `commitEdit()`, `cancelEdit()` | Drive the editor from code |
-| `setValue(name, value)` | Set a property of all targets as if edited |
+| `setValue(name, value)` | Set a property of all targets as if edited (also a hidden one, or one on another tab) |
 | `valueTextOf(name)`, `isBold(name)`, `rowCount`, `rowName(i)`, `indexOfProp(name)` | Inspect the grid (tests, accessibility) |
 | `rowRect(i)`, `nameRect(i)`, `valueRect(i)` | Geometry of a row in client coordinates |
 

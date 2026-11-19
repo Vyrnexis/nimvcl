@@ -24,7 +24,7 @@ pass.password = true                       # shows dots
 | `placeholder` (`textHint`) | string | Muted hint shown while empty |
 | `readOnly` | bool | Blocks typing but allows selecting and copying |
 | `maxLength` | int | Maximum characters (0 = unlimited) |
-| `password` / `passwordChar` | bool / Rune | Mask the text |
+| `password` / `passwordChar` | bool / Rune | Mask the text with a bullet / with that character (`Rune(0)` or `""`: off). A masked edit never copies or cuts. In a form file `password = true` is the bullet and `passwordChar = '*'` any other character (a string; the first character counts) |
 | `charCase` | `EditCharCase` | `ecNormal`, `ecUpperCase`, `ecLowerCase` |
 | `numbersOnly` | bool | Accept only digits |
 | `borderStyle` | `EditBorder` | `ebSingle` or `ebNone` |

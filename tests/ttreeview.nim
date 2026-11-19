@@ -904,3 +904,44 @@ suite "treeview (selection and extent)":
     f.activeControl = tv
     f.tap('-'.key, {ssCtrl})
     check p.expanded
+
+suite "treeview design-time node data":
+  Application.init()
+
+  test "itemImages, itemSelectedImages and checkedItems in outline order":
+    let tv = newTreeView(nil)
+    tv.checkboxes = true
+    tv.nodeLines = @["R", "  A", "    A1", "  B", "S"]
+    check tv.itemImages.len == 0 and tv.checkedItems.len == 0
+    tv.items[0].children[0].imageIndex = 3
+    tv.items[0].children[0].children[0].imageIndex = 1
+    tv.items[1].selectedIndex = 2
+    tv.items[0].children[1].checked = true
+    check tv.itemImages == @["-1", "3", "1"]
+    check tv.itemSelectedImages == @["-1", "-1", "-1", "-1", "2"]
+    check tv.checkedItems == @["3"]
+    let w = newTreeView(nil)
+    w.checkboxes = true
+    w.nodeLines = tv.nodeLines
+    w.itemImages = tv.itemImages
+    w.itemSelectedImages = tv.itemSelectedImages
+    w.checkedItems = tv.checkedItems
+    check w.items[0].children[0].imageIndex == 3
+    check w.items[0].children[0].children[0].imageIndex == 1
+    check w.items[1].selectedIndex == 2
+    check w.items[0].children[1].checked == cbChecked
+    check w.items[0].children[0].checked == cbUnchecked
+
+  test "with propagateChecks a checked parent checks its children, a grayed one is derived":
+    let tv = newTreeView(nil)
+    tv.checkboxes = true
+    tv.propagateChecks = true
+    tv.nodeLines = @["R", "  A", "  B", "S"]
+    tv.checkedItems = @["1"]                     # A only
+    check tv.items[0].checked == cbGrayed
+    check tv.checkedItems == @["1"]              # R is not listed
+    tv.checkedItems = @["0", "1", "2"]
+    check tv.items[0].checked == cbChecked and tv.items[0].children[1].checked == cbChecked
+    check tv.checkedItems == @["0", "1", "2"]
+    tv.checkedItems = @[]
+    check tv.items[0].checked == cbUnchecked and tv.items[0].children[0].checked == cbUnchecked

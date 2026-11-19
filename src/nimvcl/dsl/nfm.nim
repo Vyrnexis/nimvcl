@@ -36,6 +36,7 @@ import ../controls/[menus, statusbar, listview, actions, flowpanel]
 import ./props_std
 import ./nfmsyntax {.all.}
 import ./formload
+import ./propdeps
 export nfmsyntax, formload
 export flowpanel.parseGridSizes, flowpanel.gridSizesToText
 
@@ -230,7 +231,12 @@ proc buildTree(node: NfmNode, parent, rootOwner: Obj, file: string, opt: NfmOpti
 
 proc applyProps(b: Built, file: string, opt: NfmOptions,
                 byName: Table[string, Obj], baseDir: string) =
-  for p in b.node.props:
+  # a file written before a property depended on another (`tabIndex` ahead of
+  # `tabs`) is applied in the order the registry would write it
+  var propNames: seq[string]
+  for p in b.node.props: propNames.add p.name
+  for pi in applyOrder(propNames):
+    let p = b.node.props[pi]
     if p.name == "designLeft" or p.name == "designTop":
       # the design position of a non-visual component (Component.designLeft/Top)
       if not (b.obj of Component) or p.value.kind != nvInt:

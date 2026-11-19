@@ -103,6 +103,9 @@ var
   initialized = false
   cjkFile = ""
 
+func `==`*(a, b: FontSpec): bool =
+  a.family == b.family and a.size == b.size and a.style == b.style and a.color == b.color
+
 func font*(family = "", size = DefaultFontSize, style: set[FontStyle] = {}): FontSpec =
   ## Builds a `FontSpec`.
   FontSpec(family: family, size: size, style: style)
@@ -240,9 +243,10 @@ proc fontRegistryEpoch*(): int =
   fallbackEpoch
 
 # ------------------------------------------------------------ system fonts
-# Linux/BSD: fontconfig through its command line tools (`fc-match`, `fc-list`),
-# so there is no link-time dependency; when they are missing every lookup
-# simply finds nothing and the text uses the bundled "sans".
+# Linux/BSD: fontconfig through its command line tool `fc-list`, run once on
+# first use (so there is no link-time dependency, and no process per family
+# name); when it is missing every lookup simply finds nothing and the text
+# uses the bundled "sans".
 # Windows and macOS: the font folders are scanned once (first use) and the
 # family and style are read from each file's `name` table (file name
 # heuristics when that fails). TTC/OTC collections count with their first face
@@ -252,6 +256,7 @@ const
   # -d:nimvclFontScan forces the folder scan on Linux (for testing it there)
   HaveFontScan = defined(windows) or defined(macosx) or defined(nimvclFontScan)
   HaveFontconfig = (defined(linux) or defined(bsd)) and not HaveFontScan
+  HaveFontList = HaveFontScan or HaveFontconfig   ## `scanned` is filled
 
 type
   ScanEntry = object
@@ -362,10 +367,39 @@ proc guessFromFileName(path: string): tuple[family, sub: string] =
     sub.insert(words.pop, 0)
   result = (words.join(" "), sub.join(" "))
 
+proc runTool(cmd: string, args: openArray[string]): string =
+  ## Standard output of `cmd` ("" when it is missing or fails).
+  when HaveFontconfig:
+    try:
+      let p = startProcess(cmd, args = args, options = {poUsePath})
+      defer: p.close()
+      result = p.outputStream.readAll()
+      if p.waitForExit() != 0: result = ""
+    except CatchableError:
+      result = ""
+
 proc scanFonts() =
   if scanDone: return
   scanDone = true
-  when HaveFontScan:
+  when HaveFontconfig:
+    # one line per face: family names (comma separated), style, weight, slant,
+    # face index, file. SDL_ttf opens face 0 of a collection, so only that one counts.
+    let o = runTool("fc-list", ["-f", "%{family}\t%{style}\t%{weight}\t%{slant}\t%{index}\t%{file}\n"])
+    for line in o.splitLines:
+      let parts = line.split('\t')
+      if parts.len != 6 or parts[5].len == 0: continue
+      if (try: parseInt(parts[4].strip) except ValueError: 0) != 0: continue
+      let w = try: parseInt(parts[2].strip) except ValueError: 80
+      let sl = try: parseInt(parts[3].strip) except ValueError: 0
+      let sub = parts[1].split(',')[0].strip.toLowerAscii
+      let plain = sub in ["", "regular", "book", "roman", "normal", "bold",
+                          "italic", "bold italic", "oblique", "bold oblique"]
+      for n in parts[0].split(','):
+        let name = n.strip
+        if name.len > 0:
+          scanned.add ScanEntry(family: name, plain: plain, bold: w >= 180,
+                                italic: sl > 0, path: parts[5])
+  elif HaveFontScan:
     for d in scanDirs():
       try:
         if not dirExists(d): continue
@@ -400,47 +434,15 @@ proc scanLookup(family: string, bold, italic: bool): SysVariant =
       bestScore = score
       result = SysVariant(path: e.path, bold: e.bold, italic: e.italic)
 
-proc runTool(cmd: string, args: openArray[string]): string =
-  ## Standard output of `cmd` ("" when it is missing or fails).
-  when HaveFontconfig:
-    try:
-      let p = startProcess(cmd, args = args, options = {poUsePath})
-      defer: p.close()
-      result = p.outputStream.readAll()
-      if p.waitForExit() != 0: result = ""
-    except CatchableError:
-      result = ""
-
-func fcEscape(s: string): string =
-  ## Escapes the characters that are special in a fontconfig pattern.
-  for c in s:
-    if c in {'\\', '-', ':', ',', '='}: result.add '\\'
-    result.add c
-
 proc systemVariant(family: string, bold, italic: bool): SysVariant =
   ## The installed file that best matches `family` with the wanted style, or an
   ## empty path. fontconfig always answers (with a substitute when the family is
   ## missing): the answer only counts when it names the requested family.
   let key = family.toLowerAscii & (if bold: "|b" else: "|r") & (if italic: "i" else: "")
   if key in sysVariants: return sysVariants[key]
-  when HaveFontScan:
+  when HaveFontList:
     scanFonts()
     result = scanLookup(family, bold, italic)
-  elif HaveFontconfig:
-    var pat = fcEscape(family)
-    if bold: pat.add ":weight=bold"
-    else: pat.add ":weight=regular"
-    pat.add (if italic: ":slant=italic" else: ":slant=roman")
-    let o = runTool("fc-match", ["-f", "%{family}\t%{weight}\t%{slant}\t%{file}", pat])
-    let parts = o.split('\t')
-    if parts.len == 4 and parts[3].len > 0 and fileExists(parts[3]):
-      var named = false
-      for n in parts[0].split(','):
-        if n.strip.cmpIgnoreCase(family.strip) == 0: named = true
-      if named:
-        let w = try: parseInt(parts[1].strip) except ValueError: 80
-        let sl = try: parseInt(parts[2].strip) except ValueError: 0
-        result = SysVariant(path: parts[3], bold: w >= 180, italic: sl > 0)
   sysVariants[key] = result
 
 proc systemFontFamilies*(): seq[string] =
@@ -450,19 +452,11 @@ proc systemFontFamilies*(): seq[string] =
   ## result is cached.
   if not sysFamiliesDone:
     sysFamiliesDone = true
-    when HaveFontScan:
+    when HaveFontList:
       scanFonts()
       var seen = initHashSet[string]()
       for e in scanned:
         if not seen.containsOrIncl(e.family.toLowerAscii): sysFamilies.add e.family
-      sysFamilies.sort(proc(a, b: string): int = cmpIgnoreCase(a, b))
-    elif HaveFontconfig:
-      var seen = initHashSet[string]()
-      for line in runTool("fc-list", [":", "family"]).splitLines:
-        for n in line.split(','):
-          let name = n.strip
-          if name.len > 0 and not seen.containsOrIncl(name.toLowerAscii):
-            sysFamilies.add name
       sysFamilies.sort(proc(a, b: string): int = cmpIgnoreCase(a, b))
   sysFamilies
 

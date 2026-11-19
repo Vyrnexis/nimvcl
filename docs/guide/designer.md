@@ -203,8 +203,9 @@ removes one.
 
 ## Properties that need a dialog
 
-The inspector's "..." buttons (string lists, pictures, image lists, collections
-of columns, panels, pages, buttons and menu items) are implemented by
+The inspector's "..." buttons (string lists, pictures, image lists, the cells of
+a `StringGrid`, the items of a `ListView` and `TreeView`, collections of
+columns, panels, pages, buttons and menu items) are implemented by
 `nimvcl/controls/propeditors`: `attachEditors(inspector, host)` is all a
 designer needs, with a `PropEditorHost` that says where picture files live
 (`baseDir`, `imagesDir`) and gets `onChanged` / `onItemAdded` notifications. An

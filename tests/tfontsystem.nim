@@ -1,5 +1,5 @@
 ## System fonts (fontconfig), unknown families and fonts registered from memory.
-## Skips the fontconfig cases when fc-match / fc-list are not installed.
+## Skips the fontconfig cases when fc-list is not installed.
 import std/[unittest, os, strutils]
 import sdl3 except Color
 import nimvcl
@@ -11,7 +11,7 @@ putEnv("NIMVCL_ASSETS", "/nonexistent/nimvcl-assets")   # bundled fonts must com
 
 # Windows and macOS scan the font folders, no fontconfig needed there.
 let haveFc = defined(windows) or defined(macosx) or
-  (findExe("fc-match").len > 0 and findExe("fc-list").len > 0)
+  findExe("fc-list").len > 0
 let fams = if haveFc: systemFontFamilies() else: @[]
 
 suite "system fonts":

@@ -1639,6 +1639,38 @@ proc `itemLines=`*(lv: ListView, v: seq[string]) =
     let p = l.split('\t')
     lv.items.add(p[0], p[1 .. ^1])
 
+proc itemImages*(lv: ListView): seq[string] =
+  ## The `imageIndex` of each item as text (what a form file stores for
+  ## `itemImages`); trailing "no image" entries are left out.
+  if lv.fOwnerData: return
+  var v: seq[int]
+  for i in 0 ..< lv.count: v.add lv.getItem(i).imageIndex
+  imageIndexLines(v)
+
+proc `itemImages=`*(lv: ListView, v: seq[string]) =
+  ## Sets the image index of every item from `v` (see `itemImages`); set it
+  ## after the items.
+  if lv.fOwnerData: return
+  let idx = parseImageIndexLines(v, lv.count)
+  for i in 0 ..< lv.count: lv.getItem(i).imageIndex = idx[i]
+  lv.invalidate()
+
+proc checkedItems*(lv: ListView): seq[string] =
+  ## The indexes of the checked items as text (what a form file stores for
+  ## `checkedItems`).
+  if lv.fOwnerData: return
+  var v: seq[int]
+  for i in 0 ..< lv.count:
+    if lv.itemChecked(i): v.add i
+  indexLines(v)
+
+proc `checkedItems=`*(lv: ListView, v: seq[string]) =
+  ## Checks exactly the items whose index is listed in `v`; set it after the
+  ## items.
+  if lv.fOwnerData: return
+  let idx = parseIndexLines(v, lv.count)
+  for i in 0 ..< lv.count: lv.setChecked(i, i in idx)
+
 # `loadForm` (dsl/formload) builds objects that are not `newT(parent: Container)`
 # controls with `nfmMake(T, parent)`, found in the scope of the calling module.
 

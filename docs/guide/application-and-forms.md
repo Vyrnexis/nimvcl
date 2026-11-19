@@ -40,11 +40,13 @@ f.position = poScreenCenter         # poDesigned | poScreenCenter | poMainFormCe
 f.borderStyle = bsSingle            # bsSizeable | bsSingle | bsNone
 f.formStyle = fsStayOnTop           # fsNormal | fsStayOnTop
 f.keyPreview = true                 # the form sees keys before the focused control
+f.icon = loadImage("app.png")       # the window icon (task bar and title bar)
 ```
 
 | Property / event | Description |
 |---|---|
-| `menu` | The form's `MainMenu`, see [menus](../components/menus.md) |
+| `menu` | The form's `MainMenu`, see [menus](../components/menus.md); a `MainMenu` object in a form file is the menu already, so `menu` is only written for a menu that is not a child of the form |
+| `icon` | The window icon, an `Image` (set through SDL when the window is created and when changed). A form file stores its path: `icon = 'images/app.png'` |
 | `activeControl` | The focused control (settable) |
 | `modalResult` | A value other than `mrNone` closes a modal form |
 | `onShow`, `onHide`, `onActivate`, `onDeactivate` | `NotifyEvent`s |

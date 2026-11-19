@@ -102,9 +102,27 @@ ListItem: `caption`, `subItems`, `imageIndex`, `checked`, `selected`, `data`, `t
 
 ## At design time
 
-`columns` opens the collection editor (caption, width, alignment...). `items` is
-a string list: one row per line, the cells separated by a tab character
-(`itemLines` / `itemLines =` in code). Item images and check states are not
-stored in a form file.
+`columns` opens the collection editor (caption, width, alignment...). `items`
+opens the items editor (`ItemsDlgForm` of `nimvcl/controls/propeditors`, like
+Delphi's): the items with Add, Delete, Up and Down, and for the selected one its
+caption, sub-items (one per line), image index (into `smallImages`) and check
+state. In the form file the data is three string lists, applied in this order:
+
+```
+items = (
+  'a.txt\t10'            # caption, then the sub-items, separated by tabs
+  'b.txt\t20'
+)
+itemImages = (
+  '0'                    # imageIndex of each item; trailing "none" left out
+)
+checkedItems = (
+  '1'                    # indexes of the checked items
+)
+```
+
+In code: `itemLines`, `itemImages` and `checkedItems` (all `seq[string]`). The
+inspector lists only `items`; `itemImages` and `checkedItems` are edited by its
+dialog.
 
 [Back to the index](../README.md)

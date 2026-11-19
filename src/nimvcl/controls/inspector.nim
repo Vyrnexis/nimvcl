@@ -191,6 +191,7 @@ proc commonProps(ins: ObjectInspector): seq[PropInfo] =
   let first = classOf(ins.fTargets[0])
   if first == nil: return
   for p in first.propsOf:
+    if p.hidden: continue
     var ok = true
     for i in 1 ..< ins.fTargets.len:
       let q = infoFor(ins.fTargets[i], p.name)
@@ -514,10 +515,15 @@ proc reportError*(ins: ObjectInspector, msg: string) =
   ins.invalidate()
 
 proc setValue*(ins: ObjectInspector, name: string, v: PropValue): bool {.discardable.} =
-  ## Sets a property of all targets as if edited by the user.
+  ## Sets a property of all targets as if edited by the user (also one the
+  ## inspector does not list, such as a hidden or an events-tab property).
   let i = ins.findRowByKey(name)
-  if i < 0 or ins.fRows[i].kind != rkProp: return false
-  ins.applyValue(ins.fRows[i], v)
+  if i >= 0 and ins.fRows[i].kind == rkProp:
+    return ins.applyValue(ins.fRows[i], v)
+  # not listed (a hidden property, another tab): still a property of the targets
+  let info = if ins.fTargets.len > 0: infoFor(ins.fTargets[0], name) else: nil
+  if info == nil: return false
+  ins.applyValue(Row(kind: rkProp, info: info, key: name), v)
 
 proc parseText(info: PropInfo, text: string, v: var PropValue): string =
   ## Parses edited text; returns an error message ("" when fine).

@@ -8,7 +8,7 @@
 import std/strutils
 import sdl3 except Color, Cursor
 from sdl3_image import nil
-import ../graphics/geometry
+import ../graphics/[geometry, image]
 import ./sdlutil
 
 export sdl3.Window, sdl3.Renderer
@@ -108,6 +108,12 @@ proc setLogicalSize*(w: PlatformWindow, lw, lh: float32) =
 
 proc setTitle*(w: PlatformWindow, title: string) =
   discard setWindowTitle(w.window, title.cstring)
+
+proc setIcon*(w: PlatformWindow, img: Image) =
+  ## The window icon (the title bar / task bar picture). Failure is ignored: a
+  ## platform without window icons (Wayland without the protocol) keeps its own.
+  if w.window != nil and img != nil:
+    discard setWindowIcon(w.window, img.surface)
 
 proc show*(w: PlatformWindow) = discard showWindow(w.window)
 proc hide*(w: PlatformWindow) = discard hideWindow(w.window)

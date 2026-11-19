@@ -453,6 +453,38 @@ suite "property order and robustness":
     check ListBox(h.findComponent("lb")).itemIndex == 1
     check TrackBar(h.findComponent("tr")).position == -15
 
+  test "a file with the properties in the old order loads the same at run time":
+    Application.init()
+    let g = loadNfm("""object F: Form
+  width = 300
+  height = 200
+  object tc: TabControl
+    tabIndex = 2
+    tabs = (
+      'a'
+      'b'
+      'c'
+    )
+  end
+  object lb: ListBox
+    itemIndex = 1
+    items = (
+      'x'
+      'y'
+      'z'
+    )
+  end
+  object tr: TrackBar
+    position = -15
+    max = -10
+    min = -20
+  end
+end
+""")
+    check TabControl(g.findComponent("tc")).tabIndex == 2
+    check ListBox(g.findComponent("lb")).itemIndex == 1
+    check TrackBar(g.findComponent("tr")).position == -15
+
   test "a dependency on a missing property is ignored":
     check classByName("PageControl").propsOf.len > 0
     var seen = false
@@ -488,3 +520,23 @@ suite "property order and robustness":
     check owner.components.len == 0
     let ok = loadNfm("object F: Form\nend\n", owner)
     check owner.components.len == 1 and owner.components[0] == Component(ok)
+
+suite "item data properties":
+  test "cells, colWidths and per-item lists load, round-trip and report bad values":
+    Application.init()
+    let src = "object F: Form\n" &
+      "  object g: StringGrid\n    colCount = 3\n    rowCount = 3\n" &
+      "    colWidths = '10, 20, 30'\n    cells = (\n      'a\\tb'\n      ''\n      'c'\n    )\n  end\n" &
+      "  object lv: ListView\n    items = (\n      'x'\n      'y'\n    )\n" &
+      "    itemImages = (\n      ''\n      '2'\n    )\n    checkedItems = (\n      '1'\n    )\n  end\n" &
+      "end\n"
+    let f = loadNfm(src)
+    let g = StringGrid(f.findComponent("g"))
+    check g.cells[1, 0] == "b" and g.cells[0, 2] == "c" and g.colWidths[2] == 30
+    let lv = ListView(f.findComponent("lv"))
+    check lv.items[1].imageIndex == 2 and lv.itemChecked(1) and not lv.itemChecked(0)
+    let text = formToNfm(f)
+    check formToNfm(loadNfm(text)) == text
+    # a width list is text, a cell list is a list
+    expect NfmError: discard loadNfm("object F: Form\n  object g: StringGrid\n    cells = 'a'\n  end\nend\n")
+    expect NfmError: discard loadNfm("object F: Form\n  object g: StringGrid\n    colWidths = (\n      '1'\n    )\n  end\nend\n")
