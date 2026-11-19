@@ -499,9 +499,6 @@ registerClass(TreeView, parent = ScrollingControl, kids = noKids()):
     onCollapsed: TreeNodeEvent
     onChecked: TreeNodeEvent
   hide itemImages, itemSelectedImages, checkedItems
-  after itemImages, items
-  after itemSelectedImages, items
-  after checkedItems, items, propagateChecks, itemImages
 
 registerClass(ListView, parent = ScrollingControl,
               kids = columnKids(self)):
@@ -535,8 +532,6 @@ registerClass(ListView, parent = ScrollingControl,
     onColumnClick: ListColumnEvent
     onColumnResize: ListColumnEvent
   hide itemImages, checkedItems
-  after itemImages, items
-  after checkedItems, items, itemImages
 
 registerClass(ListColumn, parent = nil, create = newColumnOf(parent),
               protoParent = newListView(nil)):
@@ -571,15 +566,12 @@ registerClass(DrawGrid, parent = ScrollingControl, kids = noKids()):
     onFixedCellClick: GridCellEvent
     onColWidthChanged: GridIndexEvent
     onRowHeightChanged: GridIndexEvent
-  after colWidths, colCount, defaultColWidth
-  after rowHeights, rowCount, defaultRowHeight
 
 registerClass(StringGrid, parent = DrawGrid):
   category Behaviour:
     sortOnHeaderClick: bool
   category Data:
     prop cells, seq[string], getCells, setCells
-  after cells, colCount, rowCount
   category Events:
     onHeaderClick: GridIndexEvent
 

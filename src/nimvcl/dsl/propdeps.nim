@@ -9,12 +9,19 @@
 ## A dependency names properties that an object may not have (`text` after
 ## `itemIndex` for a class without an `itemIndex`): those are ignored.
 
-const propDeps*: array[5, (string, seq[string])] = [
+const propDeps*: array[12, (string, seq[string])] = [
   ("tabIndex", @["tabs"]),                       # a page must exist before it is selected
   ("itemIndex", @["items"]),                     # ... likewise a list row
   ("text", @["itemIndex"]),                      # an edit text overrides the selected row's
   ("value", @["minValue", "maxValue"]),          # values are clamped to the range
-  ("position", @["min", "max", "pageSize"])]
+  ("position", @["min", "max", "pageSize"]),
+  ("cells", @["colCount", "rowCount"]),          # grid cells outside the grid are dropped
+  ("colWidths", @["colCount", "defaultColWidth"]),
+  ("rowHeights", @["rowCount", "defaultRowHeight"]),
+  ("itemImages", @["items"]),                    # per-item data needs the items
+  ("itemSelectedImages", @["items"]),
+  ("checkedItems", @["items", "itemImages", "propagateChecks"]),
+  ("imageIndex", @["images"])]
 
 proc depsOf*(name: string): seq[string] =
   ## The properties that are applied before `name`.

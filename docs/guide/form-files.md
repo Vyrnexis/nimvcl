@@ -578,7 +578,6 @@ constructor just have to be in scope). The statements:
 | `category Layout\|Appearance\|Behaviour\|Data\|Events:` + block | category of the properties inside (default `Behaviour`; a proc-typed property is an event) |
 | `nostore a, b` | never written to a form file (implied by another property) |
 | `hide a, b` | written to form files but not listed by the object inspector (edited together with another property by its dialog) |
-| `after p, a, b` | `p` is applied after `a` and `b` (the properties it depends on) |
 | `skipWhen p, (cond)` | not written while `cond` (over `self`) holds |
 | `defaultWhen p, flag` | counts as default while the bool property `flag` is true |
 
