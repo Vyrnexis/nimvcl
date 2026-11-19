@@ -6,7 +6,7 @@
 ## Pixel-aligned edges stay crisp: a rect edge on an integer coordinate covers
 ## its pixels fully and leaves the neighbours untouched.
 
-import std/math
+import std/[math, tables]
 import sdl3 except Color
 import ./color
 
@@ -59,6 +59,26 @@ func ringCount(s: Shape): int =
   of skRoundRect: 4 * (s.seg + 1)
   of skEllipse: s.seg
 
+var
+  quarterCache: Table[int, seq[(float32, float32)]]   ## seg -> (cos t, sin t), t in 0 .. PI/2
+  circleCache: Table[int, seq[(float32, float32)]]    ## seg -> (cos a, sin a), a = 2 PI i / seg
+
+proc quarterTable(seg: int): seq[(float32, float32)] =
+  ## The unit quarter-circle points of a rounded corner (cached per `seg`: the
+  ## same few sizes are drawn every frame).
+  quarterCache.withValue(seg, v): return v[]
+  for i in 0 .. seg:
+    let t = (PI / 2) * i.float / seg.float
+    result.add (cos(t).float32, sin(t).float32)
+  quarterCache[seg] = result
+
+proc circleTable(seg: int): seq[(float32, float32)] =
+  circleCache.withValue(seg, v): return v[]
+  for i in 0 ..< seg:
+    let a = 2 * PI * i.float / seg.float
+    result.add (cos(a).float32, sin(a).float32)
+  circleCache[seg] = result
+
 # Adds the ring of the shape inset by `d` (negative grows it); returns the first
 # vertex index. Rings of one shape all have the same vertex count, so ring k and
 # ring k+1 can be stitched index by index.
@@ -70,21 +90,22 @@ proc addRing(g: var GeoBuf, s: Shape, d: float32, c: Color, alpha: float32): cin
     let ci = max(s.r, d)              # corner centres move inward once d > r
     let cx = [s.x + ci, s.x + s.w - ci, s.x + s.w - ci, s.x + ci]
     let cy = [s.y + ci, s.y + ci, s.y + s.h - ci, s.y + s.h - ci]
-    let a0 = [PI, 1.5 * PI, 0.0, 0.5 * PI]
+    let q = quarterTable(s.seg)
     for k in 0 .. 3:
-      for i in 0 .. s.seg:
-        let a = a0[k] + (PI / 2) * i.float / s.seg.float
-        discard g.addVert(cx[k] + rr * cos(a).float32, cy[k] + rr * sin(a).float32,
-                          c, alpha)
+      for (ct, st) in q:
+        # the corner's start angle is a multiple of a quarter turn: rotate (cos t, sin t)
+        let (ca, sa) = case k
+          of 0: (-ct, -st)        # from PI
+          of 1: (st, -ct)         # from 1.5 PI
+          of 2: (ct, st)          # from 0
+          else: (-st, ct)         # from 0.5 PI
+        discard g.addVert(cx[k] + rr * ca, cy[k] + rr * sa, c, alpha)
   of skEllipse:
     let rx = s.w / 2
     let ry = s.h / 2
     let mx = s.x + rx
     let my = s.y + ry
-    for i in 0 ..< s.seg:
-      let a = 2 * PI * i.float / s.seg.float
-      let ca = cos(a).float32
-      let sa = sin(a).float32
+    for (ca, sa) in circleTable(s.seg):
       # offset along the outward normal of the ellipse
       var nx = ca / rx
       var ny = sa / ry

@@ -78,7 +78,7 @@ proc beginFrame*(ctx: RenderContext): Canvas =
 
 proc endFrame*(c: Canvas) =
   ## Ends the frame: restores the renderer's clip rectangle and blend mode to
-  ## what they were at `beginFrame` and sweeps idle cache entries. Does not
+  ## what they were at `beginFrame` and sweeps idle cache entries (every few frames). Does not
   ## present; the caller owns `renderPresent` (or reads pixels back).
   if c.ended: return
   c.ended = true
@@ -86,7 +86,7 @@ proc endFrame*(c: Canvas) =
   if c.savedClipOn: discard setRenderClipRect(r, addr c.savedClip)
   else: discard setRenderClipRect(r, nil)
   discard setRenderDrawBlendMode(r, c.savedBlend)
-  c.ctx.sweep()
+  c.ctx.sweepIdle()
 
 # ------------------------------------------------------------- state stacks
 
