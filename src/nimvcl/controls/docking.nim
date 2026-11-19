@@ -83,7 +83,7 @@
 import std/[json, math]
 import ../platform/[window, events]
 import ../core/[form, application]
-import ./[common, imagelist, menus]
+import ./[common, imagelist, menus, pagecontrol]
 export imagelist
 
 type
@@ -619,7 +619,9 @@ proc disposeFloat(s: DockSite) =
   let f = s.fForm
   if f != nil:
     f.onClose = nil
-    f.freeWindow()
+    # Usually reached from an event of this very window (its last tab dragged
+    # out, its close request): destroy the window once that event is done.
+    Application.queue(f, proc(f: Form) {.nimcall.} = f.freeWindow())
 
 proc detachPanel(p: DockPanel, remember: bool) =
   ## Takes the panel out of its group (tidying the tree) and fires onUndock.
@@ -719,7 +721,7 @@ proc dockImpl(p: DockPanel, site: DockSite, target: Control, side: DockSide,
      p.group == DockTabs(target):
     let g = DockTabs(target)
     let ids = g.panels
-    var at = if index < 0: ids.high else: index
+    var at = if index < 0: ids.len else: index
     let cur = ids.find(p)
     if at > cur: dec at
     at = clamp(at, 0, ids.high)
@@ -1459,7 +1461,11 @@ proc keyHook(site: DockSite, ui: UiRoot, key: var Key, shift: ShiftState) =
   if ssAlt in shift or ssSuper in shift or ssCtrl notin shift: return
   var p: DockPanel
   var c = ui.focusedControl
-  while c != nil and not (c of DockPanel): c = Control(c.parent)
+  # the innermost owner of the tab keys wins: a PageControl with a strip
+  # nested inside the panel cycles its own pages
+  while c != nil and not (c of DockPanel):
+    if c of PageControl and PageControl(c).showTabs: return
+    c = Control(c.parent)
   if c != nil: p = DockPanel(c)
   else:
     let a = site.primary.fActive
@@ -1471,7 +1477,7 @@ proc keyHook(site: DockSite, ui: UiRoot, key: var Key, shift: ShiftState) =
       let i = ps.find(p)
       let n = ps[((i + (if ssShift in shift: -1 else: 1)) mod ps.len + ps.len) mod ps.len]
       n.activate(focus = true)
-    key = Key(0)
+      key = Key(0)
   elif key == keyF4 and ssShift notin shift:
     if p.fClosable: p.close()
     key = Key(0)

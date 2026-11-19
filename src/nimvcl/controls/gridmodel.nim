@@ -83,6 +83,49 @@ proc resetSizes*(a: var AxisSizes) =
   a.sumOver = 0
   a.dirty = true
 
+proc shiftSlots*(a: var AxisSizes, at, delta: int) =
+  ## Moves the overrides of the slots `>= at` by `delta`, so that sizes follow
+  ## their rows when rows are inserted (`delta > 0`, after `setCount` grew the
+  ## axis) or deleted (`delta < 0`: the overrides of the removed slots
+  ## `at ..< at - delta` are dropped; call before `setCount` shrinks it).
+  if a.over.len == 0 or delta == 0: return
+  var oldKeys = move a.keys
+  let old = a.over
+  a.over.clear()
+  a.sumOver = 0
+  for k in oldKeys:
+    var nk = k
+    if k >= at:
+      if delta < 0 and k < at - delta: continue
+      nk = k + delta
+    if nk >= a.n: continue
+    a.over[nk] = old[k]
+    a.sumOver += float64(old[k])
+    a.keys.add nk
+  a.dirty = true
+
+proc permuteSlots*(a: var AxisSizes, first: int, order: openArray[int]) =
+  ## The slots `first ..< first + order.len` are reordered: new slot
+  ## `first + i` takes the size that slot `order[i]` (an old index in that
+  ## range) had.
+  if a.over.len == 0: return
+  var inv = newSeq[int](order.len)
+  for i, o in order: inv[o - first] = first + i
+  let lo = a.keys.lowerBound(first)
+  let hi = a.keys.lowerBound(first + order.len)
+  if lo == hi: return
+  var moved: seq[(int, float32)]
+  for j in lo ..< hi:
+    let k = a.keys[j]
+    moved.add (inv[k - first], a.over[k])
+    a.over.del k
+  for (k, v) in moved: a.over[k] = v
+  # the key list is rebuilt from the table (sums are unchanged)
+  a.keys.setLen(0)
+  for k in a.over.keys: a.keys.add k
+  a.keys.sort()
+  a.dirty = true
+
 proc offset*(a: var AxisSizes, i: int): float64 =
   ## Start of slot `i` (clamped to 0 .. count); `offset(count)` is the total.
   let k = min(max(i, 0), a.n)

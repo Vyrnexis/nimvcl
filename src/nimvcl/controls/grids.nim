@@ -1156,6 +1156,7 @@ method sizeChanged*(g: StringGrid) =
   for r in 0 ..< g.fData.len:
     if g.fData[r].len > g.colCount: g.fData[r].setLen(g.colCount)
   if g.fSortCol >= g.colCount: g.fSortCol = -1
+  if g.fAligns.len > g.colCount: g.fAligns.setLen(g.colCount)
 
 func cells*(g: StringGrid): CellsProxy = CellsProxy(g: g)
 proc `[]`*(p: CellsProxy, col, row: int): string = p.g.cellOf(col, row)
@@ -1211,6 +1212,7 @@ proc insertRow*(g: StringGrid, at: int) =
   let hadCurrent = g.rowCount > g.fFixedRows
   if i < g.fData.len: g.fData.insert(newSeq[string](), i)
   g.rowCount = g.rowCount + 1
+  g.fRows.shiftSlots(i, 1)                # row heights follow their rows
   if hadCurrent:                          # the current cell / selection move down
     if g.fRow >= i: inc g.fRow
     if g.fAnchorRow >= i: inc g.fAnchorRow
@@ -1222,6 +1224,7 @@ proc deleteRow*(g: StringGrid, at: int) =
   if at < g.fixedRows or at >= g.rowCount: return
   g.endEdit(false)
   if at < g.fData.len: g.fData.delete(at)
+  g.fRows.shiftSlots(at, -1)
   if g.fRow > at: dec g.fRow             # keep the same cell current
   if g.fAnchorRow > at: dec g.fAnchorRow
   g.rowCount = g.rowCount - 1             # (the sort order of the rest stays)
@@ -1239,9 +1242,31 @@ proc compareCells*(a, b: string): int =
   elif nb: 1
   else: cmpIgnoreCase(a, b)
 
+type SortKey = object
+  isNum: bool
+  num: float
+  text: string                 # lower-cased, for the default text order
+
+proc sortKey(s: string): SortKey =
+  ## What `compareCells` compares, computed once per row.
+  var f: float
+  if s.len > 0 and parseFloat(s, f) == s.len and
+     classify(f) notin {fcNan, fcInf, fcNegInf}:
+    SortKey(isNum: true, num: f)
+  else:
+    SortKey(text: toLowerAscii(s))
+
+proc cmpKeys(a, b: SortKey): int =
+  if a.isNum and b.isNum: cmp(a.num, b.num)
+  elif a.isNum: -1
+  elif b.isNum: 1
+  else: cmp(a.text, b.text)
+
 proc sortByColumn*(g: StringGrid, col: int, ascending = true,
                    cmpProc: proc(a, b: string): int = nil) =
-  ## Stable sort of the scrolling rows by column `col` (the fixed rows stay).
+  ## Stable sort of the scrolling rows by column `col` (the fixed rows stay;
+  ## row heights follow their rows). The default order is `compareCells`,
+  ## with each row's key computed once.
   if col < 0 or col >= g.colCount: return
   g.endEdit(false)
   let first = g.fixedRows
@@ -1250,15 +1275,24 @@ proc sortByColumn*(g: StringGrid, col: int, ascending = true,
     if g.fData.len < g.rowCount: g.fData.setLen(g.rowCount)
     var order = newSeq[int](n)
     for i in 0 ..< n: order[i] = first + i
-    let f = if cmpProc != nil: cmpProc else: compareCells
-    let data = g.fData
-    order.sort(proc(x, y: int): int =
-      let a = if col < data[x].len: data[x][col] else: ""
-      let b = if col < data[y].len: data[y][col] else: ""
-      result = f(a, b)
-      if not ascending: result = -result
-      if result == 0: result = cmp(x, y))
-    for i in 0 ..< n: g.fData[first + i] = data[order[i]]
+    template textAt(r: int): string =
+      (if col < g.fData[r].len: g.fData[r][col] else: "")
+    if cmpProc != nil:
+      order.sort(proc(x, y: int): int =
+        result = cmpProc(textAt(x), textAt(y))
+        if not ascending: result = -result
+        if result == 0: result = cmp(x, y))
+    else:
+      var keys = newSeq[SortKey](n)
+      for i in 0 ..< n: keys[i] = sortKey(textAt(first + i))
+      order.sort(proc(x, y: int): int =
+        result = cmpKeys(keys[x - first], keys[y - first])
+        if not ascending: result = -result
+        if result == 0: result = cmp(x, y))
+    g.fRows.permuteSlots(first, order)
+    var sorted = newSeq[seq[string]](n)
+    for i in 0 ..< n: sorted[i] = move g.fData[order[i]]
+    for i in 0 ..< n: g.fData[first + i] = move sorted[i]
   g.fSortCol = col
   g.fSortAsc = ascending
   g.invalidate()

@@ -50,7 +50,18 @@ type
 
   TabChangingEvent* = proc(sender: Control, allowChange: var bool)
 
+  StripMetrics = object
+    ## Widths of the tab strip, kept until the captions, visibility, font or
+    ## measuring ability change (checked when the strip is used).
+    texts: seq[string]
+    shown: seq[bool]
+    xs: seq[float32]            # xs[i]: left edge of tab i from StripLeft; xs[n]: end
+    font: FontSpec
+    measured: bool
+    valid: bool
+
   TabBase* = ref object of Container
+    fMetrics: StripMetrics
     fIndex: int
     fFirst: int                 # first tab shown (strip scroll position)
     fHotTab: int                # -1 none, tab index, or -2/-3 scroll arrows
@@ -87,6 +98,11 @@ method tabChanged*(t: TabBase, oldIndex, newIndex: int) {.base.} =
 method tabEnabled*(t: TabBase, i: int): bool {.base.} = true
 method tabVisible*(t: TabBase, i: int): bool {.base.} = true
   ## Whether tab `i` is shown in the strip.
+method collectTabs*(t: TabBase, texts: var seq[string], shown: var seq[bool]) {.base.} =
+  ## The caption and strip visibility of every tab, in one pass.
+  for i in 0 ..< t.tabCount:
+    texts.add t.tabText(i)
+    shown.add t.tabVisible(i)
 
 func tabIndex*(t: TabBase): int = t.fIndex
 
@@ -124,44 +140,70 @@ proc place(t: TabBase, r: RectF): RectF =
   ## top), in client coordinates: mirrored for `tpBottom`.
   if t.fPos == tpTop: r else: rectF(r.x, t.height - r.y - r.h, r.w, r.h)
 
-proc tabWidth(t: TabBase, i: int): float32 =
-  if not t.tabVisible(i): return 0
-  max(t.textWidth(displayText(t.tabText(i)), t.font) + 2 * TabPad, MinTabW)
+proc refreshMetrics(t: TabBase) =
+  ## Re-measures the strip when something it depends on changed. Called once
+  ## per paint / hit test / tab change; the helpers below then work on the
+  ## cached prefix sums.
+  var texts: seq[string]
+  var shown: seq[bool]
+  t.collectTabs(texts, shown)
+  let f = t.font
+  let measured = t.canMeasure
+  let m = addr t.fMetrics
+  if m.valid and m.measured == measured and m.font == f and m.texts == texts and
+     m.shown == shown: return
+  m.xs.setLen(texts.len + 1)
+  m.xs[0] = 0
+  for i in 0 ..< texts.len:
+    let w = if shown[i]: max(t.textWidth(displayText(texts[i]), f) + 2 * TabPad, MinTabW)
+            else: 0'f32
+    m.xs[i + 1] = m.xs[i] + w
+  m.texts = texts
+  m.shown = shown
+  m.font = f
+  m.measured = measured
+  m.valid = true
 
-proc totalTabsWidth(t: TabBase): float32 =
-  for i in 0 ..< t.tabCount: result += t.tabWidth(i)
+func tabWidth(t: TabBase, i: int): float32 =
+  if i < 0 or i >= t.fMetrics.xs.len - 1: 0'f32
+  else: t.fMetrics.xs[i + 1] - t.fMetrics.xs[i]
+
+func stripTabs(t: TabBase): int = max(t.fMetrics.xs.len - 1, 0)
+
+func isOverflowing(t: TabBase): bool =
+  t.fMetrics.xs.len > 0 and StripLeft + t.fMetrics.xs[^1] > t.width - 2
 
 proc overflowing*(t: TabBase): bool =
-  StripLeft + t.totalTabsWidth > t.width - 2
+  t.refreshMetrics()
+  t.isOverflowing
 
-proc stripRight(t: TabBase): float32 =
+func stripRight(t: TabBase): float32 =
   ## Right edge available to tabs.
-  t.width - 2 - (if t.overflowing: 2 * ArrowW else: 0'f32)
+  t.width - 2 - (if t.isOverflowing: 2 * ArrowW else: 0'f32)
 
 proc rectOf(t: TabBase, i: int): RectF =
-  if i < t.fFirst or i >= t.tabCount: return rectF(0, 0, 0, 0)
-  var x = StripLeft
-  for k in t.fFirst ..< i: x += t.tabWidth(k)
-  let h = t.stripHeight
+  if i < t.fFirst or i >= t.stripTabs: return rectF(0, 0, 0, 0)
   let w = t.tabWidth(i)
   if w <= 0: return rectF(0, 0, 0, 0)
+  let x = StripLeft + t.fMetrics.xs[i] - t.fMetrics.xs[min(t.fFirst, t.stripTabs)]
+  let h = t.stripHeight
   if i == t.fIndex: rectF(x, 1, w, h - 1)
   else: rectF(x, 3, w, h - 3)
 
 proc normalizeFirst(t: TabBase) =
   ## The strip is only scrolled while the tabs overflow.
-  if t.fFirst != 0 and not t.overflowing: t.fFirst = 0
+  if t.fFirst != 0 and not t.isOverflowing: t.fFirst = 0
 
 proc tabRect*(t: TabBase, i: int): RectF =
   ## Tab `i` in client coordinates; empty when scrolled out to the left or
   ## hidden.
+  t.refreshMetrics()
   t.normalizeFirst()
   t.place(t.rectOf(i))
 
 proc tabsRight(t: TabBase): float32 =
   ## Right edge of the last tab as currently scrolled.
-  result = StripLeft
-  for k in t.fFirst ..< t.tabCount: result += t.tabWidth(k)
+  StripLeft + t.fMetrics.xs[^1] - t.fMetrics.xs[min(t.fFirst, t.stripTabs)]
 
 proc arrowRect(t: TabBase, left: bool): RectF =
   let h = t.stripHeight
@@ -172,20 +214,26 @@ proc tabAt*(t: TabBase, x, y: float32): int =
   ## Tab under the point, -1 none, -2 / -3 the left / right scroll arrow.
   let y = if t.fPos == tpTop: y else: t.height - y    # strip-local, from its outer edge
   if y < 0 or y >= t.stripHeight: return -1
+  t.refreshMetrics()
   t.normalizeFirst()
-  if t.overflowing:
+  if t.isOverflowing:
     if t.arrowRect(true).contains(pointF(x, y)): return -2
     if t.arrowRect(false).contains(pointF(x, y)): return -3
   if x >= t.stripRight: return -1
-  for i in t.fFirst ..< t.tabCount:
-    let r = t.rectOf(i)
-    if x >= r.x and x < r.right: return i
-    if r.x > t.stripRight: break
-  -1
+  # the first tab whose right edge lies beyond x (binary search on the prefix sums)
+  let xs = t.fMetrics.xs
+  let target = x - StripLeft + xs[min(t.fFirst, t.stripTabs)]
+  var lo = t.fFirst
+  var hi = t.stripTabs
+  while lo < hi:
+    let mid = (lo + hi) div 2
+    if xs[mid + 1] > target: hi = mid else: lo = mid + 1
+  if lo < t.stripTabs and x >= StripLeft and t.tabWidth(lo) > 0: lo else: -1
 
 proc ensureVisible(t: TabBase, i: int) =
-  if i < 0 or i >= t.tabCount or not t.tabVisible(i): return
-  if not t.overflowing:
+  t.refreshMetrics()
+  if i < 0 or i >= t.stripTabs or t.tabWidth(i) <= 0: return
+  if not t.isOverflowing:
     t.fFirst = 0
     return
   if i < t.fFirst: t.fFirst = i
@@ -228,6 +276,7 @@ proc cycle*(t: TabBase, dir: int) =
       return
 
 proc firstVisibleTab*(t: TabBase): int =
+  t.refreshMetrics()
   t.normalizeFirst()
   t.fFirst
 
@@ -306,6 +355,7 @@ method paint*(t: TabBase, c: Canvas) =
   let en = t.isEnabled
   let h = t.stripHeight
   let w = t.width
+  t.refreshMetrics()
   t.normalizeFirst()
   if t.fEnsure:
     t.fEnsure = false
@@ -324,7 +374,7 @@ method paint*(t: TabBase, c: Canvas) =
   let right = t.stripRight
   c.pushClip(t.place(rectF(0, 0, right + 2, h)))
   var selR = rectF(0, 0, 0, 0)
-  for i in t.fFirst ..< t.tabCount:
+  for i in t.fFirst ..< t.stripTabs:
     let r = t.rectOf(i)
     if r.x > right: break
     if r.w <= 0: continue
@@ -336,7 +386,7 @@ method paint*(t: TabBase, c: Canvas) =
     c.fillRoundRect(t.place(rectF(r.x, r.y, r.w, r.h + 6)), th.radius, fill)
     c.strokeRoundRect(t.place(rectF(r.x, r.y, r.w, r.h + 6)), th.radius, th.border, 1)
     c.popClip()
-    c.drawMnemonic(t.tabText(i), t.font, t.place(rectF(r.x + 4, r.y, r.w - 8, r.h - 1)),
+    c.drawMnemonic(t.fMetrics.texts[i], t.font, t.place(rectF(r.x + 4, r.y, r.w - 8, r.h - 1)),
                    (if t.hasFontColor: t.ink(th, fill, en)
                     elif en: legible(th.textMuted, fill) else: th.textDisabled),
                    t.altHeld, taCenter, vaCenter)
@@ -346,13 +396,13 @@ method paint*(t: TabBase, c: Canvas) =
     c.fillRoundRect(full, th.radius, bodyBg)
     c.strokeRoundRect(full, th.radius, th.borderStrong, 1)
     c.popClip()
-    c.drawMnemonic(t.tabText(t.fIndex), t.font,
+    c.drawMnemonic(t.fMetrics.texts[t.fIndex], t.font,
                    t.place(rectF(selR.x + 4, selR.y, selR.w - 8, selR.h)),
                    t.ink(th, bodyBg, en), t.altHeld, taCenter, vaCenter)
     if t.focused:
       drawFocusRing(c, t.place(rectF(selR.x, selR.y, selR.w, selR.h)), th)
   c.popClip()
-  if t.overflowing:
+  if t.isOverflowing:
     for left in [true, false]:
       let r = t.place(t.arrowRect(left))
       let canGo =
@@ -471,6 +521,12 @@ method tabVisible*(p: PageControl, i: int): bool =
   let s = p.sheetAt(i)
   s != nil and s.tabVisible
 
+method collectTabs*(p: PageControl, texts: var seq[string], shown: var seq[bool]) =
+  for c in p.children:
+    if c of TabSheet:
+      texts.add TabSheet(c).caption
+      shown.add TabSheet(c).tabVisible
+
 proc showActive(p: PageControl) =
   var k = 0
   for c in p.children:
@@ -574,13 +630,8 @@ method childBoundsChanged*(p: PageControl, child: Control) =
 method visibilityChanged*(p: PageControl) =
   p.ensureHook()                    # fires when inserted into a form/host tree
 
-method padding*(p: PageControl): Spacing =
-  p.syncPages()
-  procCall padding(TabBase(p))
-
 method paint*(p: PageControl, c: Canvas) =
   p.ensureHook()
-  p.syncPages()
   procCall paint(TabBase(p), c)
 
 proc initPageControl*(p: PageControl, owner: Component = nil) =

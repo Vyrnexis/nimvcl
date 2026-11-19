@@ -212,7 +212,9 @@ func isSeparator*(m: MenuItem): bool = m.fCaption == "-"
 func parent*(m: MenuItem): MenuItem = m.fParent
 func count*(m: MenuItem): int = m.fItems.len
 func hasSubmenu*(m: MenuItem): bool = m.fItems.len > 0
-func `[]`*(m: MenuItem, i: int): MenuItem = m.fItems[i]
+func `[]`*(m: MenuItem, i: int): MenuItem =
+  ## Sub-item `i`; nil when out of range.
+  if i in 0 ..< m.fItems.len: m.fItems[i] else: nil
 iterator items*(m: MenuItem): MenuItem =
   for it in m.fItems: yield it
 func indexOf*(m, child: MenuItem): int = m.fItems.find(child)
@@ -236,7 +238,9 @@ proc releaseLinks(m: MenuItem) =
   for it in m.fItems: it.releaseLinks()
 
 proc delete*(m: MenuItem, index: int) =
-  ## Removes the sub-item for good: its action link is released.
+  ## Removes the sub-item for good: its action link is released (out of range:
+  ## nothing happens).
+  if index notin 0 ..< m.fItems.len: return
   let it = m.fItems[index]
   it.fParent = nil
   m.fItems.delete(index)
@@ -367,7 +371,8 @@ proc closeSub(p: MenuPanel) =
 proc showPanel(owner: Form, root: MenuItem, anchor: RectF, placement: Placement,
                parent: PopupWindow, selectFirst: bool,
                navigate: proc(dir: int) = nil,
-               altKey: proc(ch: Rune): bool = nil): PopupWindow
+               altKey: proc(ch: Rune): bool = nil,
+               onClosed: proc(q: PopupWindow) = nil): PopupWindow
 
 proc setHot(p: MenuPanel, idx: int, fromMouse: bool)
 proc step(p: MenuPanel, dir: int): int
@@ -386,15 +391,13 @@ proc openSub(p: MenuPanel, idx: int, selectFirst: bool) =
   # the submenu overlaps the panel by 2px and lines up with the row's top
   let anchor = rectF(b.x + 2, b.y + r.y - PadV, b.w - 4, r.h)
   let panel = p
-  let sp = showPanel(p.ownerForm, it, anchor, plRight, p.popup, selectFirst)
+  let sp = showPanel(p.ownerForm, it, anchor, plRight, p.popup, selectFirst,
+    onClosed = proc(q: PopupWindow) =
+      if panel.sub == q:
+        panel.sub = nil
+        panel.subItem = nil)
   p.sub = sp
   p.subItem = it
-  sp.onClosed = proc(q: PopupWindow) =
-    if panel.sub == q:
-      panel.sub = nil
-      panel.subItem = nil
-    let pn = MenuPanel(q.content)
-    if pn.delay != nil: pn.delay.free()
 
 proc syncSub(p: MenuPanel) =
   ## The submenu follows the hot item: opens for one with sub-items, else closes.
@@ -572,17 +575,18 @@ method doKeyDown*(p: MenuPanel, key: var Key, shift: ShiftState) =
 proc showPanel(owner: Form, root: MenuItem, anchor: RectF, placement: Placement,
                parent: PopupWindow, selectFirst: bool,
                navigate: proc(dir: int) = nil,
-               altKey: proc(ch: Rune): bool = nil): PopupWindow =
+               altKey: proc(ch: Rune): bool = nil,
+               onClosed: proc(q: PopupWindow) = nil): PopupWindow =
+  ## Opens one menu panel; `onClosed` runs after the panel's own cleanup.
   let panel = newPanel(owner, root)
   panel.navigate = navigate
   panel.altKey = altKey
   result = showPopup(owner, panel, anchor, placement, pkMenu, parent)
   panel.popup = result
   if selectFirst: panel.setHot(panel.step(1), false)
-  let prev = result.onClosed
   result.onClosed = proc(q: PopupWindow) =
     if panel.delay != nil: panel.delay.free()
-    if prev != nil: prev(q)
+    if onClosed != nil: onClosed(q)
 
 # ------------------------------------------------------------ registration
 
@@ -634,8 +638,9 @@ proc free*(m: PopupMenu) =
   ## drops its image list subscription and detaches it from its owner.
   m.close()
   m.images = nil
-  m.fRoot.releaseLinks()
+  m.fRoot.clear()                   # releases the action links; no shortcut fires
   for t in m.fTargets:
+    if t.popupMenuRef == RootRef(m): t.popupMenuRef = nil
     let f = t.menuForm
     if f != nil:
       let i = f.popupMenus.find(RootRef(m))
@@ -811,16 +816,14 @@ proc openDropdown*(m: MainMenu, idx: int, selectFirst = false) =
         mm.openDropdown(i, true)
         return true
   m.closeMenus()
-  let p = showPanel(f, it, rect, plBelow, nil, selectFirst, nav, alt)
+  let p = showPanel(f, it, rect, plBelow, nil, selectFirst, nav, alt,
+    onClosed = proc(q: PopupWindow) =
+      if mm.fDrop == q:
+        mm.fDrop = nil
+        mm.fOpen = -1
+        mm.invalidate())
   m.fDrop = p
   m.fOpen = idx
-  p.onClosed = proc(q: PopupWindow) =
-    if mm.fDrop == q:
-      mm.fDrop = nil
-      mm.fOpen = -1
-      mm.invalidate()
-    let pn = MenuPanel(q.content)
-    if pn.delay != nil: pn.delay.free()
   m.invalidate()
 
 proc openByMnemonic*(m: MainMenu, ch: Rune): bool =

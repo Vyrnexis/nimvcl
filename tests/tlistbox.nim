@@ -2,7 +2,7 @@
 
 import std/[unittest, os, monotimes, times]
 import nimvcl
-import nimvcl/controls/[scrollbar, scrolling, scrollbox, listbox]
+import nimvcl/controls/[scrollbar, scrolling, scrollbox, listbox, indexset]
 
 proc feed(f: Form, kind: EventKind, x = 0'f32, y = 0'f32, button = mbLeft,
           clicks = 1, shift: ShiftState = {}) =
@@ -144,6 +144,25 @@ suite "listbox":
     check lb.itemIndex == 3 and lb.selectedIndices == @[2]
     f.tap(keySpace)
     check lb.selectedIndices == @[2, 3]
+
+  test "the hover row follows the pointer after an insert or delete":
+    let f = newShown()
+    let lb = mkList(f, 10)
+    var hot = -1
+    lb.style = lbOwnerDraw
+    lb.onDrawItem = proc(s: Control, c: Canvas, i: int, r: RectF, st: ItemStates) =
+      if isHot in st: hot = i
+    f.moveTo(rowX, rowY(3))
+    discard f.paintIfDirty()
+    check hot == 3
+    lb.insert(0, "new")
+    hot = -1
+    discard f.paintIfDirty()
+    check hot == 3                       # the pointer did not move: row 3 is still under it
+    lb.delete(0)
+    hot = -1
+    discard f.paintIfDirty()
+    check hot == 3
 
   test "drag selects":
     let f = newShown()
@@ -451,3 +470,32 @@ suite "listbox":
     check lb.itemIndex == -1 and lb.contentSize.h == 200
     lb.onData = nil
     check lb.count == 0
+
+suite "indexset":
+  test "runs merge, split and shift":
+    var s = initIndexSet()
+    s.inclRange(10, 20)
+    s.incl 22
+    s.incl 21
+    check s.runCount == 1 and s.len == 13 and 15 in s and 9 notin s
+    s.excl 15
+    check s.runCount == 2 and 15 notin s and 14 in s and 16 in s
+    s.shift(12, 3)                       # an insert at 12: later rows move down
+    check 10 in s and 11 in s and 12 notin s and 15 in s and 17 in s and
+          18 notin s and 19 in s and 25 in s and 26 notin s
+    s.excl 17
+    s.shift(18, -1)                      # row 17 was deleted
+    check 16 in s and 17 notin s and 18 in s and 24 in s and 25 notin s
+    var t = initIndexSet()
+    t.inclRange(0, 100)
+    check t.minus(s).len == 101 - s.len
+    check s.minus(t).len == 0
+    t.truncate(50)
+    check t.len == 50
+    var big = initIndexSet()
+    big.inclRange(0, 5_000_000)
+    check big.len == 5_000_001 and big.runCount == 1
+    var r = initIndexSet()
+    r.incl 0
+    r.incl 1
+    check r.remapped(@[2, 1, 0]).len == 2 and 2 in r.remapped(@[2, 1, 0])

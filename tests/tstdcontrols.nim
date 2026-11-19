@@ -513,6 +513,36 @@ suite "standard controls":
     check pc.firstVisibleTab == prev - 1
     Application.processMessages()
 
+  test "pagecontrol: hit test follows captions, hidden tabs and removals":
+    let f = newShown(700, 200)
+    let pc = newPageControl(f)
+    pc.align = alClient
+    var shs: seq[TabSheet]
+    for i in 1 .. 8: shs.add newTabSheet(pc, "Tab " & $i)
+    lay f
+    for i in 0 ..< 8:
+      let r = pc.tabRect(i)
+      if r.w > 0: check pc.tabAt(r.x + r.w / 2, r.y + 2) == i
+    shs[1].tabVisible = false
+    check pc.tabRect(1).w == 0
+    let r2 = pc.tabRect(2)
+    check pc.tabAt(r2.x + 3, r2.y + 2) == 2
+    shs[2].caption = "A much much longer caption"
+    check pc.tabRect(2).w > r2.w
+    let r2b = pc.tabRect(2)
+    check pc.tabAt(r2b.x + r2b.w - 2, r2b.y + 2) == 2
+
+  test "pagecontrol: layout and paint queries never fire onChange":
+    let f = newShown()
+    let (pc, shs, eds) = pages(f)
+    var changes = 0
+    pc.onChange = proc(s: Control) = inc changes
+    pc.activePageIndex = 1
+    changes = 0
+    discard pc.padding
+    discard pc.tabAt(20, 5)
+    check changes == 0
+
   test "tabcontrol: tabs only":
     let f = newShown()
     let tc = newTabControl(f, @["One", "Two", "Three"], 10, 10, 300, 150)

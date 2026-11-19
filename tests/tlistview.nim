@@ -894,3 +894,48 @@ suite "listview (review fixes)":
     discard f.paintIfDirty()
     il.add(icon(rgb(0, 0, 1)))
     check not f.paintIfDirty()
+
+suite "listview (selection model)":
+  setup:
+    Application.init()
+    Application.forceScale = 0
+  teardown:
+    for f in openForms(): f.freeWindow()
+
+  test "deleting an item while nothing is focused fires no onChange":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 3)
+    var changes = 0
+    lv.onChange = proc(s: Control) = inc changes
+    lv.items.delete(2)
+    check changes == 0 and lv.count == 2
+
+  test "selecting a huge range is not proportional to its size":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 0)
+    lv.multiSelect = true
+    lv.ownerData = true
+    lv.itemsCount = 2_000_000
+    lv.onData = proc(s: Control, it: ListItem) = it.caption = "x"
+    var added, removed = 0
+    lv.onSelectionChanged = proc(s: Control, came, gone: openArray[int]) =
+      added += came.len
+      removed += gone.len
+    let t0 = getMonoTime()
+    lv.setSelection([0], 0)
+    lv.selectAll()
+    lv.clearSelection()
+    let ms = float((getMonoTime() - t0).inNanoseconds) / 1e6
+    check added == 2_000_000 and removed == 2_000_000
+    echo "  [listview perf] select all / clear of 2M virtual rows with handlers: ", ms, " ms"
+
+  test "drag selection past the last row selects up to it":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 5)
+    lv.multiSelect = true
+    let p1 = lv.fpos(ctr(lv.captionRect(1)))
+    f.feed(ekMouseDown, p1.x, p1.y)
+    let below = lv.fpos(pointF(ctr(lv.captionRect(1)).x, lv.clientRect.bottom - 3))
+    f.feed(ekMouseMove, below.x, below.y, shift = {ssLeft})
+    f.feed(ekMouseUp, below.x, below.y)
+    check lv.selectedIndices == @[1, 2, 3, 4]

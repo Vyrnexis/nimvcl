@@ -142,18 +142,17 @@ proc syncBars(c: ScrollingControl) =
   c.fHBar.setPosition64(c.fPosX)
   c.fSyncing = false
 
-proc applyPos(c: ScrollingControl, x, y: float64, force = false) =
+proc applyPos(c: ScrollingControl, x, y: float64) =
   let nx = min(max(x, 0.0), c.maxScrollX)
   let ny = min(max(y, 0.0), c.maxScrollY)
-  if nx == c.fPosX and ny == c.fPosY and not force: return
-  let changed = nx != c.fPosX or ny != c.fPosY
+  if nx == c.fPosX and ny == c.fPosY: return
   c.fPosX = nx
   c.fPosY = ny
   c.fSyncing = true
   c.fVBar.setPosition64(ny)
   c.fHBar.setPosition64(nx)
   c.fSyncing = false
-  if changed or force: c.contentScrolled()
+  c.contentScrolled()
 
 proc updateScrollBars*(c: ScrollingControl) =
   ## Re-evaluates bar visibility, ranges and the clamping of `scrollPos`.

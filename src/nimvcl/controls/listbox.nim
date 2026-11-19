@@ -13,7 +13,7 @@
 ## or searched, so only the visible rows are touched (1,000,000 rows are fine).
 ## `add`/`insert`/`delete`/`clear`/`items` and `sorted` do nothing in virtual mode
 ## (`count` may be set before or after `onData`);
-## selection works as usual (a selection of N rows costs N set entries).
+## selection works as usual (selected rows are kept as runs, so selecting a huge range is cheap).
 ## Pixel positions are float32: beyond ~700,000 rows the scroll position is
 ## quantised to 2 px, which is invisible for row navigation.
 ##
@@ -53,10 +53,10 @@
 ## jump to the next item starting with the typed prefix, reset after
 ## `typeAheadTimeout` ms, 1000 by default).
 
-import std/[sets, monotimes, algorithm, sequtils, strutils]
+import std/[monotimes, algorithm, strutils]
 import ../graphics/context
 import ../core/timer
-import ./common, ./scrolling
+import ./common, ./scrolling, ./indexset
 export scrolling
 
 type
@@ -73,7 +73,7 @@ type
     fBorder: BorderStyle
     fItems: seq[string]
     fCount: int                  # virtual item count
-    fSel: HashSet[int]
+    fSel: IndexSet
     fIndex, fAnchor, fHot: int
     fVer: int                    # bumped on every selection/focus change
     fMulti, fExtended, fSorted, fDragging, fMouseIn, fShowFocusRect: bool
@@ -96,7 +96,7 @@ const
   ItemPadding = 8'f32
   DragScrollMs = 45
 
-proc nowMs(): int64 = getMonoTime().ticks div 1_000_000
+proc nowMs*(): int64 = getMonoTime().ticks div 1_000_000
 
 # ----------------------------------------------------------------- basics
 
@@ -179,8 +179,8 @@ proc selectOnly(lb: ListBox, i: int) =
   lb.touch()
 
 proc selectRange(lb: ListBox, a, b: int) =
-  var s = initHashSet[int]()
-  for j in min(a, b) .. max(a, b): s.incl j
+  var s = initIndexSet()
+  s.inclRange(a, b)
   if s == lb.fSel: return
   lb.fSel = s
   lb.touch()
@@ -247,7 +247,6 @@ func selCount*(lb: ListBox): int = lb.fSel.len
 
 proc selectedIndices*(lb: ListBox): seq[int] =
   for i in lb.fSel: result.add i
-  result.sort()
 
 proc `itemIndex=`*(lb: ListBox, i: int) =
   let v = lb.fVer
@@ -264,7 +263,7 @@ proc setSelection*(lb: ListBox, indices: openArray[int], focus = -1) =
   ## anchor (-1: the first index given, or none); it is scrolled into view when
   ## given. Single mode keeps only the first index.
   let v = lb.fVer
-  var s = initHashSet[int]()
+  var s = initIndexSet()
   var first = -1
   for i in indices:
     if i >= 0 and i < lb.count:
@@ -331,9 +330,7 @@ proc `style=`*(lb: ListBox, v: ListBoxStyle) =
 
 proc shiftIndices(lb: ListBox, at, delta: int) =
   ## Indices >= `at` move by `delta` (selection, focus, anchor).
-  var s = initHashSet[int]()
-  for j in lb.fSel: s.incl(if j >= at: j + delta else: j)
-  lb.fSel = s
+  lb.fSel.shift(at, delta)
   if lb.fIndex >= at: lb.fIndex += delta
   if lb.fAnchor >= at: lb.fAnchor += delta
   if lb.fHot >= at: lb.fHot = -1
@@ -354,6 +351,7 @@ proc insert*(lb: ListBox, index: int, s: string) =
   lb.shiftIndices(i, 1)
   lb.fItems.insert(s, i)
   lb.refresh()
+  lb.updateHot()                         # the row under a still pointer changed
 
 proc add*(lb: ListBox, s: string) =
   if lb.isVirtual: return
@@ -375,6 +373,7 @@ proc delete*(lb: ListBox, i: int) =
   if wasSel or wasFocus: lb.touch()
   lb.refresh()
   lb.scrollBy(0, 0)         # re-clamp
+  lb.updateHot()
   lb.notify(v)
 
 proc clear*(lb: ListBox) =
@@ -397,10 +396,7 @@ proc clampToCount(lb: ListBox) =
   ## Drops selection / focus / anchor beyond the item count.
   let v = lb.fVer
   var changed = false
-  for j in toSeq(lb.fSel):
-    if j >= lb.count:
-      lb.fSel.excl j
-      changed = true
+  if lb.fSel.truncate(lb.count): changed = true
   if lb.fIndex >= lb.count:
     lb.fIndex = -1
     changed = true
@@ -437,9 +433,7 @@ proc `sorted=`*(lb: ListBox, v: bool) =
   for n, o in order:
     pos[o] = n
     lb.fItems[n] = items[o]
-  var s = initHashSet[int]()
-  for j in lb.fSel: s.incl pos[j]
-  lb.fSel = s
+  lb.fSel = lb.fSel.remapped(pos)
   if lb.fIndex >= 0: lb.fIndex = pos[lb.fIndex]
   if lb.fAnchor >= 0: lb.fAnchor = pos[lb.fAnchor]
   lb.invalidate()
@@ -484,14 +478,14 @@ proc applyClick(lb: ListBox, i: int, shift: ShiftState) =
       if ssShift in shift and lb.fAnchor >= 0:
         lb.selectRange(lb.fAnchor, i)
       elif ssCtrl in shift:
-        if i in lb.fSel: lb.fSel.excl i else: lb.fSel.incl i
+        lb.fSel.toggle i
         lb.touch()
         lb.fAnchor = i
       else:
         lb.selectOnly(i)
         lb.fAnchor = i
     else:
-      if i in lb.fSel: lb.fSel.excl i else: lb.fSel.incl i
+      lb.fSel.toggle i
       lb.touch()
       lb.fAnchor = i
   else:
@@ -590,7 +584,8 @@ proc moveFocus(lb: ListBox, target: int, shift: ShiftState) =
   lb.makeVisible(target)
   lb.notify(v)
 
-func prefixIC(s, lowerPrefix: string): bool =
+func prefixIC*(s, lowerPrefix: string): bool =
+  ## `s` starts with `lowerPrefix` (ASCII case-insensitive; the prefix is already lower case).
   if s.len < lowerPrefix.len: return false
   for j in 0 ..< lowerPrefix.len:
     if toLowerAscii(s[j]) != lowerPrefix[j]: return false
@@ -734,7 +729,7 @@ proc initListBox*(lb: ListBox, owner: Component = nil) =
   lb.fHot = -1
   lb.fExtended = true
   lb.typeAheadTimeout = 1000
-  lb.fSel = initHashSet[int]()
+  lb.fSel = initIndexSet()
   lb.fShowFocusRect = true
   lb.padding = spacing(1)
 

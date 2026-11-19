@@ -226,7 +226,7 @@ proc autoCompleteText(c: ComboBox) =
   let low = t.toLowerAscii
   for i in 0 ..< c.fList.count:
     let s = c.fList.itemText(i)
-    if s.len > t.len and s.toLowerAscii.startsWith(low):
+    if s.len > t.len and prefixIC(s, low):
       e.replaceRange(0, t.len, s)        # the item's own spelling replaces the typed text
       e.select(t.len, s.len - t.len)
       return
