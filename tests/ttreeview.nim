@@ -799,3 +799,108 @@ suite "treeview (review fixes)":
     discard f.paintIfDirty()
     il.add(newImage(16, 16, rgb(1, 2, 3)))          # no longer listened to
     check not f.paintIfDirty()
+
+suite "treeview (selection and extent)":
+  setup:
+    Application.init()
+    Application.forceScale = 0
+  teardown:
+    for f in openForms(): f.freeWindow()
+
+  test "the horizontal extent covers a wide node that was never painted":
+    let f = newShown()
+    let tv = mkTree(f)
+    for i in 0 ..< 200: tv.items.addChild(nil, "n" & $i)
+    tv.items.addChild(nil, "W".repeat(150))          # row 200, far below the view
+    f.settle()
+    check tv.contentSize.w > tv.viewport.w
+    let vh = tv.viewport.h
+    discard f.paintIfDirty()
+    check tv.viewport.h == vh                        # painting changes no layout
+    # a text change reaches the extent as well
+    let n = tv.items.top(0)
+    n.text = "V".repeat(300)
+    check tv.contentSize.w > 1200.0
+
+  test "selected = a node behind a vetoing onExpanding changes nothing":
+    let f = newShown()
+    let tv = mkTree(f)
+    let a = tv.items.addChild(nil, "A")
+    let deep = a.addChild("b").addChild("deep")
+    tv.items.addChild(nil, "other")
+    tv.onExpanding = proc(s: Control, n: TreeNode, allow: var bool) = allow = false
+    var cnt = 0
+    tv.onChange = proc(s: Control, n: TreeNode) = inc cnt
+    tv.selected = deep
+    check tv.selected == nil and cnt == 0 and deep.rowIndex < 0
+
+  test "deleting a selected, unfocused node fires onChange":
+    let f = newShown()
+    let tv = mkTree(f)
+    tv.multiSelect = true
+    let a = tv.items.addChild(nil, "a")
+    let b = tv.items.addChild(nil, "b")
+    let c = tv.items.addChild(nil, "c")
+    tv.selected = a
+    b.selected = true
+    c.selected = true
+    tv.selected = a
+    b.selected = true
+    var cnt = 0
+    tv.onChange = proc(s: Control, n: TreeNode) = inc cnt
+    b.delete()
+    check cnt == 1 and tv.selCount == 1
+
+  test "endUpdate reports one change for one logical change":
+    let f = newShown()
+    let tv = mkTree(f)
+    let p = tv.items.addChild(nil, "p")
+    let x = p.addChild("x")
+    p.expand()
+    var cnt = 0
+    tv.onChange = proc(s: Control, n: TreeNode) = inc cnt
+    tv.beginUpdate()
+    tv.selected = x
+    p.collapse()
+    tv.endUpdate()
+    check cnt == 1 and tv.selected == p
+
+  test "collapsing under beginUpdate repairs anchor and cancels a hidden edit":
+    let f = newShown()
+    let tv = mkTree(f)
+    let p = tv.items.addChild(nil, "p")
+    let x = p.addChild("x")
+    p.expand()
+    tv.beginEdit(x)
+    check tv.isEditing
+    tv.beginUpdate()
+    p.collapse()
+    tv.endUpdate()
+    check not tv.isEditing
+
+  test "Shift+arrow range selection extends and shrinks incrementally":
+    let f = newShown()
+    let tv = mkTree(f, 400)
+    tv.multiSelect = true
+    for i in 0 ..< 10: tv.items.addChild(nil, "n" & $i)
+    tv.selected = tv.items.top(2)
+    f.activeControl = tv
+    f.tap(keyDown, {ssShift})
+    f.tap(keyDown, {ssShift})
+    check tv.selCount == 3
+    f.tap(keyUp, {ssShift})
+    check tv.selCount == 2 and tv.items.top(3).selected and
+          not tv.items.top(4).selected
+    f.tap(keyUp, {ssShift}); f.tap(keyUp, {ssShift})
+    check tv.selCount == 2 and tv.items.top(1).selected and tv.items.top(2).selected
+
+  test "Ctrl+minus does not collapse the node":
+    let f = newShown()
+    let tv = mkTree(f)
+    let p = tv.items.addChild(nil, "p")
+    p.addChild("x")
+    p.expand()
+    tv.selected = p
+    f.activeControl = tv
+    f.tap('-'.key, {ssCtrl})
+    check p.expanded

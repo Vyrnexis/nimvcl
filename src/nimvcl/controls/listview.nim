@@ -95,7 +95,7 @@
 import std/[sets, algorithm, strutils]
 import ../graphics/context
 import ../core/timer
-import ./common, ./scrolling, ./edit, ./imagelist, ./viewsupport
+import ./common, ./scrolling, ./edit, ./imagelist, ./viewsupport, ./indexset
 export scrolling, imagelist, viewsupport.CheckBoxState, viewsupport.ItemState,
        viewsupport.ItemStates
 
@@ -143,7 +143,8 @@ type
     fColumns: seq[ListColumn]
     fCount: int                      ## virtual item count
     fOwnerData: bool
-    fSel, fChecks: HashSet[int]
+    fSel: IndexSet
+    fChecks: HashSet[int]
     fIndex, fAnchor, fHot, fEditIdx, fSlowIdx, fDownIdx: int
     fVer: int
     fStyle: ListViewStyle
@@ -570,7 +571,7 @@ proc touch(lv: ListView) = inc lv.fVer
 
 type SelSnap = object
   active: bool
-  old: HashSet[int]
+  old: IndexSet
 
 proc snap(lv: ListView): SelSnap =
   if lv.onSelectItem != nil or lv.onSelectionChanged != nil:
@@ -583,12 +584,8 @@ proc notify(lv: ListView, ver: int, sn: SelSnap) =
   lv.invalidate()
   if sn.active and (lv.onSelectItem != nil or lv.onSelectionChanged != nil):
     var gone, came: seq[int]
-    for i in sn.old:
-      if i notin lv.fSel: gone.add i
-    for i in lv.fSel:
-      if i notin sn.old: came.add i
-    gone.sort()
-    came.sort()
+    for i in sn.old.minus(lv.fSel): gone.add i
+    for i in lv.fSel.minus(sn.old): came.add i
     if lv.onSelectItem != nil:
       for i in gone:
         let it = lv.getItem(i)
@@ -607,8 +604,8 @@ proc selectOnly(lv: ListView, i: int) =
   lv.touch()
 
 proc selectRange(lv: ListView, a, b: int) =
-  var s = initHashSet[int]()
-  for j in min(a, b) .. max(a, b): s.incl j
+  var s = initIndexSet()
+  s.inclRange(a, b)
   if s == lv.fSel: return
   lv.fSel = s
   lv.touch()
@@ -652,7 +649,6 @@ func selCount*(lv: ListView): int = lv.fSel.len
 
 proc selectedIndices*(lv: ListView): seq[int] =
   for i in lv.fSel: result.add i
-  result.sort()
 
 proc `itemIndex=`*(lv: ListView, i: int) =
   ## Selects exactly item `i` (-1: nothing) and scrolls it into view.
@@ -673,7 +669,7 @@ proc setSelection*(lv: ListView, indices: openArray[int], focus = -1) =
   ## the first index. An empty list clears the selection.
   let v = lv.fVer
   let sn = lv.snap()
-  var s = initHashSet[int]()
+  var s = initIndexSet()
   var first = -1
   for i in indices:
     if i >= 0 and i < lv.count:
@@ -764,10 +760,7 @@ proc renumber(lv: ListView, from0 = 0) =
 
 proc shiftIndices(lv: ListView, at, delta: int) =
   ## Indices >= `at` move by `delta` (selection, focus, anchor).
-  if lv.fSel.len > 0:
-    var s = initHashSet[int]()
-    for j in lv.fSel: s.incl(if j >= at: j + delta else: j)
-    lv.fSel = s
+  lv.fSel.shift(at, delta)
   if lv.fIndex >= at: lv.fIndex += delta
   if lv.fAnchor >= at: lv.fAnchor += delta
   if lv.fEditIdx >= at: lv.fEditIdx += delta
@@ -807,7 +800,7 @@ proc deleteItem(lv: ListView, i: int) =
   lv.fItems[i].fView = nil
   lv.fItems.delete(i)
   lv.renumber(i)
-  if wasSel or lv.fIndex == -1: lv.touch()
+  if wasSel or wasFocus: lv.touch()
   lv.refresh()
   lv.scrollBy(0, 0)
   lv.notify(v, SelSnap())
@@ -872,14 +865,15 @@ proc `itemsCount=`*(lv: ListView, n: int) =
   else:
     let v = lv.fVer
     var changed = false
+    var kept = lv.fSel
+    kept.truncate(newCount)
     var drop: seq[int]
-    for j in lv.fSel:
-      if j >= newCount: drop.add j
-    drop.sort()
+    for j in lv.fSel.minus(kept): drop.add j
     if lv.fEditIdx >= newCount: lv.endEdit(cancel = true)
     for j in drop:                       # items that no longer exist: told first
       if lv.onSelectItem != nil: lv.onSelectItem(lv, lv.bareItem(j), false)
-      lv.fSel.excl j
+    if drop.len > 0:
+      lv.fSel = kept
       changed = true
     if drop.len > 0 and lv.onSelectionChanged != nil:
       lv.onSelectionChanged(lv, [], drop)
@@ -913,11 +907,12 @@ proc sortItems*(lv: ListView, cmp: proc(a, b: ListItem): int) =
     pos[o] = n
     lv.fItems[n] = old[o]
   lv.renumber()
-  var s = initHashSet[int]()
-  for j in lv.fSel: s.incl pos[j]
-  lv.fSel = s
+  lv.fSel = lv.fSel.remapped(pos)
   if lv.fIndex >= 0: lv.fIndex = pos[lv.fIndex]
   if lv.fAnchor >= 0: lv.fAnchor = pos[lv.fAnchor]
+  if lv.fEditIdx >= 0: lv.fEditIdx = pos[lv.fEditIdx]
+  if lv.fDownIdx >= 0: lv.fDownIdx = pos[lv.fDownIdx]
+  if lv.fSlowIdx >= 0: lv.fSlowIdx = pos[lv.fSlowIdx]
   lv.fHot = -1
   lv.invalidate()
   if lv.fIndex >= 0: lv.makeVisible(lv.fIndex)
@@ -1148,14 +1143,14 @@ proc applyClick(lv: ListView, i: int, shift: ShiftState) =
       if ssShift in shift and lv.fAnchor >= 0:
         lv.selectRange(lv.fAnchor, i)
       elif ssCtrl in shift:
-        if i in lv.fSel: lv.fSel.excl i else: lv.fSel.incl i
+        lv.fSel.toggle i
         lv.touch()
         lv.fAnchor = i
       else:
         lv.selectOnly(i)
         lv.fAnchor = i
     else:
-      if i in lv.fSel: lv.fSel.excl i else: lv.fSel.incl i
+      lv.fSel.toggle i
       lv.touch()
       lv.fAnchor = i
   else:
@@ -1603,7 +1598,7 @@ proc initListView*(lv: ListView, owner: Component = nil) =
   lv.fRpc = 1
   lv.slowClickDelay = 600
   lv.typeAheadTimeout = 1000
-  lv.fSel = initHashSet[int]()
+  lv.fSel = initIndexSet()
   lv.fChecks = initHashSet[int]()
   lv.padding = spacing(1)
   lv.viewStyle = vsReport
