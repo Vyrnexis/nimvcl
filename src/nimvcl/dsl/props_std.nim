@@ -339,7 +339,6 @@ registerClass(TabBase, parent = Container, abstract = true):
 registerClass(TabControl, parent = TabBase):
   category Data:
     prop tabs, seq[string], getTabs, setTabs
-  after tabIndex, tabs
 
 registerClass(PageControl, parent = TabBase)
 
@@ -393,7 +392,6 @@ registerClass(SpinEdit, parent = Container, kids = noKids()):
     value: int
   category Events:
     onChange: NotifyEvent
-  after value, minValue, maxValue
 
 registerClass(ComboBox, parent = Container, kids = noKids()):
   category Appearance:
@@ -413,8 +411,6 @@ registerClass(ComboBox, parent = Container, kids = noKids()):
     onDropDown: NotifyEvent
     onCloseUp: NotifyEvent
   skipWhen text, (self.itemIndex >= 0)
-  after itemIndex, items
-  after text, itemIndex
 
 registerClass(ListBox, parent = ScrollingControl, kids = noKids()):
   category Appearance:
@@ -431,7 +427,6 @@ registerClass(ListBox, parent = ScrollingControl, kids = noKids()):
     itemIndex: int
   category Events:
     onChange: NotifyEvent
-  after itemIndex, items
 
 registerClass(TrackBar, parent = Control):
   category Behaviour:
@@ -444,7 +439,6 @@ registerClass(TrackBar, parent = Control):
     pageSize: int
   category Events:
     onChange: NotifyEvent
-  after position, min, max
 
 registerClass(ProgressBar, parent = Control):
   category Appearance:
@@ -457,7 +451,6 @@ registerClass(ProgressBar, parent = Control):
     position: int
   category Events:
     onChange: NotifyEvent
-  after position, min, max
 
 registerClass(ScrollBar, parent = Control):
   category Behaviour:
@@ -472,7 +465,6 @@ registerClass(ScrollBar, parent = Control):
   category Events:
     onChange: NotifyEvent
     onScroll: ScrollEvent
-  after position, min, max, pageSize
 
 # ------------------------------------------------------------ views
 

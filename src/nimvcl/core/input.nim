@@ -343,15 +343,20 @@ proc buttonShift(ui: UiRoot): ShiftState =
   if mbMiddle in ui.buttons: result.incl ssMiddle
 
 proc hitAt(ui: UiRoot, p: PointF): Control =
-  result = ui.root.controlAtPoint(p)
-  if result == nil and ui.rootGetsMouse and ui.root.clientRect.contains(p):
+  ## The mouse target at `p`. A disabled control (or one inside a disabled
+  ## container) is hit but takes no input, and what lies below it does not get
+  ## it either (VCL): the result is nil there.
+  let h = ui.root.controlAtPoint(p, includeDisabled = true)
+  if h != nil:
+    return if h.isEnabled: h else: nil
+  if ui.rootGetsMouse and ui.root.clientRect.contains(p):
     result = ui.root
 
-proc designFor(ui: UiRoot, p: PointF): DesignHook =
-  ## The design hook that owns the pointer at `p` (nil: normal routing).
+proc designFor(ui: UiRoot, p: PointF, h: Control): DesignHook =
+  ## The design hook that owns the pointer at `p`, where `h` is the mouse
+  ## target there (`hitAt`); nil: normal routing.
   if ui.fDesignCap != nil: return ui.fDesignCap
   if ui.fCaptured != nil: return nil
-  let h = ui.hitAt(p)
   for d in ui.designers:
     if d.scope == nil: continue
     if h != nil:
@@ -359,10 +364,13 @@ proc designFor(ui: UiRoot, p: PointF): DesignHook =
     elif d.scope.isVisible and d.scope.clientToForm(d.scope.clientRect).contains(p):
       return d
 
-proc hoverAt(ui: UiRoot, p: PointF): Control =
-  ## The control to hover at `p`: none inside a designed container.
-  if ui.designers.len > 0 and ui.designFor(p) != nil: return nil
-  ui.hitAt(p)
+proc hoverAt(ui: UiRoot, p: PointF, h: Control): Control =
+  ## The control to hover at `p` (`h` is the mouse target there): none inside a
+  ## designed container.
+  if ui.designers.len > 0 and ui.designFor(p, h) != nil: return nil
+  h
+
+proc hoverAt(ui: UiRoot, p: PointF): Control = ui.hoverAt(p, ui.hitAt(p))
 
 proc addDesigner*(ui: UiRoot, d: DesignHook) =
   ## Attaches a design hook (see core/design.nim). The first one gets the keys.
@@ -400,8 +408,9 @@ proc mouseMove(ui: UiRoot, p: PointF, shift: ShiftState): bool =
   ui.mouseInside = true
   let shift = shift + ui.buttonShift
   var target: Control
+  let hit = if ui.fCaptured == nil: ui.hitAt(p) else: nil   # once per event
   if ui.designers.len > 0:
-    let d = ui.designFor(p)
+    let d = ui.designFor(p, hit)
     if d != nil:
       ui.setHover(nil)
       d.designMouseMove(d.scope.formToClient(p), shift)
@@ -418,7 +427,7 @@ proc mouseMove(ui: UiRoot, p: PointF, shift: ShiftState): bool =
     let over = target.clientRect.contains(target.formToClient(p))
     ui.setHover(if over: target else: nil)
   else:
-    target = ui.hitAt(p)
+    target = hit
     ui.setHover(target)
   if target == nil: return false
   let lp = target.formToClient(p)
@@ -429,8 +438,9 @@ proc mouseDown(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState,
                clicks: int): bool =
   ui.lastPos = p
   ui.mouseInside = true
+  let hit = if ui.fCaptured == nil: ui.hitAt(p) else: nil   # once per event
   if ui.designers.len > 0:
-    let d = ui.designFor(p)
+    let d = ui.designFor(p, hit)
     if d != nil:
       ui.setHover(nil)
       ui.focusControl(nil)         # the designer owns the keyboard now
@@ -441,8 +451,8 @@ proc mouseDown(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState,
       if clicks == 2 and button == mbLeft: sh.incl ssDouble
       d.designMouseDown(d.scope.formToClient(p), button, sh, clicks)
       return true
-  if ui.fCaptured == nil: ui.setHover(ui.hoverAt(p))
-  let target = if ui.fCaptured != nil: ui.fCaptured else: ui.hitAt(p)
+  if ui.fCaptured == nil: ui.setHover(ui.hoverAt(p, hit))
+  let target = if ui.fCaptured != nil: ui.fCaptured else: hit
   if target == nil: return false
   if ui.fCaptured == nil: ui.fCaptured = target
   if button == mbLeft: ui.fPressed = ui.fCaptured
@@ -497,8 +507,9 @@ proc mouseUp(ui: UiRoot, p: PointF, button: MouseButton, shift: ShiftState): boo
   true
 
 proc mouseWheel(ui: UiRoot, p: PointF, dx, dy: float32, shift: ShiftState): bool =
+  let hit = if ui.fCaptured == nil: ui.hitAt(p) else: nil   # once per event
   if ui.designers.len > 0:
-    let d = ui.designFor(p)
+    let d = ui.designFor(p, hit)
     if d != nil:
       if not d.designMouseWheel(d.scope.formToClient(p), shift + ui.buttonShift,
                                 dx, dy):
@@ -508,7 +519,7 @@ proc mouseWheel(ui: UiRoot, p: PointF, dx, dy: float32, shift: ShiftState): bool
           c.doMouseWheel(shift + ui.buttonShift, dx, dy, handled)
           c = Control(c.parent)
       return true
-  let target = if ui.fCaptured != nil: ui.fCaptured else: ui.hitAt(p)
+  let target = if ui.fCaptured != nil: ui.fCaptured else: hit
   if target == nil: return false
   var handled = false
   var c = target

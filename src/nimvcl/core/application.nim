@@ -72,6 +72,7 @@ var
   queueLock: Lock
   queued: seq[Job]
   observers: seq[EventObserver]
+  notifying = 0                 ## `notify` calls in progress
 
 initLock(queueLock)
 
@@ -217,6 +218,14 @@ proc addEventObserver*(a: TApplication, o: EventObserver) =
   ## Registers a function that is called after each dispatched window event.
   observers.add o
 
+proc removeEventObserver*(a: TApplication, o: EventObserver) =
+  ## Unregisters an observer added with `addEventObserver` (the same proc value);
+  ## no effect when it is not registered. An observer may remove itself.
+  let i = observers.find(o)
+  if i < 0: return
+  if notifying > 0: observers[i] = nil       # compacted when the notification ends
+  else: observers.delete i
+
 proc notify(f: Form, pe: PlatformEvent) =
   if f != nil:                   # Alt state, also for keys that went to a popup
     case pe.kind
@@ -226,7 +235,16 @@ proc notify(f: Form, pe: PlatformEvent) =
       if pe.key == keyLAlt or pe.key == keyRAlt: f.ui.setAlt(false)
     of ekWindowFocusLost: f.ui.setAlt(false)
     else: discard
-  for o in observers: o(f, pe)
+  inc notifying
+  try:
+    for i in 0 ..< observers.len:       # (an observer added meanwhile waits for the next event)
+      let o = observers[i]
+      if o != nil: o(f, pe)
+  finally:
+    dec notifying
+    if notifying == 0:
+      for i in countdown(observers.high, 0):
+        if observers[i] == nil: observers.delete i
 
 proc dispatch*(a: TApplication, pe: PlatformEvent) =
   ## Routes one translated event to its form (the loop's single entry point).

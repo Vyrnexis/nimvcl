@@ -242,6 +242,42 @@ suite "mouse routing":
     check f.ui.focusedControl == nil
     f.destroy()
 
+  test "a disabled control swallows the mouse: the parent gets nothing":
+    let f = newShown()
+    let outer = probe(f, "outer", 10, 10, 200, 100, focusable = true)
+    let a = probe(outer, "a", 10, 10, 50, 30, focusable = true)
+    a.enabled = false
+    f.moveTo(25, 25)
+    f.click(25, 25)
+    f.feed(ekMouseWheel, 25, 25)
+    check take().len == 0
+    check f.ui.hovered == nil
+    check f.ui.focusedControl == nil
+    outer.enabled = false          # a disabled container blocks its children too
+    a.enabled = true
+    f.click(25, 25)
+    check take().len == 0
+    f.destroy()
+
+  test "event observers can be removed, also while they run":
+    let f = newShown()
+    var first, second = 0
+    var removeFirst: EventObserver
+    let b = proc(f: Form, pe: PlatformEvent) = inc second
+    removeFirst = proc(f: Form, pe: PlatformEvent) =
+      inc first
+      Application.removeEventObserver(removeFirst)
+    Application.addEventObserver(removeFirst)
+    Application.addEventObserver(b)
+    f.moveTo(5, 5)
+    f.moveTo(6, 6)
+    check first == 1
+    check second == 2                    # the next observer still ran each time
+    Application.removeEventObserver(b)
+    f.moveTo(7, 7)
+    check second == 2
+    f.destroy()
+
   test "double click":
     let f = newShown()
     discard probe(f, "a", 10, 10, 100, 50)

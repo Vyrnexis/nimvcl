@@ -47,11 +47,11 @@
 ##   condition (over `self`) holds, because another property implies it.
 ## * `defaultWhen font, parentFont` the property counts as default while the
 ##   bool property `parentFont` is true.
-## * `after tabIndex, tabs` the first property is applied after the others:
-##   its setter only accepts a value that the others make valid (an index into
-##   a list). `propsOf` lists the properties in that order, so a saved form file
-##   and every loader that applies properties in file order set them correctly.
-##   Names the class does not have are ignored.
+## * Property order: a property whose setter only accepts a value that other
+##   properties make valid (`tabIndex` after `tabs`) is listed by `propdeps`,
+##   which the compile-time `loadForm` shares. `propsOf` lists the properties in
+##   that order, so a saved form file and every loader that applies properties
+##   in file order set them correctly.
 ##
 ## Defaults are measured, not declared: a property is "default" when it has the
 ## value a freshly created instance of the object's class has.
@@ -59,6 +59,7 @@
 import std/[macros, tables, strutils, hashes]
 import ../graphics/[color, font, image]
 import ../core/[types, component, control]
+import ./propdeps
 
 type
   Obj* = RootRef
@@ -130,7 +131,6 @@ type
     hidden*: bool                        ## not listed by the object inspector (edited through another property's dialog)
     defaultWhen*: string                 ## default while this bool property is true
     skipWhen*: proc(o: Obj): bool {.closure.}   ## not stored while this returns true (value implied by another property)
-    after*: seq[string]                  ## properties that must be set before this one (see `propsOf`)
     declaredIn*: ClassInfo
     get*: proc(o: Obj): PropValue {.closure.}
     set*: proc(o: Obj, v: PropValue) {.closure.}
@@ -424,11 +424,6 @@ proc addProp*(ci: ClassInfo, p: PropInfo) =
   ci.props.add p
   inc registryStamp
 
-proc setAfter*(p: PropInfo, others: openArray[string]) =
-  ## `p` is applied after the properties `others` (see `propsOf`).
-  p.after = @others
-  inc registryStamp
-
 proc addAlias*(alias, className: string) =
   aliasTable[alias] = className
 
@@ -470,26 +465,16 @@ proc classOf*(o: Obj): ClassInfo =
         best = d
         result = ci
 
-proc place(props: seq[PropInfo], i: int, state: var seq[int], order: var seq[PropInfo]) =
-  if state[i] != 0: return        # placed, or a dependency cycle: keep the given order
-  state[i] = 1
-  for dep in props[i].after:
-    for j in 0 ..< props.len:
-      if props[j].name == dep:
-        place(props, j, state, order)
-        break
-  state[i] = 2
-  order.add props[i]
-
 proc inApplyOrder(props: seq[PropInfo]): seq[PropInfo] =
-  ## `props` with every property after those it names in `after`, otherwise in
-  ## the given order.
-  var state = newSeq[int](props.len)    # 0 new, 1 being placed, 2 placed
-  for i in 0 ..< props.len: place(props, i, state, result)
+  ## `props` with every property after those it depends on (`propdeps`),
+  ## otherwise in the given order.
+  var names: seq[string]
+  for p in props: names.add p.name
+  for i in applyOrder(names): result.add props[i]
 
 proc propsOf*(ci: ClassInfo): seq[PropInfo] =
   ## Every property of the class including inherited ones: ancestors' first,
-  ## each in registration order, a property that is applied `after` others
+  ## each in registration order, a property that depends on others (`propdeps`)
   ## behind them. A property redeclared in a subclass replaces the inherited
   ## one in place. This is the order a form file is written and applied in.
   if ci.propsStamp == registryStamp: return ci.propsCache
@@ -906,12 +891,6 @@ macro registerClass*(args: varargs[untyped]): untyped =
             findProp(`ci`, `nm`).skipWhen = proc(`o`: Obj): bool =
               let `selfId` = `cls`(`o`)
               `cond`
-        elif head.kind == nnkIdent and head.eqIdent("after") and st.len >= 3:
-          let nm = newLit(st[1].strVal)
-          var deps = newTree(nnkBracket)
-          for j in 2 ..< st.len: deps.add newLit(st[j].strVal)
-          stmts.add quote do:
-            findProp(`ci`, `nm`).setAfter(`deps`)
         elif head.kind == nnkIdent and head.eqIdent("defaultWhen") and st.len == 3:
           let nm = newLit(st[1].strVal)
           let flag = newLit(st[2].strVal)
@@ -922,7 +901,7 @@ macro registerClass*(args: varargs[untyped]): untyped =
           stmts.add propStmt(cls, ci, head.strVal, st[1][0], cat, nil, nil)
         else:
           error("registerClass: expected `name: Type`, `prop name, Type, get, set`, " &
-                "`category X:`, `nostore a, b`, `after a, b` or `defaultWhen a, b`", st)
+                "`category X:`, `nostore a, b` or `defaultWhen a, b`", st)
       else:
         error("registerClass: unsupported statement", st)
   if hasBody: walk(stmts, args[^1], "Behaviour", cls, ci)

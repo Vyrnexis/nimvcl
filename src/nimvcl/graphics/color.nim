@@ -7,6 +7,9 @@ type
     ## Non-premultiplied RGBA color.
     r*, g*, b*, a*: uint8
 
+func `==`*(a, b: Color): bool =
+  a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a
+
 func rgba*(r, g, b: int, a: int = 255): Color =
   ## Color from 0..255 components (values are clamped).
   Color(r: uint8(clamp(r, 0, 255)), g: uint8(clamp(g, 0, 255)),

@@ -18,6 +18,7 @@ import ./font, ./image, ./aa
 const
   ResolvedSlots = 32              ## direct-mapped memo of font resolutions
   DefaultMaxIdleFrames* = 120     ## frames an unused cache entry survives
+  SweepEvery = 8                  ## frames between idle sweeps (at most half the idle window)
   DefaultTextCacheCap* = 2048     ## hard limit on cached text objects
 
 type
@@ -363,6 +364,13 @@ proc sweep*(ctx: RenderContext) =
   for k in deadTex:
     var e: TexEntry
     if ctx.textures.pop(k, e): destroyTexture(e.tex)
+
+proc sweepIdle*(ctx: RenderContext) =
+  ## `sweep` once every few frames (walking every cache entry each frame costs
+  ## more than the entries it frees), and at once when the text cache is over
+  ## its cap.
+  let every = max(1, min(SweepEvery, ctx.maxIdleFrames div 2))
+  if ctx.frame mod every == 0 or ctx.texts.len > ctx.textCacheCap: ctx.sweep()
 
 # ---------------------------------------------------------------- textures
 

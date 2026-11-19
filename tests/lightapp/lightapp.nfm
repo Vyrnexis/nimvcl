@@ -20,6 +20,26 @@ object Light: Form
     caption = 'OK'
     onClick = button1Click
   end
+  object list1: ListBox
+    itemIndex = 1
+    items = (
+      'a'
+      'b'
+    )
+  end
+  object tabs1: TabControl
+    tabIndex = 2
+    tabs = (
+      'x'
+      'y'
+      'z'
+    )
+  end
+  object track1: TrackBar
+    position = 70
+    max = 100
+    min = 50
+  end
   object icons: ImageList
     width = 24
     height = 24

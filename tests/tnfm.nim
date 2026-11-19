@@ -453,6 +453,38 @@ suite "property order and robustness":
     check ListBox(h.findComponent("lb")).itemIndex == 1
     check TrackBar(h.findComponent("tr")).position == -15
 
+  test "a file with the properties in the old order loads the same at run time":
+    Application.init()
+    let g = loadNfm("""object F: Form
+  width = 300
+  height = 200
+  object tc: TabControl
+    tabIndex = 2
+    tabs = (
+      'a'
+      'b'
+      'c'
+    )
+  end
+  object lb: ListBox
+    itemIndex = 1
+    items = (
+      'x'
+      'y'
+      'z'
+    )
+  end
+  object tr: TrackBar
+    position = -15
+    max = -10
+    min = -20
+  end
+end
+""")
+    check TabControl(g.findComponent("tc")).tabIndex == 2
+    check ListBox(g.findComponent("lb")).itemIndex == 1
+    check TrackBar(g.findComponent("tr")).position == -15
+
   test "a dependency on a missing property is ignored":
     check classByName("PageControl").propsOf.len > 0
     var seen = false
