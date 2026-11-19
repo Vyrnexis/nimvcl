@@ -343,8 +343,13 @@ proc buttonShift(ui: UiRoot): ShiftState =
   if mbMiddle in ui.buttons: result.incl ssMiddle
 
 proc hitAt(ui: UiRoot, p: PointF): Control =
-  result = ui.root.controlAtPoint(p)
-  if result == nil and ui.rootGetsMouse and ui.root.clientRect.contains(p):
+  ## The mouse target at `p`. A disabled control (or one inside a disabled
+  ## container) is hit but takes no input, and what lies below it does not get
+  ## it either (VCL): the result is nil there.
+  let h = ui.root.controlAtPoint(p, includeDisabled = true)
+  if h != nil:
+    return if h.isEnabled: h else: nil
+  if ui.rootGetsMouse and ui.root.clientRect.contains(p):
     result = ui.root
 
 proc designFor(ui: UiRoot, p: PointF): DesignHook =

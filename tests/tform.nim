@@ -242,6 +242,23 @@ suite "mouse routing":
     check f.ui.focusedControl == nil
     f.destroy()
 
+  test "a disabled control swallows the mouse: the parent gets nothing":
+    let f = newShown()
+    let outer = probe(f, "outer", 10, 10, 200, 100, focusable = true)
+    let a = probe(outer, "a", 10, 10, 50, 30, focusable = true)
+    a.enabled = false
+    f.moveTo(25, 25)
+    f.click(25, 25)
+    f.feed(ekMouseWheel, 25, 25)
+    check take().len == 0
+    check f.ui.hovered == nil
+    check f.ui.focusedControl == nil
+    outer.enabled = false          # a disabled container blocks its children too
+    a.enabled = true
+    f.click(25, 25)
+    check take().len == 0
+    f.destroy()
+
   test "double click":
     let f = newShown()
     discard probe(f, "a", 10, 10, 100, 50)
