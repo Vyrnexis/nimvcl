@@ -42,6 +42,7 @@ type
   ToolBar* = ref object of Container
     fFlat: bool
     fImages: ImageListRef
+    fNextX: float32          # layout cursor: where the next custom child starts
 
 const
   GlyphSize = 16'f32
@@ -229,6 +230,7 @@ method releaseResources*(t: ToolBar) =
 
 func flat*(t: ToolBar): bool = t.fFlat
 proc `flat=`*(t: ToolBar, v: bool) =
+  if v == t.fFlat: return
   t.fFlat = v
   t.invalidate()
 
@@ -240,13 +242,16 @@ method preferredSize*(t: ToolBar): SizeF =
   let p = t.padding
   sizeF(t.width, h + p.vertical)
 
+method beforeLayout*(t: ToolBar) =
+  procCall beforeLayout(Container(t))
+  t.fNextX = low(float32)
+
 method customAlign*(t: ToolBar, child: Control, available: RectF) =
-  var x = available.x
-  for c in t.children:
-    if c == child: break
-    if c.visible and c.align == alCustom:
-      x += c.margins.left + c.width + c.margins.right
+  ## The layout pass hands over the visible custom children in order: one
+  ## running x position places them in a single linear pass.
   let m = child.margins
+  let x = max(t.fNextX, available.x)
+  t.fNextX = x + m.left + child.width + m.right
   child.setBounds(round(x + m.left),
                   round(available.y + (available.h - child.height) / 2),
                   child.width, child.height)
