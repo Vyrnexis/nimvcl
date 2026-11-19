@@ -80,6 +80,10 @@ big.onDrawCell = proc(sender: Control, c: Canvas, col, row: int,
 
 ## Tips
 
+* Navigation shares its row logic with ListBox: Home and End go to the first and
+  last column of the row (Ctrl: of the grid), PageUp and PageDown to the last
+  fully visible row, then by a page. Typing does not search: it starts the
+  editor with that text (when `goEditing` is set).
 * Only visible cells are drawn, so a million rows scroll fine.
 * Fixed cells never become the current cell.
 * In a DrawGrid, `rect` excludes the 1 px grid line. Use `cellTextColor(state)` and

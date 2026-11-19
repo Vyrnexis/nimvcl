@@ -77,7 +77,7 @@ away:
 | `control.free()` | Removes the control and all its children from the form and unlinks their actions (and image list subscriptions) |
 | `menuItem.delete(i)` / `menuItem.clear()` | The removed items (and their sub-items) are unlinked |
 | `popupMenu.free()`, `mainMenu.free()` | Unlinks every item and drops the menu's image list subscription |
-| `action.free()` | Unlinks every client and removes the action from its list |
+| `action.free()` | Unlinks every client (a tool button that became a check button for the action goes back to a plain one) and removes the action from its list |
 
 Plain `parent = nil` or `removeControl` only detaches a control (it may come
 back later), so it keeps the link: call `free()` when it is gone for good.
@@ -85,7 +85,9 @@ back later), so it keeps the link: call `free()` when it is gone for good.
 ## Updating state on idle
 
 `onUpdate` runs once after each batch of events and right before a menu opens,
-never continuously. Use it to compute `enabled` or `checked` from your state:
+never continuously. Only action lists that exist are visited (they are in a
+registry), not every form, and an `onUpdate` handler may add or remove actions
+or lists safely. Use it to compute `enabled` or `checked` from your state:
 
 ```nim
 var dirty = false

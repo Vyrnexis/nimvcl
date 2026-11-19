@@ -53,9 +53,11 @@ The Object Inspector's "..." button on `images` opens the image list dialog
 (`ImageListDlgForm`, see [property editors](inspector.md#property-editor-dialogs)):
 a list with thumbnails and Add (several files at once), Delete, Up and Down.
 The controls that take a list (`ToolBar.images`, `TreeView.images`,
-`ListView.smallImages` / `largeImages`, `MainMenu.images`, `PopupMenu.images`,
+`ListView.smallImages` / `largeImages`, `Button.images`, `MainMenu.images`, `PopupMenu.images`,
 `ActionList.images`) have a drop-down of the ImageLists of the form; the link is
-saved as the list's name. `imageIndex` is a plain number property.
+saved as the list's name. `imageIndex` is a plain number property; the per-item
+indexes of a `ListView` or `TreeView` are edited in its
+[items editor](listview.md#at-design-time).
 
 ## Events
 
@@ -73,6 +75,13 @@ re-measure by themselves when you add icons later. You can subscribe too:
 let id = icons.addListener(proc() = echo "icons changed, version ", icons.version)
 icons.removeListener(id)        # let go when you no longer care
 ```
+
+Controls that show a list hold it in an `ImageListRef` field
+(`nimvcl/controls/imagelist`): `attach(list, onChange)` swaps the list and the
+subscription in one step, `detach()` drops both (called from `releaseResources`
+when the control is freed), and `list` reads it. Menus, ToolBar, TreeView,
+ListView, Button and docking all use it, so a custom control that takes an
+ImageList should too, instead of calling `addListener` itself.
 
 A listener is a closure, so the list keeps whatever the closure captured
 alive. That is why a control that is thrown away should be released with
@@ -94,6 +103,7 @@ alive. That is why a control that is thrown away should be released with
 |---|---|
 | [TreeView](treeview.md) | `images`, `TreeNode.imageIndex`, `selectedIndex` |
 | [ListView](listview.md) | `smallImages`, `largeImages`, `ListItem.imageIndex` |
+| [Button](button.md) | `images`, `imageIndex`, `imageAlignment` |
 | [ToolBar](toolbar.md) | `images`, `ToolButton.imageIndex` |
 | [Menus](menus.md) | `MainMenu.images`, `PopupMenu.images`, `MenuItem.imageIndex` |
 | [ActionList](../guide/actions.md) | `images`, `Action.imageIndex` |

@@ -22,7 +22,10 @@ tick.enabled = true                       # starts the timer
 
 A new timer is disabled. Set `enabled = true` to start it and `false` to stop it.
 `interval` can change while it runs. An enabled timer stays alive through the
-registry, so set `enabled = false` (or call `free`) when you are done with it.
+registry, so set `enabled = false` (or call `free`) when you are done with it;
+freeing the control that owns a timer stops it. Ticks are not queued up: a
+handler slower than the interval misses ticks rather than being called back to
+back.
 
 See [Timer](../components/timer.md).
 

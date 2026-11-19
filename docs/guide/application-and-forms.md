@@ -93,7 +93,9 @@ proc askName(): string =
   if dlg.showModal() == mrOk: edit.text else: ""
 ```
 
-Closing the window gives `mrCancel`. A modal form is centered on the active
+A button sets the form's `modalResult` before its `onClick` runs, so the handler
+can veto closing by setting `form.modalResult = mrNone` (to validate the input
+first, say). Closing the window gives `mrCancel`. A modal form is centered on the active
 form. For simple questions use the ready-made [dialogs](../components/dialogs.md)
 (`messageDlg`, `inputQuery`).
 

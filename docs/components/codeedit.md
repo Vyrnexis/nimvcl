@@ -115,6 +115,19 @@ caret first unless it lands inside the selection.
 `SearchOptions` has `ignoreCase`, `wholeWord` and `regex`. A bad regular
 expression makes `find` return false (the find bar shows "Invalid pattern").
 
+The regular expressions come from a built-in engine (`minire`; `std/re` needs
+PCRE at run time) that works on one line at a time: literals, `.`, classes
+`[a-z_]` / `[^...]`, `\d \w \s` and their negations, `\b \B`, `^ $`, groups
+`( )` and `(?: )`, `|`, greedy and lazy quantifiers (`* + ? {n,m}`, `*?` ...)
+and the escapes `\t \n \r \xHH \uHHHH`. No backreferences, lookaround or
+possessive quantifiers. Matching time grows with pattern size times line length,
+so nested repetition such as `(a|aa)+$` is safe and a group that can match
+nothing (`(a*)*b`) works. **Whole word** means the match does not start or end
+inside a word, so it also works for patterns that begin or end with punctuation.
+F3 and Replace step past an empty match, Find Previous visits every position,
+and **Replace All** builds the new text once: one undo step, fast on a 40,000
+line file.
+
 ## Keys
 
 | Keys | Action |

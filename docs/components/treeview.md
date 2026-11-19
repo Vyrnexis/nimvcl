@@ -31,6 +31,7 @@ TreeView:
 | `showLines`, `showButtons`, `showRoot`, `rowSelect` | bool | Look |
 | `indent`, `itemHeight` | float32 | Metrics (`itemHeight` 0 = automatic) |
 | `readOnly` | bool | Disable in-place rename |
+| `typeAheadTimeout` | int | Milliseconds before a typed prefix is forgotten (default 1000) |
 | `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
 | `color` | Color | Own background: the tree background; hover rows are a shade of it. Set it and `parentColor` turns off |
 | `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
@@ -68,7 +69,10 @@ TreeNode: `text`, `data` (`RootRef`), `tag`, `imageIndex`, `selectedIndex`, `exp
   `node.childCount == 0`.
 * Wrap bulk inserts in `beginUpdate` / `endUpdate`.
 * Keep your own object in `node.data` (derive from `RootObj`) or an int in `tag`.
-* Keys: arrows, Left/Right to collapse and expand, Space, type-ahead, F2 to rename.
+* Keys: arrows, Left/Right to collapse and expand (Left on a collapsed node goes
+  to its parent), `*` (expand everything below), `+` / `-`, Space, F2 to rename. Home, End, PageUp, PageDown and
+  type-ahead (on the visible nodes' text; `typeAheadTimeout`, 1000 ms) work as
+  in ListBox.
 
 ## At design time
 

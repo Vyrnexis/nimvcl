@@ -31,6 +31,7 @@ lv.onSelectItem = proc(sender: Control, item: ListItem, selected: bool) =
 | `smallImages`, `largeImages` | `ImageList` | Icons; items use `imageIndex` |
 | `sortColumn`, `sortOrder` | int, `SortOrder` | Arrow in the header (you do the sorting) |
 | `readOnly` | bool | Disable in-place rename |
+| `typeAheadTimeout` | int | Milliseconds before a typed prefix is forgotten (default 1000) |
 | `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
 | `color` | Color | Own background: the items area; the header and hover are shades of it. Set it and `parentColor` turns off |
 | `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
@@ -95,6 +96,13 @@ ListItem: `caption`, `subItems`, `imageIndex`, `checked`, `selected`, `data`, `t
 * Millions of rows scroll to the exact pixel (the scroll position is float64):
   a 5,000,000-row virtual list is fine; `itemRect(i)` and `itemAt(point)` agree
   with what is painted at every position.
+* **Keys** (shared by ListBox, ListView, TreeView and the grids): Up, Down, Home,
+  End, PageUp and PageDown move the focus; PageDown goes to the last fully
+  visible row and, when already there, by a page. **Type-ahead**: printable
+  ASCII keys (letters, digits; with Shift only letters) jump to the next
+  item caption starting with what you typed; further keys within `typeAheadTimeout` ms
+  (default 1000) extend the prefix. A space only counts inside a prefix, and
+  Ctrl or Alt combinations are never type-ahead.
 * Sorting is yours: handle `onColumnClick` and call `sortByColumn`.
 * Sub-item `k` is column `k + 1`; the caption is column 0.
 * Drag the right edge of a column header to resize it. (Dragging headers to

@@ -222,6 +222,19 @@ are the position of the component's tile in the form designer. They are ignored
 at run time and written only when they are not both 0. A designer reads them
 when it shows the tile and keeps them current while the tile is dragged.
 
+### Property order
+
+Some setters only accept a value that other properties make valid: `tabIndex`
+needs the `tabs`, `itemIndex` the `items`, `value` the `minValue` / `maxValue`,
+`cells` the `colCount` / `rowCount`, `itemImages` and `checkedItems` the
+`items`, `imageIndex` the `images`. One table, `nimvcl/dsl/propdeps`
+(`propDeps`, `applyOrder`), says which property follows which. The writer
+(`propsOf` lists the properties in that order), `loadNfm` and the compile-time
+`loadForm` all use it, so a file loads the same whatever order its properties
+are written in, and a hand-written file need not know the rules. A dependency
+on a property the class does not have is ignored. The table has no imports, so
+`loadForm` still does not pull in the registry.
+
 ### What is stored
 
 The writer emits only properties that differ from a fresh instance of the same
@@ -252,7 +265,8 @@ proc newMainForm*(owner: Component = nil): MainForm
 
 The construction code is the one the `form` macro writes: first every object is
 created top-down (`newButton(parent)`; `newMenuItem` and the other non-control
-items through `nfmMake`), then every property is assigned in file order, so a
+items through `nfmMake`), then the properties of each object are assigned in
+file order (except for the dependencies in "Property order" above), so a
 property may refer to any named object, also one further down. A root of class
 `Frame` produces a `Frame` subtype with the usual `newX(parent, left, top, width,
 height)`. A root of another class uses `initThatClass(self, owner)` as the `form`
@@ -580,6 +594,11 @@ constructor just have to be in scope). The statements:
 | `hide a, b` | written to form files but not listed by the object inspector (edited together with another property by its dialog) |
 | `skipWhen p, (cond)` | not written while `cond` (over `self`) holds |
 | `defaultWhen p, flag` | counts as default while the bool property `flag` is true |
+
+Properties of your own classes are applied in the order you register them;
+the dependencies of "Property order" are keyed by property name, so a property
+that has one of those names (`items`, `itemIndex`, ...) is ordered too, and
+there is no per-class way to declare a dependency.
 
 Options: `parent = Base`, `abstract = true` (cannot be created), `name = "..."`,
 `create = <expr>` (names `owner: Component`, `parent: RootRef`), `attach = <expr>`

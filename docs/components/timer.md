@@ -34,10 +34,14 @@ tick.enabled = true                              # a new timer is off
 
 ## Tips
 
-* An enabled timer is kept alive by the library. Disable or `free` it when done,
-  for example when a form closes.
+* An enabled timer is kept alive by the library. Disable or `free` it when done.
+  A timer owned by a control stops when that control is freed (`control.free()`).
 * Ticks are delivered through the event loop, so a long handler delays everything.
-  Do not start a job that outlasts the interval.
+  Ticks do not pile up: at most one is pending per timer, so a handler that
+  outlasts the interval misses ticks instead of running back to back. Do not
+  start a job that outlasts the interval.
+* Enabling a timer raises `IOError` when SDL cannot start it; the timer stays
+  disabled.
 * A debounce is a timer you restart on each keystroke, then disable inside
   `onTimer`.
 * Timers also work in host mode.

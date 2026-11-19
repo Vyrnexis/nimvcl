@@ -24,6 +24,23 @@ between minor versions.
   dialog (Add, Add child, Indent, Outdent, Up, Down).
 - Property registry: `hide a, b` keeps a stored property out of the inspector.
 - `ObjectInspector.setValue` also sets properties the inspector does not list.
+- `propdeps`: one table of property dependencies (`tabIndex` after `tabs`,
+  `cells` after `colCount` ...) shared by the registry, `loadNfm` and the
+  compile-time `loadForm`, so a form file loads the same in any property order.
+- `TrackBar` handles the mouse wheel when focused.
+
+### Changed
+
+- A disabled control (or one inside a disabled container) swallows mouse input
+  instead of passing it to what lies below it, as in the VCL.
+- `ComboBox` owns its items and its committed index (`items` is a
+  `ComboItems`); the drop-down list is a view made for each opening.
+- `ListBox`, `ListView`, `TreeView` and `DrawGrid` share row navigation,
+  selection updates and the in-place editor (`rowview`), and the first three
+  share type-ahead; the drag auto-scroll is shared too.
+- System fonts are listed by one `fc-list` run (was `fc-match` per family).
+- `StatusBar.simpleText` keeps the panels, and the size grip only takes room
+  with `sizeGrip`; `FlowPanel` and `ToolBar` skip layout for unchanged values.
 
 ## [0.1.4] - 2026-11-19
 
@@ -169,3 +186,6 @@ First release. There are no earlier versions.
 [0.1.2]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.0
+[0.1.3]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.3
+[0.1.4]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.4
+[0.2.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.2.0

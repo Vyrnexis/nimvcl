@@ -137,6 +137,8 @@ are the object's child nodes in the form file.
 | `onGetChoices(sender, target: Obj, prop: string): seq[Obj]` | The objects an object-reference property offers (filtered by the property's class). When nil, the named objects of the target's form are found by walking up from the target; set it when the target lives inside a design surface |
 | `onGetHandlers(sender, target: Obj, event: string): seq[string]` | More handler names for the event editor, besides `knownHandlers` |
 | `onSelectionChanged` | The selected row changed |
+| `onContextMenu(sender, prop: string, p: PointF)` | A right click was released over the inspector. The row under the cursor was already selected by the press; `prop` is its dotted property name ("" over a category, empty space or the header) and `p` the point in the inspector's client coordinates (`clientToForm(p)` for a popup). It runs before the control's own `popupMenu` is served, so the host can enable or hide that menu's items for the row |
+| `isOverridden(sender, prop: string): bool` | Host predicate for inherited forms: does the value of `prop` (dotted) differ from the ancestor's? Such rows draw their **name** in bold (the bold *value* still means "differs from a fresh object"). The answer is cached per row until `refresh` or the next `inspect`; `ins.overridden(prop)` reads it |
 
 ## Methods
 
@@ -148,7 +150,7 @@ are the object's child nodes in the form file.
 | `setExpanded(name, on)` | Expand or collapse a composite property or a category (`"cat:Layout"`) |
 | `beginEdit(name, openList = true)`, `commitEdit()`, `cancelEdit()` | Drive the editor from code |
 | `setValue(name, value)` | Set a property of all targets as if edited (also a hidden one, or one on another tab) |
-| `valueTextOf(name)`, `isBold(name)`, `rowCount`, `rowName(i)`, `indexOfProp(name)` | Inspect the grid (tests, accessibility) |
+| `valueTextOf(name)`, `isBold(name)`, `overridden(name)`, `rowCount`, `rowName(i)`, `indexOfProp(name)` | Inspect the grid (tests, accessibility) |
 | `rowRect(i)`, `nameRect(i)`, `valueRect(i)` | Geometry of a row in client coordinates |
 
 ## Tips

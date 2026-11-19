@@ -186,6 +186,14 @@ echo name.focused                # true while it has the focus
 A group of `RadioButton`s counts as one tab stop; arrow keys move inside it.
 `onEnter` and `onExit` fire when a control gains or loses focus.
 
+## Disabled controls
+
+A control with `enabled = false`, or inside a disabled container, takes no
+input: no mouse events, no focus, not a tab stop, no mnemonic. A mouse press on
+it is also not passed to what lies below it (a click on a disabled button over a
+panel does not reach the panel), as in the VCL. A control that gets disabled
+while it holds the mouse capture loses it (`captureLost`).
+
 ## Mnemonics
 
 An `&` in a caption underlines the next letter while Alt is held. Alt+letter

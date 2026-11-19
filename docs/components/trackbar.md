@@ -42,6 +42,7 @@ volume.onChange = proc(sender: Control) =
 * `onChange` fires on every step while dragging. For heavy work, check
   `isDragging` or use a [Timer](timer.md) to debounce.
 * The minimum is at the left, or at the top when vertical.
-* Home and End jump to the ends.
+* Home and End jump to the ends. The mouse wheel steps a focused bar by
+  `lineSize` per notch (up moves toward the maximum).
 
 [Back to the index](../README.md)

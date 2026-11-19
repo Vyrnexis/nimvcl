@@ -64,15 +64,23 @@ A `FontSpec.family` is resolved in this order:
    bold, italic, boldItalic)` takes the file **bytes**, for example
    `registerFontFamilyData("Foo", staticRead("fonts/Foo-Regular.ttf"))`, so the font
    is part of the executable like the bundled ones. Missing variants are
-   synthesised from the regular face.
+   synthesised from the regular face. `unregisterFontFamily(name)` takes a
+   registered family out again (a bundled family of that name comes back);
+   fonts and text that used it are dropped from the caches at the start of the
+   next frame, so a tool that adds and removes project fonts (an IDE) needs no
+   restart. Unknown names are ignored.
 2. The bundled families `sans` and `mono`.
-3. A **system font** (Linux/BSD): any other name is looked up with fontconfig
-   (`fc-match`; no link-time dependency). Only an exact family match counts: when
-   fontconfig answers with a substitute, or `fc-match` is not installed, the text
-   uses the bundled `sans`. Results are cached. `systemFontFamilies()` lists the
-   installed families (`fc-list`, sorted, empty when unavailable) and
-   `refreshSystemFonts()` forgets the caches. On Windows and macOS there is no
-   system lookup yet: unknown names fall back to `sans`.
+3. A **system font**: any other name is looked up among the installed
+   families, matched by exact (case-insensitive) family name. On Linux/BSD the
+   list comes from fontconfig's `fc-list`, run once on first use (no link-time
+   dependency); on Windows and macOS the font folders (`%WINDIR%\Fonts`,
+   `%LOCALAPPDATA%\Microsoft\Windows\Fonts`; `/System/Library/Fonts`,
+   `/Library/Fonts`, `~/Library/Fonts`) are scanned and the family and style are
+   read from each file's name table. A collection (`.ttc`) counts with its first
+   face. Where the family is not installed, or `fc-list` is missing, the text
+   uses the bundled `sans`. `systemFontFamilies()` lists the installed families
+   (sorted, empty when unavailable) and `refreshSystemFonts()` forgets the
+   caches.
 
 What to ship: bundled and registered-from-data (project) fonts **travel with the
 binary** and look the same everywhere. System fonts depend on the target machine:

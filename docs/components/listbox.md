@@ -28,6 +28,7 @@ list.onChange = proc(sender: Control) =
 | `itemHeight` | float32 | Row height |
 | `style` | `ListBoxStyle` | `lbStandard` or `lbOwnerDraw` (with `onDrawItem`) |
 | `topIndex` | int | First visible row |
+| `typeAheadTimeout` | int | Milliseconds before a typed prefix is forgotten (default 1000) |
 | `borderStyle` | `BorderStyle` | `bsSingle` (default) or `bsNone`: no border, no focus ring and square corners, so the control can sit flush in a panel |
 | `color` | Color | Own background: the list background; hover rows are a shade of it, selection keeps the theme colors. Set it and `parentColor` turns off |
 | `font.color` | Color | Text color (VCL `Font.Color`); alpha 0 (the default) uses the theme's text color. `fontColor` is a shortcut |
@@ -67,6 +68,13 @@ list.onChange = proc(sender: Control) =
   keeps only the focused row selected.
 * In virtual mode `clear`, `delete` and `items` do nothing: change `count`.
 * With `sorted`, `insert` ignores the index.
+* **Keys** (shared by ListBox, ListView, TreeView and the grids): Up, Down, Home,
+  End, PageUp and PageDown move the focus; PageDown goes to the last fully
+  visible row and, when already there, by a page. **Type-ahead**: printable
+  ASCII keys (letters, digits; with Shift only letters) jump to the next
+  item starting with what you typed; further keys within `typeAheadTimeout` ms
+  (default 1000) extend the prefix. A space only counts inside a prefix, and
+  Ctrl or Alt combinations are never type-ahead.
 * ListBox scrolls on its own. Wheel and keyboard scrolling work out of the box.
 
 [Back to the index](../README.md)

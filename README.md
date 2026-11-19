@@ -1,14 +1,16 @@
 # nimvcl
 
 A Delphi VCL-style UI library for Nim 2.2, drawn entirely with SDL3 (Linux
-first). Forms, `Align` and `Anchors`, `onClick` events, actions, menus, and a
-`form` macro that works like a `.dfm` checked by the compiler.
+first, Windows and macOS experimental). Forms, `Align` and `Anchors`, `onClick`
+events, actions, menus, and a `form` macro that works like a `.dfm` checked by
+the compiler. Forms can also live in `.nfm` text files, which is what the
+visual designer edits.
 
-**Status:** 0.1.0, the first release. The API can still change before 1.0; see
-the [changelog](CHANGELOG.md).
+**Status:** version 0.2.0. The API can still change before 1.0; see the
+[changelog](CHANGELOG.md). Source: <https://github.com/Vyrnexis/nimvcl>.
 
-The companion IDE, a visual form designer built on nimvcl, lives in
-[NimRAD](https://github.com/Vyrnexis/NimRAD).
+The companion IDE, a Delphi 7-style RAD environment with a visual form designer
+built on nimvcl, is [NimRAD](https://github.com/Vyrnexis/NimRAD).
 
 ![The nimvcl showcase: buttons and choices](docs/images/showcase-buttons.png)
 
@@ -53,15 +55,24 @@ Run the gallery yourself: `nim c -r examples/showcase.nim`.
 - Dialogs: `showMessage`, `messageDlg`, `inputQuery`, native Open, Save and
   folder dialogs.
 - `Timer`, `ImageList`, and a thread-safe `Application.queue` / `runOnUi`.
+- Lists and trees (`ListBox`, `ListView`, `TreeView`) have type-ahead and share
+  their keyboard navigation with the grids; a disabled control swallows mouse
+  input like in the VCL.
 - A `form` macro that declares a form with typed fields for its controls.
 - Form files: `.nfm` text forms (a `.dfm` for nimvcl). `loadForm` turns one into
   a typed form at compile time without pulling in the property registry;
   `loadNfm` builds it at run time. Forms can inherit from other forms, as in
   Delphi.
+- Design-time coverage: everything a form file stores can be edited in the
+  Object Inspector, including `StringGrid.cells`, `colWidths` / `rowHeights`,
+  `Edit.passwordChar`, `Button.images` / `imageIndex` / `imageAlignment`,
+  `Form.icon` and `Form.menu`, and per-item images and check boxes of
+  `ListView` and `TreeView` with an items editor dialog.
 - Tooling for IDEs: a property registry (nimvcl's RTTI), an `ObjectInspector`
   with editors for colours, fonts, pictures, image lists, string lists and
-  collections, and `FormDesigner` for selecting, moving, resizing, creating and
-  undoing on a design surface.
+  collections (and hooks for a context menu and for "differs from the
+  ancestor" rows), and `FormDesigner` for selecting, moving, resizing, creating
+  and undoing on a design surface.
 
 ## Example
 
@@ -96,14 +107,22 @@ Application.run(form)
 small set that handler code needs (forms, dialogs, colours, timers, clipboard),
 see [Imports and the prelude](docs/guide/imports.md).
 
-## Requirements
+## Install
 
-- Nim 2.2+
-- SDL3, SDL3_ttf, SDL3_image (Arch: `pacman -S sdl3 sdl3_ttf sdl3_image`)
-- [nim-lang/sdl3](https://github.com/nim-lang/sdl3) (installed by nimble)
+Requirements: Nim 2.2+, SDL3, SDL3_ttf and SDL3_image, and the
+[nim-lang/sdl3](https://github.com/nim-lang/sdl3) binding (installed by nimble).
 
-Other distros and the `requires` line are in
-[Getting started](docs/getting-started.md).
+- **Linux**: `pacman -S sdl3 sdl3_ttf sdl3_image` on Arch; other distros are in
+  [Getting started](docs/getting-started.md).
+- **Windows**: the official SDL3, SDL3_ttf and SDL3_image release zips from
+  [libsdl-org](https://github.com/libsdl-org); put the DLLs next to the exe or
+  on `PATH`. Not the MSYS2 build (see Platform support).
+- **macOS**: `brew install sdl3 sdl3_ttf sdl3_image`; SDL is linked at build
+  time (see Platform support).
+
+Then `nimble install https://github.com/Vyrnexis/nimvcl`, or work from a clone
+(`nim.cfg` already puts `src` on the path). The `requires` line for your own
+`.nimble` file is in [Getting started](docs/getting-started.md).
 
 ## Platform support
 
@@ -191,6 +210,6 @@ or one file: `SDL_VIDEO_DRIVER=offscreen SDL_RENDER_DRIVER=software nim c -r tes
 The tests run headless on SDL's offscreen video driver with the software
 renderer, so no window opens. Popups use their top-level fallback there.
 
-## Licence
+## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
