@@ -457,3 +457,73 @@ suite "ObjectInspector":
              shift = {ssLeft})
     r.f.feed(ekMouseUp, r.ins.clientToForm(pointF(x0 + 40, y)).x, r.ins.clientToForm(pointF(x0, y)).y)
     check r.ins.splitX == x0 + 40
+
+suite "ObjectInspector editors":
+  test "leaving an unchanged editor does not rewrite the values":
+    let r = rig()
+    let a = r.mkButton("a")
+    let b = r.mkButton("b")
+    a.caption = "One"
+    b.caption = "Two"
+    r.ins.inspect([Obj(a), Obj(b)])
+    r.ins.beginEdit("caption")
+    check r.ins.commitEdit()                    # focus left, nothing typed
+    check a.caption == "One" and b.caption == "Two"
+    check r.changes.len == 0
+    a.onClick = proc(s: Control) = discard
+    setHandlerName(Obj(a), "onClick", "aClick")
+    b.onClick = proc(s: Control) = discard
+    setHandlerName(Obj(b), "onClick", "bClick")
+    r.ins.tab = itEvents
+    r.ins.beginEdit("onClick")
+    check r.ins.commitEdit()
+    check handlerNameOf(Obj(a), "onClick") == "aClick"
+    check handlerNameOf(Obj(b), "onClick") == "bClick"
+    check a.onClick != nil and b.onClick != nil
+    check r.changes.len == 0
+    # a single object: an untouched editor is no change either
+    r.ins.inspect(a)
+    r.ins.tab = itProperties
+    r.ins.beginEdit("caption")
+    check r.ins.commitEdit()
+    check r.changes.len == 0
+    r.ins.beginEdit("caption")
+    r.ins.editText.text = "Changed"
+    check r.ins.commitEdit()
+    check a.caption == "Changed" and r.changes == @["a.caption"]
+
+  test "an editor closed by moving the focus away does not take it back":
+    let r = rig()
+    let a = r.mkButton("a")
+    let other = newEdit(r.f, "", 20, 450)
+    r.ins.inspect(a)
+    r.ins.beginEdit("caption")
+    r.ins.editText.text = "Typed"
+    other.setFocus()
+    check other.focused
+    check not r.ins.focused
+    check not r.ins.editing
+    check a.caption == "Typed"
+
+  test "a multi-selection edit reports each target that took the value":
+    let r = rig()
+    let a = r.mkButton("a")
+    let b = r.mkButton("b")
+    r.ins.inspect([Obj(a), Obj(b)])
+    check not r.ins.setValue("tabOrder", pvString("x"))      # wrong kind: raises in the setter
+    check r.ins.lastError.len > 0
+    check r.ins.setValue("caption", pvString("Both"))
+    check r.changes == @["a.caption", "b.caption"]
+
+  test "numbers that are not finite are rejected":
+    let r = rig()
+    let b = r.mkButton()
+    r.ins.inspect(b)
+    let w = b.width
+    for txt in ["inf", "-inf", "nan"]:
+      r.ins.beginEdit("width")
+      r.ins.editText.text = txt
+      check not r.ins.commitEdit()
+      check "finite" in r.ins.lastError
+      check b.width == w
+      r.ins.cancelEdit()

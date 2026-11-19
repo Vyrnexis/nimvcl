@@ -30,6 +30,7 @@
 ## convention.
 
 import std/[macros, strutils, tables]
+import ./nfmsyntax {.all.}
 
 type
   Gen = object
@@ -60,9 +61,6 @@ proc whenElse(cond: NimNode, yes, no: NimNode, src: NimNode): NimNode =
   nn(nnkWhenStmt, src,
      nn(nnkElifBranch, src, cond, nn(nnkStmtList, src, yes)),
      nn(nnkElse, src, nn(nnkStmtList, src, no)))
-
-proc isEventName(s: string): bool =
-  s.len > 2 and s.startsWith("on") and s[2] in {'A'..'Z'}
 
 const reservedNames = [
   # Component / Control / Container / Form fields and common properties: a form
@@ -179,7 +177,7 @@ proc walk(g: var Gen, body, target: NimNode, tname: string, top: bool) =
             error("nimvcl form: expected `init:` followed by statements", st)
           for s in st[1]: g.inits.add s
           continue
-        if isEventName(head.strVal):
+        if isEventProp(head.strVal):
           g.props.add eventStmt(target, tname, st)
           continue
         if st.len != 2 or st[1].kind != nnkStmtList:

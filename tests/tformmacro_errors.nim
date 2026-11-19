@@ -79,5 +79,9 @@ suite "loadForm errors (.nfm files)":
     expectError("nfm_inherit_ghost.nim",
                 "nfm_inherit_ghost.nfm:3:3: `inherited ghost`: the ancestor form has no object of that name", 5)
 
+  test "inherited object inside a new container":
+    expectError("nfm_inherit_nested.nim",
+                "nfm_inherit_nested.nfm:4:5: `inherited ok` can only stand directly in an `inherited` object", 5)
+
   test "new object named like an ancestor's":
     expectError("nfm_inherit_dup.nim", "nfm_inherit_dup.nfm:3:3: duplicate object name `ok`", 5)

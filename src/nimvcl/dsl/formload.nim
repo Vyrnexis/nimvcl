@@ -65,7 +65,8 @@ macro declHandler*(evType: typedesc, formType: typed, handler: untyped,
     for j in 0 ..< d.len - 2:
       params.add newIdentDefs(ident(d[j].strVal), d[^2])
       sig.add d[^2].repr & ","
-  let key = formType.repr & "." & handler.strVal & "." & sig
+  # per module: the same form type name in two modules needs a declaration in each
+  let key = handler.lineInfoObj.filename & ":" & formType.repr & "." & handler.strVal & "." & sig
   if key in declSeen: return newStmtList()
   declSeen.incl key
   let nameNode = if exported: newTree(nnkPostfix, ident"*", handler) else: handler
@@ -264,6 +265,17 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
   var anc: AncestorInfo
   if root.inherited:
     collectAncestors(root, nfmDir, file, site, anc)
+
+  proc checkInheritedNesting(n: NfmNode) =
+    ## `inherited x` selects an object of the ancestor where the ancestor has
+    ## it, so it can only stand in another `inherited` object.
+    for c in n.children:
+      if c.inherited and not n.inherited:
+        error("loadForm: " & nfmPos(file, c.line, c.col) & ": `inherited " & c.name &
+              "` can only stand directly in an `inherited` object of the form (it names " &
+              "an object of the ancestor form, which cannot be moved into a new container)", site)
+      checkInheritedNesting(c)
+  checkInheritedNesting(root)
 
   var names = initHashSet[string]()
   for k in anc.classes.keys: names.incl k

@@ -15,9 +15,11 @@
 ##   `PictureDlgForm`, like Delphi's Picture Editor: a preview, "Load..." (a
 ##   file dialog for PNG/JPG/BMP...), "Clear", OK and Cancel. The picked file
 ##   goes through `host.importFile`, which returns the path that is stored in
-##   the form file (see below).
+##   the form file (see below), when the dialog is accepted (`commit`): a
+##   cancelled dialog leaves the project untouched.
 ## * **Image list** (`ImageList.images`): `ImageListDlgForm`, a list with
-##   thumbnails and Add (several files at once) / Delete / Up / Down.
+##   thumbnails and Add (several files at once) / Delete / Up / Down; the
+##   added files are imported on OK (`commit`).
 ## * **Collection** (`pkCollection`): `CollectionDlgForm`, the list of items
 ##   with Add / Delete / Up / Down and an Object Inspector for the selected
 ##   item (which itself offers these editors, so a menu item's sub-items
@@ -36,8 +38,8 @@
 ## ## Testing
 ##
 ## The dialogs are plain forms: tests build one (`newPictureDlg`, ...), call its
-## procs (`loadFile`, `addFiles`, `clearPicture`, ...) and read the result
-## (`picked`, `result`) without showing anything. `host.runModal` is what
+## procs (`loadFile`, `addFiles`, `clearPicture`, `commit`, ...) and read the
+## result (`picked`, `result`) without showing anything. `host.runModal` is what
 ## `attachEditors` uses to run a dialog (default `showModal`); a test replaces
 ## it to drive the dialog.
 ##
@@ -109,20 +111,33 @@ proc importPicture*(host: PropEditorHost, path: string): string =
   if not fileExists(dest): copyFile(abs, dest)
   relativePath(absolutePath(dest).normalizedPath, base, '/')
 
+proc showAndFree(d: Form): ModalResult =
+  ## Runs a dialog modally and releases its window.
+  result = d.showModal()
+  d.freeWindow()
+
 proc newPropEditorHost*(baseDir = "", imagesDir = ""): PropEditorHost =
   result = PropEditorHost(baseDir: baseDir, imagesDir: imagesDir)
   let h = result
   result.importFile = proc(path: string): string = importPicture(h, path)
-  result.runModal = proc(d: Form): ModalResult =
-    result = d.showModal()
-    d.freeWindow()
+  result.runModal = showAndFree
+
+proc readPicture(host: PropEditorHost, path: string): Image =
+  ## Loads the picture at `path` without storing it in the project: its `source`
+  ## is `path` until `importPicked` moves it.
+  result = loadImage(host.fullPath(path))
+  result.source = path
+
+proc importPicked(host: PropEditorHost, img: Image) =
+  ## Stores the file of a picture read by `readPicture` (see `importFile`) and
+  ## makes the stored path its `source`. Raises `IOError`.
+  if host != nil and host.importFile != nil: img.source = host.importFile(img.source)
 
 proc loadPicture*(host: PropEditorHost, path: string): Image =
   ## Imports `path` (see `importFile`) and loads it; the image's `source` is
   ## the stored path. Raises `ImageError` / `IOError`.
   let stored = if host != nil and host.importFile != nil: host.importFile(path) else: path
-  result = loadImage(host.fullPath(stored))
-  result.source = stored
+  result = readPicture(host, stored)
 
 proc changed(host: PropEditorHost, target: Obj, prop: string) =
   if host != nil and host.onChanged != nil: host.onChanged(target, prop)
@@ -132,7 +147,6 @@ proc changed(host: PropEditorHost, target: Obj, prop: string) =
 form StringListDlgForm:
   borderStyle = bsSingle
   position = poScreenCenter
-  var accepted = false
   Label hintLbl:
     caption = "One entry per line"
     muted = true
@@ -174,7 +188,7 @@ proc editStringList*(title: string, lines: var seq[string],
                      run: proc(d: Form): ModalResult = nil): bool =
   ## Runs the dialog; true (and `lines` replaced) when OK was pressed.
   let d = newStringListDlg(title, lines)
-  let r = if run != nil: run(d) else: (let x = d.showModal(); d.freeWindow(); x)
+  let r = if run != nil: run(d) else: showAndFree(d)
   if r == mrOk:
     lines = d.linesOf
     result = true
@@ -186,6 +200,7 @@ form PictureDlgForm:
   position = poScreenCenter
   var peHost: PropEditorHost
   var picked: Image
+  var pickedNew = false         ## `picked` was read from a file that is not in the project yet
   var fileDlg: OpenDialog
   var error = ""
   ImageControl preview:
@@ -228,10 +243,11 @@ proc refreshView(d: PictureDlgForm) =
     else: "(image)"
 
 proc loadFile*(d: PictureDlgForm, path: string): bool {.discardable.} =
-  ## Picks `path` (through the host's `importFile`); false, with `error` set,
-  ## when it cannot be loaded as an image.
+  ## Picks `path`; false, with `error` set, when it cannot be loaded as an
+  ## image. The file is stored in the project by `commit`, not yet.
   try:
-    d.picked = loadPicture(d.peHost, path)
+    d.picked = readPicture(d.peHost, path)
+    d.pickedNew = true
     d.error = ""
     result = true
   except CatchableError as e:
@@ -241,8 +257,18 @@ proc loadFile*(d: PictureDlgForm, path: string): bool {.discardable.} =
 proc clearPicture*(d: PictureDlgForm) =
   ## "Clear": the picture becomes empty.
   d.picked = nil
+  d.pickedNew = false
   d.error = ""
   d.refreshView()
+
+proc commit*(d: PictureDlgForm): Image =
+  ## After OK: stores a newly picked file in the project (the host's
+  ## `importFile`) and returns the picture to assign. Raises `IOError`.
+  if d.pickedNew:
+    d.peHost.importPicked(d.picked)
+    d.pickedNew = false
+    d.refreshView()
+  d.picked
 
 proc pickFile*(d: PictureDlgForm) =
   ## "Load...": the file dialog; the chosen file is loaded when it reports.
@@ -278,6 +304,7 @@ form ImageListDlgForm:
   position = poScreenCenter
   var peHost: PropEditorHost
   var imgs: seq[Image]
+  var added: seq[Image]         ## pictures in `imgs` read from files that are not in the project yet
   var iw = 16'f32
   var ih = 16'f32
   var fileDlg: OpenDialog
@@ -317,9 +344,9 @@ form ImageListDlgForm:
     self.okBtn.setBounds(w - Pad - 2 * BtnW - Gap, by, BtnW, BtnH)
     self.setBounds(self.left, self.top, w, h)
 
-proc names(d: ImageListDlgForm): seq[string] =
-  for i, img in d.imgs:
-    result.add $i & ": " & (if img != nil and img.source.len > 0: img.source else: "(image)")
+proc nameOf(d: ImageListDlgForm, i: int): string =
+  let img = d.imgs[i]
+  $i & ": " & (if img != nil and img.source.len > 0: img.source else: "(image)")
 
 proc syncButtons(d: ImageListDlgForm) =
   d.delBtn.enabled = d.list.itemIndex >= 0
@@ -328,19 +355,23 @@ proc syncButtons(d: ImageListDlgForm) =
 
 proc syncList(d: ImageListDlgForm, select = -2) =
   let keep = if select == -2: d.list.itemIndex else: select
-  d.list.items = d.names
+  var names: seq[string]
+  for i in 0 ..< d.imgs.len: names.add d.nameOf(i)
+  d.list.items = names
   d.list.itemIndex = if d.imgs.len == 0: -1 else: clamp(keep, 0, d.imgs.high)
   d.infoLbl.caption = $d.imgs.len & " image(s), shown at " & $int(d.iw) & " x " & $int(d.ih)
   d.syncButtons()
   d.list.invalidate()
 
 proc addFiles*(d: ImageListDlgForm, paths: openArray[string]): int {.discardable.} =
-  ## Appends the images of `paths` (each through the host's `importFile`);
-  ## files that cannot be loaded are skipped and listed in `errors`. Returns
-  ## how many were added.
+  ## Appends the images of `paths` (stored in the project by `commit`); files
+  ## that cannot be loaded are skipped and listed in `errors`. Returns how many
+  ## were added.
   for p in paths:
     try:
-      d.imgs.add loadPicture(d.peHost, p)
+      let img = readPicture(d.peHost, p)
+      d.imgs.add img
+      d.added.add img
       inc result
     except CatchableError as e:
       d.errors.add p & ": " & e.msg
@@ -359,6 +390,14 @@ proc moveSelected*(d: ImageListDlgForm, delta: int) =
   if i in 0 ..< d.imgs.len and j in 0 ..< d.imgs.len:
     swap(d.imgs[i], d.imgs[j])
     d.syncList(j)
+
+proc commit*(d: ImageListDlgForm): seq[Image] =
+  ## After OK: stores the added files that are still in the list in the project
+  ## (the host's `importFile`) and returns the images to assign. Raises `IOError`.
+  for img in d.imgs:
+    if img in d.added: d.peHost.importPicked(img)
+  d.added.setLen 0
+  d.imgs
 
 proc pickFiles*(d: ImageListDlgForm) =
   ## "Add...": the file dialog (several files); they are added when it reports.
@@ -388,7 +427,7 @@ proc drawRow(d: ImageListDlgForm, cv: Canvas, index: int, rect: RectF,
     let h = d.ih * s
     cv.drawImage(img, rectF(box.x + (box.w - w) / 2, box.y + (box.h - h) / 2, w, h))
   cv.strokeRoundRect(box, 0, t.border, 1)
-  cv.textRect(d.names[index], d.font,
+  cv.textRect(d.nameOf(index), d.font,
               rectF(box.right + 8, rect.y, rect.w - box.w - 20, rect.h),
               if isSelected in state: t.selectionText else: t.text, taLeft, vaCenter)
 
@@ -420,6 +459,7 @@ form CollectionDlgForm:
   var peHost: PropEditorHost
   var target: Obj
   var coll: PropInfo
+  var syncing = false           ## the list is being refilled: its change events are ignored
   ListBox list:
     multiSelect = false
   Button addBtn:
@@ -488,8 +528,10 @@ proc syncList*(d: CollectionDlgForm, select = -2) =
   let keep = if select == -2: d.list.itemIndex else: select
   var names: seq[string]
   for o in its: names.add itemLabel(o)
+  d.syncing = true
   d.list.items = names
   d.list.itemIndex = if its.len == 0: -1 else: clamp(keep, 0, its.high)
+  d.syncing = false
   d.syncEditor()
 
 proc addItem*(d: CollectionDlgForm): Obj {.discardable.} =
@@ -540,7 +582,8 @@ proc newCollectionDlg*(host: PropEditorHost, target: Obj, collection: PropInfo,
     if inner != nil: inner(s, t, prop)
     d.syncList()
     d.peHost.changed(t, prop)
-  d.list.onChange = proc(s: Control) = d.syncEditor()
+  d.list.onChange = proc(s: Control) =
+    if not d.syncing: d.syncEditor()
   d.addBtn.onClick = proc(s: Control) = d.addItem()
   d.delBtn.onClick = proc(s: Control) = d.deleteItem()
   d.upBtn.onClick = proc(s: Control) = d.moveItem(-1)
@@ -550,10 +593,7 @@ proc newCollectionDlg*(host: PropEditorHost, target: Obj, collection: PropInfo,
 # ------------------------------------------------------------------- glue
 
 proc run(host: PropEditorHost, d: Form): ModalResult =
-  if host != nil and host.runModal != nil: result = host.runModal(d)
-  else:
-    result = d.showModal()
-    d.freeWindow()
+  if host != nil and host.runModal != nil: host.runModal(d) else: showAndFree(d)
 
 proc editExtra*(ins: ObjectInspector, host: PropEditorHost, target: Obj, prop: string) =
   ## What the "..." button of property `prop` of `target` does; see the module
@@ -573,7 +613,8 @@ proc editExtra*(ins: ObjectInspector, host: PropEditorHost, target: Obj, prop: s
   of pkImage:
     let d = newPictureDlg(host, v.image, title)
     if host.run(d) == mrOk:
-      ins.setValue(prop, PropValue(kind: pkImage, image: d.picked))
+      try: ins.setValue(prop, PropValue(kind: pkImage, image: d.commit))
+      except IOError as e: ins.reportError(e.msg)
   of pkImages:
     var w = 16'f32
     var h = 16'f32
@@ -583,7 +624,8 @@ proc editExtra*(ins: ObjectInspector, host: PropEditorHost, target: Obj, prop: s
     if hp != nil: h = float32(hp.get(target).f)
     let d = newImageListDlg(host, v.imgs, w, h, title)
     if host.run(d) == mrOk:
-      ins.setValue(prop, PropValue(kind: pkImages, imgs: d.imgs))
+      try: ins.setValue(prop, PropValue(kind: pkImages, imgs: d.commit))
+      except IOError as e: ins.reportError(e.msg)
   of pkCollection:
     let d = newCollectionDlg(host, target, info, title)
     discard host.run(d)

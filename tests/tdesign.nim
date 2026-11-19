@@ -843,3 +843,94 @@ suite "form designer":
     x.d.refresh()
     f.checkSame "moved by code"
     x.done
+
+suite "form designer drags and history":
+  test "Esc during a rubber band brings the old selection back":
+    let x = build()
+    x.f.click(x.a.fcx, x.a.fcy)
+    check x.d.selection == @[Control(x.a)]
+    x.f.down(10, 100)
+    x.f.moveTo(150, 260, {ssLeft})
+    check Control(x.c) in x.d.selection
+    x.d.cancelDrag()
+    check x.d.selection == @[Control(x.a)]
+    check not x.d.dragging
+    x.f.up(150, 260)
+    check x.d.selection == @[Control(x.a)]
+    x.done
+
+  test "a second button pressed during a drag does not move the drag origin":
+    let x = build(grid = false)
+    let x0 = x.a.fcx
+    let y0 = x.a.fcy
+    x.f.down(x0, y0)
+    x.f.moveTo(x0 + 10, y0, {ssLeft})
+    x.f.down(x0 + 100, y0 + 50, button = mbRight)
+    x.f.moveTo(x0 + 10, y0, {ssLeft})
+    x.f.up(x0 + 10, y0)
+    check x.a.left == 30 and x.a.top == 20
+    x.done
+
+  test "a group of tiles stays inside the design root":
+    let x = build(grid = false)
+    let t1 = x.d.addNonVisual(newComponent(x.f), 20, 300, "Timer")
+    let t2 = x.d.addNonVisual(newComponent(x.f), 200, 300, "Timer")
+    x.d.select([Control(t1), Control(t2)])
+    x.f.drag(30, 310, 490, 310)
+    check t2.left + 32 <= x.f.width
+    check t2.left - t1.left == 180
+    x.f.drag(t1.left + 10, 310, t1.left + 10, 395)
+    check t1.top + 32 <= x.f.height
+    x.done
+
+  test "undoing the deletion of a container restores the history of its children":
+    let x = build()
+    type Info = ref object
+      cls, name, caption: string
+      kids: seq[Info]
+    var infos: seq[Info]
+    proc capture(c: Control): Info =
+      result = Info(cls: (if c of Panel: "Panel" else: "Button"), name: c.name, caption: c.caption)
+      if c of Container:
+        for k in Container(c).children: result.kids.add capture(k)
+    proc build(i: Info, parent: Container, index: int): Control =
+      if i.cls == "Panel":
+        let p = newPanel(nil, i.caption)
+        p.name = i.name
+        parent.insertControl(p, index)
+        for k in i.kids: discard build(k, p, p.children.len)
+        Control(p)
+      else:
+        let b = newButton(nil, i.caption)
+        b.name = i.name
+        parent.insertControl(b, index)
+        Control(b)
+    x.d.snapshot = proc(c: Control): string =
+      infos.add capture(c)
+      $infos.high
+    x.d.restore = proc(s: string, parent: Container, index: int): Control =
+      build(infos[parseInt(s)], parent, index)
+    let panel = newPanel(x.f, "", 300, 250, 150, 100)
+    panel.name = "P1"
+    let inner = newButton(panel, "In", 10, 10, 60, 24)
+    inner.name = "In"
+    discard x.f.paintIfDirty()
+    x.d.select(inner)
+    check x.d.deleteSelection()
+    x.d.select(panel)
+    check x.d.deleteSelection()
+    check x.d.undo()                       # the panel is back
+    proc find(c: Container, name: string): Control =
+      for k in c.children:
+        if k.name == name: return k
+        if k of Container:
+          let r = find(Container(k), name)
+          if r != nil: return r
+    let np = Panel(find(x.f, "P1"))
+    check np != nil and np != panel
+    check x.d.undo()                       # the button goes back into the new panel
+    let nb = Button(find(x.f, "In"))
+    check nb != nil
+    check nb.parent == Container(np)
+    check np.children.find(nb) >= 0
+    x.done

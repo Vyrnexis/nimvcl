@@ -41,12 +41,13 @@
 ## This module is not part of the `import nimvcl` umbrella (it pulls in the
 ## property registry): `import nimvcl/controls/inspector`.
 
-import std/[strutils, algorithm, sets]
+import std/[strutils, algorithm, sets, math]
 import ./common, ./scrolling, ./edit, ./combobox, ./listbox, ./viewsupport
 import ../core/form
 import ../graphics/font
 import ../graphics/image
 import ../dsl/props_std
+from ../dsl/nfmsyntax import formatNumber
 export props_std
 
 type
@@ -62,6 +63,10 @@ type
     level: int
     expandable: bool
     expanded: bool
+    shown: bool               ## `value`, `mixed`, `modified` are filled (cleared by `dropValueCache`)
+    value: PropValue
+    mixed: bool
+    modified: bool
 
   EditKind = enum ekNone, ekText, ekCombo
 
@@ -89,6 +94,7 @@ type
     fEditKind: EditKind
     fEditText: Edit
     fEditCombo: ComboBox
+    fEditStart: string          ## what the editor showed when it opened (see `editorState`)
     fChoices: seq[Obj]          ## objects behind the entries of an object combo
     fColorEdit: bool
     fDragSplit: bool
@@ -209,15 +215,25 @@ proc anyNonDefault(ins: ObjectInspector, info: PropInfo): bool =
     let q = infoFor(t, info.name)
     if q != nil and not isDefault(t, q): return true
 
-proc eventName(info: PropInfo): string = info.name
+proc dropValueCache(ins: ObjectInspector) =
+  ## The targets changed: the rows read their values again when next painted.
+  for r in ins.fRows.mitems: r.shown = false
+
+proc rowValue(ins: ObjectInspector, i: int): lent Row =
+  ## Row `i` with its value, `mixed` and `modified` flags read from the targets.
+  if not ins.fRows[i].shown:
+    let info = ins.fRows[i].info
+    let (v, mixed) = ins.valueOf(info)
+    let modified = ins.anyNonDefault(info)
+    ins.fRows[i].value = v
+    ins.fRows[i].mixed = mixed
+    ins.fRows[i].modified = modified
+    ins.fRows[i].shown = true
+  ins.fRows[i]
 
 # --------------------------------------------------------------- text forms
 
 func catKey(c: PropCategory): string = "cat:" & categoryName(c)
-
-func fmtNum(f: float): string =
-  let f32 = float32(f)
-  if f32 == float32(int64(f32)) and abs(f32) < 1e9: $int64(f32) else: $f32
 
 proc objName(o: Obj): string =
   if o == nil: "(none)"
@@ -229,7 +245,7 @@ proc valueText(info: PropInfo, v: PropValue): string =
   case v.kind
   of pkBool: $v.b
   of pkInt: $v.i
-  of pkFloat: fmtNum(v.f)
+  of pkFloat: formatNumber(v.f)
   of pkString: v.s
   of pkEnum: info.enumName(v.i)
   of pkSet:
@@ -240,13 +256,13 @@ proc valueText(info: PropInfo, v: PropValue): string =
   of pkColor: v.color.toHex
   of pkFont:
     let fam = if v.font.family.len > 0: v.font.family else: "default"
-    fam & ", " & fmtNum(float(v.font.size))
+    fam & ", " & formatNumber(float(v.font.size))
   of pkSpacing:
-    "(" & fmtNum(float(v.spacing.left)) & ", " & fmtNum(float(v.spacing.top)) & ", " &
-      fmtNum(float(v.spacing.right)) & ", " & fmtNum(float(v.spacing.bottom)) & ")"
+    "(" & formatNumber(float(v.spacing.left)) & ", " & formatNumber(float(v.spacing.top)) & ", " &
+      formatNumber(float(v.spacing.right)) & ", " & formatNumber(float(v.spacing.bottom)) & ")"
   of pkConstraints:
-    "(" & fmtNum(float(v.cons.minWidth)) & ", " & fmtNum(float(v.cons.minHeight)) & ", " &
-      fmtNum(float(v.cons.maxWidth)) & ", " & fmtNum(float(v.cons.maxHeight)) & ")"
+    "(" & formatNumber(float(v.cons.minWidth)) & ", " & formatNumber(float(v.cons.minHeight)) & ", " &
+      formatNumber(float(v.cons.maxWidth)) & ", " & formatNumber(float(v.cons.maxHeight)) & ")"
   of pkObject: objName(v.obj)
   of pkImage:
     if v.image == nil: "(none)"
@@ -291,7 +307,7 @@ func viewTop(ins: ObjectInspector): float32 = ins.viewport.y
 proc updateContent(ins: ObjectInspector) =
   ins.setContentSize(0, float64(ins.fRows.len) * float64(RowH))
 
-proc cancelEdit*(ins: ObjectInspector)
+proc cancelEdit*(ins: ObjectInspector, refocus = true)
 
 proc rebuild*(ins: ObjectInspector) =
   ## Recomputes the rows (after targets, tab or grouping changed).
@@ -469,23 +485,33 @@ proc vetoed(ins: ObjectInspector, t: Obj, name: string, v: PropValue): bool =
   true
 
 proc applyValue(ins: ObjectInspector, row: Row, v: PropValue): bool =
-  ## Sets `v` on every target; false (and `lastError`) when one refuses.
-  for t in ins.fTargets:
-    let q = infoFor(t, row.info.name)
-    if q != nil and ins.vetoed(t, row.info.name, v): return false
-  for t in ins.fTargets:
-    let q = infoFor(t, row.info.name)
+  ## Sets `v` on every target; false (and `lastError`) when one refuses. Each
+  ## target that took the value is reported through `onPropertyChanged` at once,
+  ## so a failure on a later one does not hide the change of the earlier ones.
+  let targets = ins.fTargets
+  let name = row.info.name
+  for t in targets:
+    let q = infoFor(t, name)
+    if q != nil and ins.vetoed(t, name, v): return false
+  ins.fError = ""
+  result = true
+  for t in targets:
+    let q = infoFor(t, name)
     if q == nil: continue
     try: q.set(t, v)
     except CatchableError as e:
       ins.fError = e.msg
-      ins.invalidate()
-      return false
-  ins.fError = ""
-  for t in ins.fTargets:
-    if ins.onPropertyChanged != nil: ins.onPropertyChanged(ins, t, row.info.name)
+      result = false
+      break
+    ins.dropValueCache()
+    if ins.onPropertyChanged != nil: ins.onPropertyChanged(ins, t, name)
+  ins.dropValueCache()
   ins.invalidate()
-  true
+
+proc reportError*(ins: ObjectInspector, msg: string) =
+  ## Shows `msg` in the error line (an editor dialog the application ran failed).
+  ins.fError = msg
+  ins.invalidate()
 
 proc setValue*(ins: ObjectInspector, name: string, v: PropValue): bool {.discardable.} =
   ## Sets a property of all targets as if edited by the user.
@@ -503,8 +529,11 @@ proc parseText(info: PropInfo, text: string, v: var PropValue): string =
     try: v = pvInt(parseInt(t))
     except ValueError: return "`" & t & "` is not a whole number"
   of pkFloat:
-    try: v = pvFloat(parseFloat(t))
+    var f: float
+    try: f = parseFloat(t)
     except ValueError: return "`" & t & "` is not a number"
+    if classify(f) in {fcNan, fcInf, fcNegInf}: return "`" & t & "` is not a finite number"
+    v = pvFloat(f)
   of pkColor:
     for (n, c) in Palette:
       if n == t.toLowerAscii:
@@ -542,22 +571,32 @@ proc layoutEditor(ins: ObjectInspector) =
   let e = ins.editorOf
   e.setBounds(r.x + 1, r.y + 1, max(r.w - 2, 20), r.h - 2)
 
-proc endEditor(ins: ObjectInspector) =
-  let wasFocused = ins.fEditKind != ekNone
+proc endEditor(ins: ObjectInspector, refocus: bool) =
+  ## Hides the editor. `refocus`: the inspector takes the focus back (the
+  ## editor ended by a key or from code); false when the editor ended because
+  ## the focus is already moving somewhere else.
   let e = ins.editorOf
   ins.fEditKind = ekNone
   ins.fEditRow = -1
   if e != nil:
     if ins.fEditCombo != nil and ins.fEditCombo.droppedDown: ins.fEditCombo.closeUp()
     e.visible = false
-  if wasFocused: ins.setFocus()
+    if refocus: ins.setFocus()
   ins.invalidate()
 
-proc cancelEdit*(ins: ObjectInspector) =
+proc cancelEdit*(ins: ObjectInspector, refocus = true) =
   ## Closes the editor without applying.
   if ins.fEditKind != ekNone:
-    ins.endEditor()
+    ins.endEditor(refocus)
     ins.fError = ""
+
+proc editorState(ins: ObjectInspector): string =
+  ## What the open editor shows (text and picked entry); compared with the state
+  ## it opened with to tell whether the user changed anything.
+  case ins.fEditKind
+  of ekText: ins.fEditText.text
+  of ekCombo: ins.fEditCombo.text & '\0' & $ins.fEditCombo.itemIndex
+  else: ""
 
 proc comboValue(ins: ObjectInspector, row: Row, v: var PropValue): string =
   ## The value picked in the combo for `row`; error text or "".
@@ -580,10 +619,16 @@ proc comboValue(ins: ObjectInspector, row: Row, v: var PropValue): string =
     v = pvString(c.text.strip)
   else: return "unsupported editor"
 
-proc commitEdit*(ins: ObjectInspector): bool {.discardable.} =
-  ## Applies the editor's content and closes it. When the content is invalid
-  ## (`lastError` is set) nothing is applied and the editor stays open; false.
+proc commitEdit*(ins: ObjectInspector, refocus = true): bool {.discardable.} =
+  ## Applies the editor's content and closes it; an editor the user did not
+  ## change just closes (so leaving a cell never rewrites the values, which
+  ## would blank a property the selected objects disagree on). When the content
+  ## is invalid (`lastError` is set) nothing is applied and the editor stays
+  ## open; false.
   if ins.fEditKind == ekNone: return true
+  if ins.editorState == ins.fEditStart:
+    ins.cancelEdit(refocus)
+    return true
   let row = ins.fRows[ins.fEditRow]
   var v: PropValue
   var err = ""
@@ -596,12 +641,11 @@ proc commitEdit*(ins: ObjectInspector): bool {.discardable.} =
     ins.invalidate()
     return false
   if not ins.applyValue(row, v): return false
-  ins.endEditor()
+  ins.endEditor(refocus)
   true
 
-proc visitObjects(o: Obj, want: ClassInfo, seen, found: var seq[Obj]) =
-  if o == nil or o in seen: return
-  seen.add o
+proc visitObjects(o: Obj, want: ClassInfo, seen: var HashSet[Obj], found: var seq[Obj]) =
+  if o == nil or seen.containsOrIncl(o): return
   let ci = classOf(o)
   if ci != nil and objectName(o).len > 0 and (want == nil or ci.isA(want)):
     found.add o
@@ -614,10 +658,11 @@ proc choicesFor(ins: ObjectInspector, info: PropInfo): seq[Obj] =
   if ins.fTargets.len == 0: return
   if ins.onGetChoices != nil:
     let want = classByName(info.typeName)
+    var listed = initHashSet[Obj]()
     for o in ins.onGetChoices(ins, ins.fTargets[0], info.name):
       let ci = classOf(o)
       if o != nil and ci != nil and objectName(o).len > 0 and (want == nil or ci.isA(want)) and
-         o notin result:
+         not listed.containsOrIncl(o):
         result.add o
     return
   var top: Obj = ins.fTargets[0]
@@ -626,7 +671,7 @@ proc choicesFor(ins: ObjectInspector, info: PropInfo): seq[Obj] =
   while top != nil and top of Component and Component(top).owner != nil and
         not (top of Form):
     top = Component(top).owner
-  var seen: seq[Obj]
+  var seen = initHashSet[Obj]()
   visitObjects(top, classByName(info.typeName), seen, result)
 
 proc isFamilyProp(info: PropInfo): bool =
@@ -665,7 +710,7 @@ proc beginEdit*(ins: ObjectInspector, row: int, openList = true): bool {.discard
   if row < 0 or row >= ins.fRows.len or ins.fTargets.len == 0: return false
   let r = ins.fRows[row]
   if r.kind != rkProp: return false
-  ins.endEditor()
+  ins.endEditor(refocus = true)
   ins.selectRow row
   ins.fError = ""
   let (v, mixed) = ins.valueOf(r.info)
@@ -688,6 +733,7 @@ proc beginEdit*(ins: ObjectInspector, row: int, openList = true): bool {.discard
     c.items = items
     c.text = if mixed: "" else: v.s
     ins.fEditKind = ekCombo
+    ins.fEditStart = ins.editorState
     ins.layoutEditor()
     c.visible = true
     c.setFocus()
@@ -699,6 +745,7 @@ proc beginEdit*(ins: ObjectInspector, row: int, openList = true): bool {.discard
   of pkString, pkInt, pkFloat:
     ins.fEditKind = ekText
     ins.fEditText.text = if mixed: "" else: valueText(r.info, v)
+    ins.fEditStart = ins.editorState
     ins.layoutEditor()
     ins.fEditText.visible = true
     ins.fEditText.setFocus()
@@ -743,6 +790,7 @@ proc beginEdit*(ins: ObjectInspector, row: int, openList = true): bool {.discard
       c.items = names
       c.text = if mixed: "" else: v.handler
     ins.fEditKind = ekCombo
+    ins.fEditStart = ins.editorState
     ins.layoutEditor()
     c.visible = true
     c.setFocus()
@@ -874,9 +922,10 @@ method paint*(ins: ObjectInspector, c: Canvas) =
       # value cell
       let vr = ins.valueRect(i)
       if not (ins.fEditKind != ekNone and ins.fEditRow == i):
-        let (v, mixed) = ins.valueOf(row.info)
-        let isBold = ins.anyNonDefault(row.info)
-        let vf = if isBold: bold else: fnt
+        let rv = ins.rowValue(i)
+        let v = rv.value
+        let mixed = rv.mixed
+        let vf = if rv.modified: bold else: fnt
         var tx = vr.x + 6
         if not mixed:
           if row.info.kind == pkColor:
@@ -983,12 +1032,12 @@ proc handleDouble(ins: ObjectInspector, i: int) =
   if row.kind != rkProp: return
   case row.info.kind
   of pkBool, pkEnum:
-    ins.endEditor()
+    ins.endEditor(refocus = true)
     ins.cycleValue(row)
   of pkEvent:
     let (v, mixed) = ins.valueOf(row.info)
     if mixed or v.handler.len > 0: return
-    ins.endEditor()
+    ins.endEditor(refocus = true)
     for t in ins.fTargets:
       let q = infoFor(t, row.info.name)
       if q == nil: continue
@@ -1001,6 +1050,7 @@ proc handleDouble(ins: ObjectInspector, i: int) =
         q.set(t, pvEvent(name))
         if ins.onPropertyChanged != nil: ins.onPropertyChanged(ins, t, q.name)
       except CatchableError as e: ins.fError = e.msg
+    ins.dropValueCache()
     ins.invalidate()
   else: discard
 
@@ -1090,7 +1140,7 @@ proc initObjectInspector*(ins: ObjectInspector, owner: Component = nil) =
     ins.editorKey(key, shift)
   e.onExit = proc(s: Control) =
     if ins.fEditKind == ekText:
-      if not ins.commitEdit(): ins.cancelEdit()
+      if not ins.commitEdit(refocus = false): ins.cancelEdit(refocus = false)
   ins.fEditText = e
   let cb = newComboBox(ins, csDropDownList)
   cb.visible = false
@@ -1103,7 +1153,7 @@ proc initObjectInspector*(ins: ObjectInspector, owner: Component = nil) =
     if ins.fEditKind == ekCombo: ins.commitEdit()
   cb.onExit = proc(s: Control) =
     if ins.fEditKind == ekCombo and not cb.droppedDown:
-      if not ins.commitEdit(): ins.cancelEdit()
+      if not ins.commitEdit(refocus = false): ins.cancelEdit(refocus = false)
   cb.dropList.onDrawItem = proc(s: Control, cv: Canvas, index: int, rect: RectF,
                                 state: ItemStates) =
     if not ins.fColorEdit: return
