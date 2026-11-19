@@ -41,8 +41,9 @@ proc deliver*(done: FileDialogDone, token: int, ok: bool, files: seq[string]) =
   ## Calls `done`; nothing it raises may escape into SDL's C code.
   try:
     done(token, ok, files)
-  except Exception:
-    discard
+  except Exception as e:
+    when not defined(release):
+      stderr.writeLine "nimvcl: file dialog callback raised " & $e.name & ": " & e.msg
 
 proc sdlCallback(userdata: pointer, filelist: cstringArray, filter: cint)
                 {.cdecl.} =
