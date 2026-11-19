@@ -48,6 +48,12 @@ method release*(l: ActionLinkBase) {.base.} =
   ## Called when the client is freed (`Control.free`, deleted menu items).
   discard
 
+method releaseResources*(c: Component) {.base.} =
+  ## Called when the owner of `c` is freed (`Control.free`): drop whatever keeps
+  ## `c` alive or active from the outside (a running timer, image list
+  ## listeners). Overridden by components that make such links. Base: nothing.
+  discard
+
 proc removeComponent*(owner, c: Component)
 
 proc insertComponent*(owner, c: Component) =
