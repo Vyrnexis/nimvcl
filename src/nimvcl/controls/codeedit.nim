@@ -1328,13 +1328,7 @@ proc showFindBar*(e: CodeEdit, replace = false) =
   ## single-line selection and focuses the find field.
   e.ensureBar()
   let m = e.fModel
-  if m.hasSelection and m.selection.anchor.line == m.selection.caret.line and
-     not e.findBarVisible:
-    let t = m.selectedText
-    if t.len > 0 and t.len < 200:
-      e.fFindText = t
-      e.fBar.setFindText(t)
-  elif m.hasSelection and m.selection.anchor.line == m.selection.caret.line:
+  if m.hasSelection and m.selection.anchor.line == m.selection.caret.line:
     let t = m.selectedText
     if t.len > 0 and t.len < 200 and t != e.fFindText:
       e.fFindText = t
@@ -1851,10 +1845,10 @@ func charStrings(): array[128, string] =
 let singleChars = charStrings()
 
 proc drawPiece(e: CodeEdit, c: Canvas, text: string, a, b: int, x0, y: float32,
-               font: FontSpec, col: Color, left, right: float32, ws: bool): float32 =
+               font: FontSpec, col: Color, left, right: float32): float32 =
   ## Draws the tab-free `text[a ..< b]` with its first byte at x0 and returns
   ## its width. Only chunks inside [left, right] are drawn; blank pieces are
-  ## drawn as nothing (or as dots with `ws`).
+  ## drawn as nothing.
   var i = a
   var x = x0
   let adv = e.fAdv
@@ -1875,16 +1869,14 @@ proc drawPiece(e: CodeEdit, c: Canvas, text: string, a, b: int, x0, y: float32,
         if text[k] != ' ':
           blank = false
           break
-      if blank: discard
-      elif ascii and fsBold in font.style:
+      if not blank and ascii and fsBold in font.style:
         # synthetic bold widens every glyph: keep each one on its cell
         for k in i ..< j:
           if text[k] != ' ':
             c.drawText(singleChars[ord(text[k])], font, x + adv * float32(k - i), y, col)
-      else: c.drawText(text[i ..< j], font, x, y, col)
+      elif not blank: c.drawText(text[i ..< j], font, x, y, col)
     x += w
     i = j
-  discard ws
   x - x0
 
 proc matchingBracket(e: CodeEdit): BracketMatch =
@@ -1933,7 +1925,7 @@ proc drawTokens(e: CodeEdit, c: Canvas, text: string, toks: openArray[Token],
                              elif st.color == t.text: e.ink(t, bg)   # plain text: `font.color`
                              elif e.ownColor: legible(st.color, bg)
                              else: st.color,
-                             textArea.x - 4, textArea.right + 4, false)
+                             textArea.x - 4, textArea.right + 4)
         w.x += pw
         w.i = q
       if q < b: e.walkTo(text, w, q + 1)
@@ -2054,7 +2046,7 @@ method paint*(e: CodeEdit, c: Canvas) =
       let useTokens = e.fHl != nil and not (composing and line == e.compLine)
       if not useTokens:
         discard e.drawPiece(c, text, 0, text.len, x0, ty, e.font, ink,
-                            textArea.x - 4, textArea.right + 4, false)
+                            textArea.x - 4, textArea.right + 4)
       else:
         if e.fApprox:
           let k = e.winIndex(line)
