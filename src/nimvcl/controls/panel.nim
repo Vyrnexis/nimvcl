@@ -57,12 +57,12 @@ proc `textRole=`*(p: Panel, v: ThemeColor) =
   ## Caption colour by theme role, resolved at paint time. An own `font.color`
   ## wins over it.
   p.fText.setRole v
-  if p.hasFontColor: p.fontColor = clTransparent   # the role replaces a fixed colour
+  if not p.parentFont and p.hasFontColor: p.fontColor = clTransparent   # the role replaces a fixed colour
   p.invalidate()
 proc resetTextColor*(p: Panel) =
   ## Back to the theme's `text` colour (clears `font.color` and `textRole`).
   p.fText.reset()
-  if p.hasFontColor:
+  if not p.parentFont and p.hasFontColor:
     p.fontColor = clTransparent
   p.invalidate()
 

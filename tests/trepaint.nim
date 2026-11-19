@@ -107,6 +107,22 @@ suite "partial repaint":
     check not f.ui.lastPaintFull
     check f.ui.dirtyRects.len == 0
 
+  test "a layout pass repaints only what moved":
+    let f = newForm(nil, 420, 320)
+    let top = newPanel(f, "", 0, 0, 420, 40)
+    top.align = alTop
+    let client = newPanel(f, "", 0, 0, 100, 100)
+    client.align = alClient
+    let lbl = newLabel(client, "short", 10, 10)
+    lbl.autoSize = true
+    f.show()
+    f.settle()
+    lbl.caption = "a considerably longer caption"
+    f.settle()
+    check not f.ui.lastPaintFull                  # not the whole form
+    check f.ui.lastPaintRects.len > 0
+    for r in f.ui.lastPaintRects: check r.w * r.h < 0.5 * 420 * 320
+
   test "invalidating the whole form is a full repaint":
     let (f, _, _, _, _, _, _, _) = build()
     f.invalidate()

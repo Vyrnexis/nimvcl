@@ -439,6 +439,43 @@ suite "actions":
     check b2.caption == "a much longer caption than before"
     check b3.caption == "a much longer caption than before"
 
+  test "freeing an action restores the tool buttons it upgraded":
+    let x = fixture()
+    let a = newAction(x.acts, "a")
+    let tb = newToolButton(x.bar, "x")
+    tb.action = a
+    a.autoCheck = true
+    a.checked = true
+    check tb.kind == tbsCheck and tb.down
+    a.free()
+    check tb.kind == tbsButton and not tb.down and tb.action == nil
+
+  test "onUpdate may add and free actions while the list updates":
+    let x = fixture()
+    var runs = 0
+    let a = newAction(x.acts, "a")
+    a.onUpdate = proc(s: Action) =
+      inc runs
+      newAction(x.acts, "dyn")
+      var stale: seq[Action]
+      for o in x.acts:
+        if o != s and o.caption == "dyn": stale.add o
+      for o in stale: o.free()
+    updateActions()
+    updateActions()
+    check runs == 2
+
+  test "a client unlinked by an earlier client's handler is skipped":
+    let x = fixture()
+    let a = newAction(x.acts, "a")
+    let c1 = newCheckBox(x.f, "1")
+    let c2 = newCheckBox(x.f, "2")
+    c1.action = a
+    c2.action = a
+    c1.onChange = proc(s: Control) = c2.action = nil
+    a.checked = true                               # must not crash on c2's link
+    check c2.action == nil
+
   test "a ToolButton upgraded to check reverts when the action stops needing it":
     let x = fixture()
     let a = newAction(x.acts, "a")

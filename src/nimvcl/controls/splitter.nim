@@ -95,7 +95,9 @@ method doMouseDown*(s: Splitter, button: MouseButton, shift: ShiftState,
 
 method doMouseMove*(s: Splitter, shift: ShiftState, x, y: float32) =
   if s.fDrag:
-    if ssLeft notin shift: s.fDrag = false
+    if ssLeft notin shift:
+      s.fDrag = false
+      s.invalidate()
     else:
       let d = s.mainAxis(x, y) - s.fStartPos
       # right/bottom aligned neighbours grow when the pointer moves left/up

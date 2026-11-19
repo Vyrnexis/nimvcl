@@ -124,7 +124,7 @@ suite "controls":
     f.tap(keyEnter)
     check log.len == 4 and log[^1] == "ok"
 
-  test "button: dialog keys are installed when first painted":
+  test "button: dialog keys are installed when the button gets into a form":
     let f = newShown()
     let ok = newButton(nil, "OK", 10, 10, 80, 28)
     ok.isDefault = true               # not in a form yet: no hook possible
@@ -144,6 +144,14 @@ suite "controls":
     check f.modalResult == mrNone
     f.click(20, 20)
     check f.modalResult == mrOk
+
+  test "button: onClick can veto the modalResult":
+    let f = newShown()
+    let b = newButton(f, "OK", 10, 10, 80, 28)
+    b.modalResult = mrOk
+    b.onClick = proc(s: Control) = f.modalResult = mrNone
+    f.click(20, 20)
+    check f.modalResult == mrNone
 
   test "button: modalResult closes a modal form":
     let m = newForm(nil, 300, 200)

@@ -20,6 +20,7 @@ type
 
 const
   ThumbSize = 16'f32
+  MinTickGap = 4'f32      ## ticks closer than this (px) are thinned out
   GrooveThick = 4'f32
 
 func min*(t: TrackBar): int = t.fMin
@@ -131,7 +132,9 @@ method doMouseDown*(t: TrackBar, button: MouseButton, shift: ShiftState,
 
 method doMouseMove*(t: TrackBar, shift: ShiftState, x, y: float32) =
   if t.fDragging:
-    if ssLeft notin shift: t.fDragging = false
+    if ssLeft notin shift:
+      t.fDragging = false
+      t.invalidate()
     else: t.position = t.axisToPos(t.axisOf(x, y) - t.fGrab)
   procCall doMouseMove(Control(t), shift, x, y)
 
@@ -195,13 +198,20 @@ method paint*(t: TrackBar, c: Canvas) =
     var v = t.fMin
     let tickCol = if en: th.borderStrong else: th.border
     let off = if t.horiz: t.height * 0.4 else: t.width * 0.4
+    # at most one tick per MinTickGap px: a huge range with a small frequency
+    # must not draw thousands of lines on every paint
+    let travel = (if t.horiz: t.width else: t.height) - ThumbSize
+    let ticks = (t.fMax - t.fMin) div t.fFreq + 1
+    let skip = system.max(1, int(ceil(MinTickGap * ticks.float32 / system.max(travel, 1'f32))))
+    let step = t.fFreq * skip
     while v <= t.fMax:
       let p = t.posToAxis(v)
       if t.horiz:
         c.line(p, off + ThumbSize / 2 + 3, p, off + ThumbSize / 2 + 8, tickCol, 1)
       else:
         c.line(off + ThumbSize / 2 + 3, p, off + ThumbSize / 2 + 8, p, tickCol, 1)
-      v += t.fFreq
+      if t.fMax - v < step: break      # no overflow near high(int)
+      v += step
   # thumb
   let r = t.thumbRect
   let st = t.visualState(t.fHot, t.fDragging)

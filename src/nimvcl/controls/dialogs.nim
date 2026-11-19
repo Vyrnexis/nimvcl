@@ -256,11 +256,12 @@ proc newInputDlg*(caption, prompt, value: string): InputDlgForm =
 proc inputQuery*(caption, prompt: string, value: var string): bool =
   ## Asks for a line of text; true (and `value` updated) when OK was pressed.
   let d = newInputDlg(caption, prompt, value)
-  let r = d.showModal()
-  if r == mrOk:
-    value = d.input.text
-    result = true
-  d.freeWindow()
+  try:
+    if d.showModal() == mrOk:
+      value = d.input.text
+      result = true
+  finally:
+    d.freeWindow()
 
 proc inputBox*(caption, prompt, default: string): string =
   ## Like `inputQuery` but returns the text, or `default` when cancelled.
