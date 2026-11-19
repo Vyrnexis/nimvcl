@@ -14,7 +14,7 @@
 
 import std/strutils
 import ../core/timer
-import ./[common, edit]
+import ./[common, edit, rangevalue]
 
 type
   SpinButtons* = ref object of Control
@@ -29,7 +29,8 @@ type
   SpinEdit* = ref object of Container
     edit*: Edit
     buttons*: SpinButtons
-    fMin, fMax, fValue, fInc: int
+    fRng: RangeValue
+    fInc: int
     repeat: Timer
     repeatDir: int
     onChange*: NotifyEvent
@@ -123,9 +124,9 @@ method paint*(s: SpinEdit, c: Canvas) =
   if foc: drawFocusRing(c, r, t)
   procCall paint(Control(s), c)
 
-func minValue*(s: SpinEdit): int = s.fMin
-func maxValue*(s: SpinEdit): int = s.fMax
-func value*(s: SpinEdit): int = s.fValue
+func minValue*(s: SpinEdit): int = s.fRng.lo
+func maxValue*(s: SpinEdit): int = s.fRng.hi
+func value*(s: SpinEdit): int = s.fRng.pos
 func increment*(s: SpinEdit): int = s.fInc
 
 proc stopRepeat(s: SpinEdit) =
@@ -133,27 +134,22 @@ proc stopRepeat(s: SpinEdit) =
   s.repeat.enabled = false
 
 proc syncText(s: SpinEdit) =
-  let txt = $s.fValue
+  let txt = $s.fRng.pos
   if s.edit.text != txt: s.edit.text = txt
 
+proc moved(s: SpinEdit, changed: bool) =
+  s.syncText()               # also restores text the user messed up
+  if changed:
+    let h = s.onChange        # copy: the handler may clear or replace itself
+    if h != nil: h(s)
+
 proc `value=`*(s: SpinEdit, v: int) =
-  let nv = clamp(v, s.fMin, s.fMax)
-  if nv == s.fValue:
-    s.syncText()           # also restores text the user messed up
-    return
-  s.fValue = nv
-  s.syncText()
-  let h = s.onChange        # copy: the handler may clear or replace itself
-  if h != nil: h(s)
+  s.moved(s.fRng.setPos(v))
 
 proc `minValue=`*(s: SpinEdit, v: int) =
-  s.fMin = v
-  if s.fMax < v: s.fMax = v
-  s.value = s.fValue
+  s.moved(s.fRng.setMin(v))
 proc `maxValue=`*(s: SpinEdit, v: int) =
-  s.fMax = v
-  if s.fMin > v: s.fMin = v
-  s.value = s.fValue
+  s.moved(s.fRng.setMax(v))
 proc `increment=`*(s: SpinEdit, v: int) = s.fInc = max(v, 1)
 
 proc commit*(s: SpinEdit) =
@@ -172,9 +168,9 @@ proc stepBy*(s: SpinEdit, dir: int, count = 1) =
   s.commit()
   let d = dir * count * s.fInc
   s.value =                      # saturating: a range up to high(int) cannot overflow
-    if d > 0 and s.fValue > high(int) - d: high(int)
-    elif d < 0 and s.fValue < low(int) - d: low(int)
-    else: s.fValue + d
+    if d > 0 and s.fRng.pos > high(int) - d: high(int)
+    elif d < 0 and s.fRng.pos < low(int) - d: low(int)
+    else: s.fRng.pos + d
 
 proc repeatTick*(s: SpinEdit) =
   ## One auto-repeat step (the timer's handler); no-op, and the repeat stops,
@@ -202,8 +198,8 @@ method focusTarget*(s: SpinEdit): Control = s.edit
 
 proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
   s.initContainer(owner)
-  s.fMin = 0
-  s.fMax = 100
+  s.fRng.lo = 0
+  s.fRng.hi = 100
   s.fInc = 1
   s.setBounds(0, 0, 100, currentTheme().controlHeight)
   s.repeat = newTimer(nil, RepeatDelayMs)
@@ -219,7 +215,7 @@ proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
   e.onKeyPress = proc(sender: Control, text: var string) =
     var d = ""
     for i, ch in text:
-      if ch in {'0'..'9'} or (ch == '-' and s.fMin < 0 and i == 0): d.add ch
+      if ch in {'0'..'9'} or (ch == '-' and s.fRng.lo < 0 and i == 0): d.add ch
     text = d
   e.onKeyDown = proc(sender: Control, key: var Key, shift: ShiftState) =
     if shift * {ssCtrl, ssAlt, ssSuper} != {}: return

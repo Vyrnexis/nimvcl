@@ -8,13 +8,14 @@
 ## `advanceMarquee` moves it one step (also what the timer calls).
 
 import ../core/timer
-import ./common
+import ./[common, rangevalue]
 
 type
   ProgressStyle* = enum pbsNormal, pbsMarquee
 
   ProgressBar* = ref object of Control
-    fMin, fMax, fPos, fStep: int
+    fRng: RangeValue
+    fStep: int
     fStyle: ProgressStyle
     fOrient: Orientation
     fPhase: float32           # marquee block position 0..1 (bouncing)
@@ -24,45 +25,43 @@ type
 
 const MarqueeMs = 30
 
-func min*(p: ProgressBar): int = p.fMin
-func max*(p: ProgressBar): int = p.fMax
-func position*(p: ProgressBar): int = p.fPos
+func min*(p: ProgressBar): int = p.fRng.lo
+func max*(p: ProgressBar): int = p.fRng.hi
+func position*(p: ProgressBar): int = p.fRng.pos
 func step*(p: ProgressBar): int = p.fStep
 func style*(p: ProgressBar): ProgressStyle = p.fStyle
 func orientation*(p: ProgressBar): Orientation = p.fOrient
 func marqueePhase*(p: ProgressBar): float32 = p.fPhase
 
-proc `position=`*(p: ProgressBar, v: int) =
-  let nv = system.max(p.fMin, system.min(p.fMax, v))
-  if nv == p.fPos: return
-  p.fPos = nv
+proc moved(p: ProgressBar) =
   p.invalidate()
   if p.onChange != nil: p.onChange(p)
 
+proc `position=`*(p: ProgressBar, v: int) =
+  if p.fRng.setPos(v): p.moved()
+
 proc `min=`*(p: ProgressBar, v: int) =
-  p.fMin = v
-  if p.fMax < v: p.fMax = v
+  let m = p.fRng.setMin(v)     # clamps into the new range; onChange when it moved
   p.invalidate()
-  p.position = p.fPos      # clamps into the new range and fires onChange
+  if m: p.moved()
 
 proc `max=`*(p: ProgressBar, v: int) =
-  p.fMax = v
-  if p.fMin > v: p.fMin = v
+  let m = p.fRng.setMax(v)
   p.invalidate()
-  p.position = p.fPos      # clamps into the new range and fires onChange
+  if m: p.moved()
 
 proc `step=`*(p: ProgressBar, v: int) = p.fStep = v
 
 proc stepIt*(p: ProgressBar) =
   ## Advances `position` by `step` (clamped).
-  p.position = p.fPos + p.fStep
+  p.position = p.fRng.pos + p.fStep
 
-proc stepBy*(p: ProgressBar, delta: int) = p.position = p.fPos + delta
+proc stepBy*(p: ProgressBar, delta: int) = p.position = p.fRng.pos + delta
 
 func fraction*(p: ProgressBar): float32 =
   ## 0..1 share of the range that is filled.
-  if p.fMax <= p.fMin: 0'f32
-  else: float32(p.fPos - p.fMin) / float32(p.fMax - p.fMin)
+  if p.fRng.hi <= p.fRng.lo: 0'f32
+  else: float32(p.fRng.pos - p.fRng.lo) / float32(p.fRng.hi - p.fRng.lo)
 
 proc advanceMarquee*(p: ProgressBar, delta = 0.02'f32) =
   p.fPhase += p.fDir * delta
@@ -129,8 +128,8 @@ method paint*(p: ProgressBar, c: Canvas) =
 
 proc initProgressBar*(p: ProgressBar, owner: Component = nil) =
   p.initControl(owner)
-  p.fMin = 0
-  p.fMax = 100
+  p.fRng.lo = 0
+  p.fRng.hi = 100
   p.fStep = 10
   p.fDir = 1
   p.setBounds(0, 0, 150, 18)
