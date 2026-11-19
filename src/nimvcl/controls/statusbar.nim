@@ -49,9 +49,10 @@ proc `simplePanel=`*(b: StatusBar, v: bool) =
   b.invalidate()
 proc simpleText*(b: StatusBar): string = b.caption
 proc `simpleText=`*(b: StatusBar, v: string) =
-  ## Sets the simple text and switches to simple mode.
+  ## Sets the simple text. A bar without panels shows it as is; a bar with
+  ## panels keeps showing them until `simplePanel` is set (VCL SimpleText).
   b.caption = v
-  b.fSimple = true
+  if b.fPanels.len == 0: b.fSimple = true
   b.invalidate()
 
 func sizeGrip*(b: StatusBar): bool = b.fSizeGrip
@@ -81,6 +82,7 @@ proc movePanel*(b: StatusBar, from0, to0: int) =
     b.invalidate()
 
 proc clearPanels*(b: StatusBar) =
+  for p in b.fPanels: p.bar = nil
   b.fPanels.setLen 0
   b.invalidate()
 
@@ -103,11 +105,16 @@ method paint*(b: StatusBar, c: Canvas) =
   c.fillRect(r, bg)
   c.line(0, 0.5, r.w, 0.5, t.border, 1)
   if b.fSimple or b.fPanels.len == 0:
-    c.textRect(b.caption, b.font, rectF(t.spacing, 1, max(r.w - GripSize - t.spacing, 0), r.h - 1),
+    let grip = if b.fSizeGrip: GripSize else: 0'f32
+    c.textRect(b.caption, b.font, rectF(t.spacing, 1, max(r.w - grip - t.spacing, 0), r.h - 1),
                col, taLeft, vaCenter)
   else:
+    var x = 0'f32                     # left edge of panel i (running sum: linear)
+    let grip = if b.fSizeGrip: GripSize else: 0'f32
     for i, p in b.fPanels:
-      let pr = b.panelRect(i)
+      let pr = if i == b.fPanels.high: rectF(x, 0, max(b.width - x - grip, 0), b.height)
+               else: rectF(x, 0, p.width, b.height)
+      x += p.width
       c.textRect(p.text, b.font, rectF(pr.x + t.spacing, 1, max(pr.w - 2 * t.spacing, 0), r.h - 1),
                  col, p.alignment, vaCenter)
       if i < b.fPanels.high:

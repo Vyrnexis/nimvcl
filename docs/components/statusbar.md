@@ -48,7 +48,7 @@ Only the common ones (`onClick`, mouse events).
 
 * The last panel takes all the space that is left. Its `width` is ignored.
 * Keep the `StatusPanel` returned by `addPanel`; setting its `text` is enough to update.
-* Setting `simpleText` (or passing it to `newStatusBar`) switches to simple mode.
+* Setting `simpleText` (or passing it to `newStatusBar`) on a bar without panels shows it as one line; with panels, set `simplePanel = true` to show it instead of them.
 
 ## At design time
 
