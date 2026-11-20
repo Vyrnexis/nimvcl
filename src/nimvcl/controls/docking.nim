@@ -64,6 +64,12 @@
 ##   set `allow = false` to veto. `hide()` does not ask.
 ## * `onActivate(site, panel)`: another panel became the active one (tab
 ##   selected, a click or focus inside it, Ctrl+Tab, docking it).
+## * `onPanelStateChanged(site, panel)`: the panel's `state` changed (hidden,
+##   docked, floating), once per user action however many steps it took (a
+##   move between groups of the same kind is no change); `loadLayout` fires it
+##   once per panel at the end (so a panel `loadLayout` hid, shows or floats
+##   gets one call, and there is none for a panel that stayed as it was).
+##   Replaces polling `state`.
 ## * `onLayoutChanged(site)`: the arrangement changed (dock, undock, split
 ##   drag finished, load). Handy for autosaving `saveLayout`.
 ##
@@ -78,7 +84,9 @@
 ## Names in the text that no panel has are skipped; panels the text does not
 ## mention are added as tabs of the first group, so a newer program can load
 ## an older layout. A text that is not a layout returns `false` and changes
-## nothing.
+## nothing. `loadLayoutEx(text)` does the same and tells why it refused
+## (`(ok, reason)`). `removePanel(panel)` takes a panel out of the dock system
+## for good (frees it and its content).
 
 import std/[json, math]
 import ../platform/[window, events]
@@ -117,6 +125,7 @@ type
     fDockPlace: DockPlace
     fFloatRect: RectF
     fWasFloating: bool
+    fNotified: DockState      ## the state `onPanelStateChanged` last reported
 
   DockTabs* = ref object of Container
     fActive: DockPanel
@@ -165,6 +174,7 @@ type
     fActive: DockPanel            # primary only
     fLoading: bool
     onDock*, onUndock*, onActivate*: DockPanelEvent
+    onPanelStateChanged*: DockPanelEvent
     onClose*: DockCloseEvent
     onLayoutChanged*: NotifyEvent
 
@@ -184,6 +194,7 @@ const
   DefaultFloatH = 280'f32
 
 var
+  gOpDepth: int      ## > 0 while a multi-step change (a move = undock + dock) runs
   gDrag: DragState
   gObserving: bool
   dockScreenOrigin*: proc(f: Form): PointF = nil
@@ -292,6 +303,29 @@ proc fire(s: DockSite, which: int, p: DockPanel) =
   else:
     let h = ps.onActivate
     if h != nil: h(ps, p)
+
+proc settle(s: DockSite) =
+  ## Reports the panels whose `state` differs from the one last reported, once
+  ## the outermost operation is done (not during `loadLayout`: it settles at
+  ## its end).
+  let ps = s.primary
+  if gOpDepth > 0 or ps.fLoading: return
+  let h = ps.onPanelStateChanged
+  for p in ps.fPanels:
+    let st = p.state
+    if st != p.fNotified:
+      p.fNotified = st
+      if h != nil: h(ps, p)
+
+template operation(site: DockSite, body: untyped) =
+  ## Runs a change that may take several steps; `onPanelStateChanged` is
+  ## raised once, after it.
+  inc gOpDepth
+  try:
+    body
+  finally:
+    dec gOpDepth
+  site.settle()
 
 proc layoutChanged(s: DockSite) =
   let ps = s.primary
@@ -670,6 +704,7 @@ proc detachPanel(p: DockPanel, remember: bool) =
       else: s.updateFloatCaption()
     s.fire(1, p)
     s.layoutChanged()
+  ps.settle()
 
 # -------------------------------------------------------------- docking
 
@@ -728,8 +763,8 @@ proc firstGroup(s: DockSite): DockTabs =
   let gs = s.groups
   if gs.len > 0: gs[0] else: nil
 
-proc dockImpl(p: DockPanel, site: DockSite, target: Control, side: DockSide,
-              frac: float32, index: int) =
+proc dockImplRaw(p: DockPanel, site: DockSite, target: Control, side: DockSide,
+                 frac: float32, index: int) =
   ## The one place that puts a panel into a tree. `target` is a node of
   ## `site` (a DockTabs or DockSplit), or nil.
   let ps = p.fSite
@@ -791,6 +826,11 @@ proc dockImpl(p: DockPanel, site: DockSite, target: Control, side: DockSide,
   activate(p)
   site.layoutChanged()
   discard ps
+
+proc dockImpl(p: DockPanel, site: DockSite, target: Control, side: DockSide,
+              frac: float32, index: int) =
+  site.operation:
+    dockImplRaw(p, site, target, side, frac, index)
 
 proc pointInOwnTree(a: Control, b: Control): bool = a == b or a.isAncestorOf(b)
 
@@ -859,7 +899,7 @@ proc newFloatSite(primary: DockSite, rect0: RectF, caption: string): DockSite =
         if allow: pn.detachPanel(remember = true)
   s
 
-proc floatImpl(p: DockPanel, rect: RectF) =
+proc floatImplRaw(p: DockPanel, rect: RectF) =
   let primary = p.fSite
   var r = rect
   let cur = p.site
@@ -898,6 +938,10 @@ proc floatImpl(p: DockPanel, rect: RectF) =
   fs.fire(0, p)
   activate(p)
   fs.layoutChanged()
+
+proc floatImpl(p: DockPanel, rect: RectF) =
+  p.fSite.operation:
+    floatImplRaw(p, rect)
 
 # ------------------------------------------------------------------ site API
 
@@ -952,8 +996,9 @@ proc show*(p: DockPanel) =
 proc dockBack*(p: DockPanel) =
   ## A floating (or hidden) panel returns to its last docked place.
   if p.group != nil and p.state == dpDocked: return
-  if p.group != nil: p.detachPanel(remember = true)
-  restoreImpl(p, true)
+  p.fSite.operation:
+    if p.group != nil: p.detachPanel(remember = true)
+    restoreImpl(p, true)
 
 proc close*(p: DockPanel): bool {.discardable.} =
   ## Asks `onClose`; when allowed, hides the panel. Returns whether it closed.
@@ -1122,36 +1167,40 @@ proc nodeShapeOk(j: JsonNode, names: var seq[string]): bool =
     return true
   false
 
-proc layoutOk(ps: DockSite, j: JsonNode): bool =
+proc layoutProblem(ps: DockSite, j: JsonNode): string =
   ## Checks a parsed layout before anything is touched: the version, the shape
   ## of every part, and that it names at least one panel this site has (a
-  ## layout of other panels would only empty the site).
-  if j.kind != JObject or not j.hasKey("root") or not j.hasKey("version"): return false
-  if j["version"].kind != JInt or j["version"].getInt != 1: return false
+  ## layout of other panels would only empty the site). "" when it is fine,
+  ## else what is wrong.
+  const bad = "not a dock layout: a part has the wrong shape"
+  if j.kind != JObject or not j.hasKey("root") or not j.hasKey("version"):
+    return "not a dock layout: no \"version\" and \"root\""
+  if j["version"].kind != JInt or j["version"].getInt != 1:
+    return "unsupported layout version " & $j["version"]
   var names: seq[string]
-  if not nodeShapeOk(j["root"], names): return false
+  if not nodeShapeOk(j["root"], names): return bad
   if j.hasKey("floats"):
-    if j["floats"].kind != JArray: return false
+    if j["floats"].kind != JArray: return bad
     for f in j["floats"]:
-      if f.kind != JObject or not nodeShapeOk(f{"root"}, names): return false
+      if f.kind != JObject or not nodeShapeOk(f{"root"}, names): return bad
       for k in ["x", "y", "w", "h"]:
-        if f.hasKey(k) and f[k].kind notin {JInt, JFloat}: return false
+        if f.hasKey(k) and f[k].kind notin {JInt, JFloat}: return bad
   if j.hasKey("hidden"):
-    if j["hidden"].kind != JArray: return false
+    if j["hidden"].kind != JArray: return bad
     for h in j["hidden"]:
-      if h.kind != JObject or h{"name"} == nil or h["name"].kind != JString: return false
+      if h.kind != JObject or h{"name"} == nil or h["name"].kind != JString: return bad
       names.add h["name"].getStr
       for k in ["x", "y", "w", "h"]:
-        if h.hasKey(k) and h[k].kind notin {JInt, JFloat}: return false
-  if j.hasKey("active") and j["active"].kind != JString: return false
+        if h.hasKey(k) and h[k].kind notin {JInt, JFloat}: return bad
+  if j.hasKey("active") and j["active"].kind != JString: return bad
   if ps.fPanels.len > 0:
     var known = false
     for n in names:
       if ps.findPanel(n) != nil:
         known = true
         break
-    if not known: return false
-  true
+    if not known: return "the layout names none of this site's panels"
+  ""
 
 proc applyLayout(ps: DockSite, j: JsonNode) =
   ## Replaces the arrangement by `j` (already checked by `layoutOk`).
@@ -1203,19 +1252,23 @@ proc applyLayout(ps: DockSite, j: JsonNode) =
     let ap = ps.findPanel(an)
     if ap != nil and ap.group != nil: ap.activate()
 
-proc loadLayout*(site: DockSite, text: string): bool =
-  ## Restores a layout made by `saveLayout`. False (and nothing changed) when
-  ## `text` is not a layout: bad JSON, an unknown version, a part of the wrong
-  ## shape, or no panel of this site in it. The text is checked before anything
-  ## is touched; should the rebuild still fail half way, the previous layout is
-  ## put back and the result is false. A tab drag in progress is cancelled.
+proc loadLayoutEx*(site: DockSite, text: string): tuple[ok: bool, reason: string] =
+  ## Restores a layout made by `saveLayout`. `ok` is false (and nothing
+  ## changed) when `text` is not a layout; `reason` then says why: bad JSON, an
+  ## unknown version, a part of the wrong shape, no panel of this site in it. The
+  ## text is checked before anything is touched; should the rebuild still fail
+  ## half way, the previous layout is put back and the result is false.
+  ## A tab drag in progress is cancelled.
   ## Events: panels that were docked or floating and end up hidden get
-  ## `onUndock`, hidden ones that appear get `onDock`.
+  ## `onUndock`, hidden ones that appear get `onDock`; then
+  ## `onPanelStateChanged` once for each panel whose state changed, and
+  ## `onLayoutChanged`.
   let ps = site.primary
   var j: JsonNode
   try: j = parseJson(text)
-  except CatchableError: return false
-  if not ps.layoutOk(j): return false
+  except CatchableError as e: return (false, "not JSON: " & e.msg)
+  let problem = ps.layoutProblem(j)
+  if problem.len > 0: return (false, problem)
   cancelDrag()
   let previous = parseJson(site.saveLayout())
   var before: seq[DockState]
@@ -1224,10 +1277,10 @@ proc loadLayout*(site: DockSite, text: string): bool =
   try:
     try:
       ps.applyLayout(j)
-    except Exception:
+    except Exception as e:
       try: ps.applyLayout(previous)
       except Exception: discard
-      return false
+      return (false, "the layout could not be built: " & e.msg)
   finally:
     ps.fLoading = false
     ps.relayout()
@@ -1238,8 +1291,29 @@ proc loadLayout*(site: DockSite, text: string): bool =
     if before[i] != dpHidden and now == dpHidden: ps.fire(1, p)
     elif before[i] == dpHidden and now != dpHidden: ps.fire(0, p)
     inc i
+  ps.settle()
   ps.layoutChanged()
-  true
+  (true, "")
+
+proc loadLayout*(site: DockSite, text: string): bool =
+  ## `loadLayoutEx(text).ok`: false (and nothing changed) when `text` is not a
+  ## layout of this site.
+  site.loadLayoutEx(text).ok
+
+proc removePanel*(site: DockSite, panel: DockPanel) =
+  ## Takes `panel` out of the dock system for good: it leaves its group or
+  ## floating window (`onUndock`, `onPanelStateChanged` when it was shown), its
+  ## name becomes free and the panel is freed with its content. A panel of
+  ## another dock system is refused (`ValueError`).
+  let ps = site.primary
+  if panel.fSite != ps:
+    raise newException(ValueError, "removePanel: the panel belongs to another dock system")
+  if gDrag != nil and gDrag.panel == panel: cancelDrag()
+  panel.detachPanel(remember = false)
+  let i = ps.fPanels.find(panel)
+  if i >= 0: ps.fPanels.delete i
+  if ps.fActive == panel: ps.fActive = nil
+  panel.free()
 
 # --------------------------------------------------------- guides geometry
 

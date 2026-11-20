@@ -42,6 +42,7 @@ discard site.loadLayout(saved)
 | `onUndock(site, panel)` | A panel left its group (moved, floated, hidden) |
 | `onClose(site, panel, allow: var bool)` | The user or `close()` wants to close a panel; veto with `allow = false` |
 | `onActivate(site, panel)` | Another panel became the active one |
+| `onPanelStateChanged(site, panel)` | A panel's `state` changed (hidden, docked, floating): once per action, a move between groups is no change; `loadLayout` fires it once per changed panel at its end |
 | `onLayoutChanged(sender)` | The arrangement changed |
 
 ## DockSite methods
@@ -53,6 +54,8 @@ discard site.loadLayout(saved)
 | `findPanel(name)` | Panel by name, nil if none |
 | `saveLayout()` | The arrangement as JSON text |
 | `loadLayout(text)` | Restore it; `false` and no change on bad text |
+| `loadLayoutEx(text)` | Same, returns `(ok, reason)` with the reason a text was refused |
+| `removePanel(panel)` | Remove a panel for good (frees it and its content; its name is free again) |
 | `guideRect(group, side)` | The drop guide of a group (nil group: site edge), in site coordinates |
 | `guidesVisible` | The drag overlay is showing |
 

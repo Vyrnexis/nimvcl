@@ -441,6 +441,78 @@ suite "docking":
     ide.inspector.show()
     check ide.inspector.state == dpDocked
 
+  test "onPanelStateChanged: once per change, a move is no change, load fires once per panel":
+    let ide = buildIde()
+    let site = ide.site
+    var log: seq[string]
+    site.onPanelStateChanged = proc(s: DockSite, p: DockPanel) =
+      log.add p.name & ":" & $p.state
+    ide.inspector.hide()
+    check log == @["inspector:dpHidden"]
+    log.setLen 0
+    ide.inspector.show()
+    check log == @["inspector:dpDocked"]
+    log.setLen 0
+    # a move between groups stays docked: no call
+    site.dock(ide.ed2, ide.palette, dsCenter)
+    ide.ed2.dockBack()
+    check log.len == 0
+    ide.palette.makeFloating(rectF(1000, 300, 280, 200))
+    check log == @["palette:dpFloating"]
+    log.setLen 0
+    ide.palette.dockBack()
+    check log == @["palette:dpDocked"]
+    log.setLen 0
+    # close through the API
+    check ide.structure.close()
+    check log == @["structure:dpHidden"]
+    log.setLen 0
+    # a drag between groups
+    settle()
+    ide.messages.dragPanel(guidePoint(site, ide.ed1.group, dsCenter))
+    check log.len == 0
+    # load: one call per panel whose state changed, none for the others
+    let s1 = site.saveLayout()
+    ide.inspector.hide()
+    ide.palette.makeFloating(rectF(1000, 300, 280, 200))
+    ide.messages.hide()
+    log.setLen 0
+    check site.loadLayout(s1)
+    check log.len == 3
+    check "inspector:dpDocked" in log and "palette:dpDocked" in log and
+          "messages:dpDocked" in log
+    log.setLen 0
+    check site.loadLayout(s1)
+    check log.len == 0
+    # removePanel
+    ide.ed2.show()
+    log.setLen 0
+    site.removePanel(ide.ed2)
+    check log == @["ed2:dpHidden"]
+    check site.findPanel("ed2") == nil
+
+  test "loadLayoutEx tells why a layout was refused":
+    let ide = buildIde()
+    let site = ide.site
+    let s1 = site.saveLayout()
+    check site.loadLayoutEx(s1) == (true, "")
+    var r = site.loadLayoutEx("{nope")
+    check not r.ok and r.reason.len > 0
+    r = site.loadLayoutEx("[1]")
+    check not r.ok and "layout" in r.reason
+    var j = parseJson(s1)
+    j["version"] = %2
+    r = site.loadLayoutEx($j)
+    check not r.ok and "version" in r.reason
+    j = parseJson(s1)
+    j["root"] = %*{"tabs": ["ghost"]}
+    j["floats"] = %*[]
+    j["hidden"] = %*[]
+    r = site.loadLayoutEx($j)
+    check not r.ok and "panels" in r.reason
+    check not site.loadLayout($j)
+    check site.saveLayout() == s1
+
   test "load validates first: bad parts are refused and nothing changes (N9)":
     let ide = buildIde()
     let site = ide.site

@@ -9,6 +9,7 @@ between minor versions.
 
 ### Added
 
+- `DockSite.onPanelStateChanged(site, panel)`: a panel became hidden, docked or floating, once per action (a move is no change; `loadLayout` fires it once per changed panel at the end); `loadLayoutEx(text)` returns `(ok, reason)` (`loadLayout` is its wrapper); `removePanel(panel)` frees a panel and its name.
 - `PageControl` / `TabControl` closable tabs: `closeButtons` draws a close cross on every tab (hover state, tab width includes it, so `sheetTabText` overrides need no padding), a middle click closes too; `onTabClose(sender, index, allow: var bool)` can veto, otherwise the sheet is freed (the tab dropped); `closeTab(i)` from code.
 - `Action.secondaryShortcuts` (Delphi's SecondaryShortCuts): more shortcuts that run the action like `shortcut`; menus and buttons show only the primary one. Streamed as a string list.
 - `ListView.beginUpdate` / `endUpdate` and `ListBox.beginUpdate` / `endUpdate` (nestable): item changes in between do not relayout or repaint, one refresh at the end. `ListView` looks the text line height up once per font and render scale instead of several times per row and paint. (Q3)
