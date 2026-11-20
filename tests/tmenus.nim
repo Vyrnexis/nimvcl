@@ -150,6 +150,44 @@ suite "main menu":
     check x.mm.top == 0 and x.mm.width == x.f.width
     check p.top >= x.mm.height
 
+  test "press on a bar item, drag to a row, release: the row is activated":
+    let x = build()
+    let fr = x.mm.clientToForm(x.mm.itemRect(0))
+    let bx = fr.x + fr.w / 2
+    let by = fr.y + fr.h / 2
+    Application.dispatch(ev(x.f.win, ekMouseDown, bx, by))
+    check x.mm.openIndex == 0
+    let p = top()
+    let r = menuItemRect(p, x.save)
+    let px = p.bounds.x + r.x + r.w / 2
+    let py = p.bounds.y + r.y + r.h / 2
+    Application.dispatch(ev(x.f.win, ekMouseMove, px, py, shift = {ssLeft}))
+    check hotMenuItem(p) == x.save
+    Application.dispatch(ev(x.f.win, ekMouseUp, px, py))
+    check log == @["save"] and chainLen(x.f) == 0
+
+  test "a release on the bar item itself keeps the dropdown open":
+    let x = build()
+    let fr = x.mm.clientToForm(x.mm.itemRect(0))
+    x.f.win.click(fr.x + fr.w / 2, fr.y + fr.h / 2)
+    check x.mm.openIndex == 0 and log.len == 0
+
+  test "a menu taller than its cap scrolls with the wheel and the arrow keys":
+    let x = build()
+    menuMaxHeight = 80
+    defer: menuMaxHeight = 0
+    x.f.tap('f', {ssAlt})
+    let p = top()
+    check p.content.height <= 80
+    check menuItemRect(p, x.exit).y > p.content.height     # below the visible part
+    for _ in 0 ..< 3: x.f.tap(keyDown)
+    check hotMenuItem(p) == x.exit
+    let r = menuItemRect(p, x.exit)
+    check r.y >= 0 and r.y + r.h <= p.content.height
+    Application.dispatch(PlatformEvent(kind: ekMouseWheel, windowId: p.ui.win.id,
+                                       x: 10, y: 10, dy: 5))
+    check menuItemRect(p, x.exit).y > r.y
+
   test "Alt+letter opens the menu and selects the first item":
     let x = build()
     x.f.tap('f', {ssAlt})

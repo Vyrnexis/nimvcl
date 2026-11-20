@@ -39,6 +39,7 @@
 ## to be linked in (the umbrella does).
 
 import std/[strutils, unicode]
+import ../platform/window
 import ../core/[form, popup, application, timer]
 import ../graphics/context
 import ./common, ./imagelist
@@ -82,6 +83,7 @@ type
     images: ImageList
     hot: int
     pressed: bool
+    scroll, fullH: float32      ## taller than the display: the rows scroll
     sub: PopupWindow
     subItem: MenuItem
     delay: Timer
@@ -91,6 +93,7 @@ type
   MainMenu* = ref object of Control
     fRoot: MenuItem
     fOpen, fHot: int
+    fPressed: bool              ## the left button is down since it opened a dropdown
     fDrop: PopupWindow
     fImgRef: ImageListRef
 
@@ -314,14 +317,19 @@ func selectable(p: MenuPanel, i: int): bool =
   i >= 0 and i < p.entries.len and not p.entries[i].isSeparator and
     p.entries[i].enabled
 
+var menuMaxHeight* = 0'f32
+  ## Caps the height of a menu popup, whose rows then scroll (wheel, arrow
+  ## keys); 0: the usable height of the display. Set by tests.
+
 proc rowRect(p: MenuPanel, i: int): RectF =
-  rectF(1, p.rowY[i], p.width - 2, p.rowH[i])
+  rectF(1, p.rowY[i] - p.scroll, p.width - 2, p.rowH[i])
 
 proc rowAt(p: MenuPanel, x, y: float32): int =
   result = -1
   if x < 0 or x >= p.width: return
   for i in 0 ..< p.entries.len:
-    if y >= p.rowY[i] and y < p.rowY[i] + p.rowH[i]: return i
+    let top = p.rowY[i] - p.scroll
+    if y >= top and y < top + p.rowH[i]: return i
 
 proc newPanel(owner: Form, root: MenuItem): MenuPanel =
   ## Builds the panel and sizes it with the owner's RenderContext.
@@ -359,7 +367,30 @@ proc newPanel(owner: Form, root: MenuItem): MenuPanel =
       if it.hasSubmenu: anySub = true
   let w = 2 + result.gutter + maxCap + (if maxSc > 0: TextGap + maxSc else: 0'f32) +
           (if anySub: ArrowW else: RightPad)
-  result.setBounds(0, 0, ceil(max(w, MinPanelW)), ceil(y + PadV + 1))
+  var h = ceil(y + PadV + 1)
+  var maxH = menuMaxHeight
+  if maxH <= 0 and owner.hasWindow:
+    let d = owner.win.displayUsableBounds()
+    if d.ok: maxH = d.h / (if owner.win.forcedScale > 0: owner.win.forcedScale else: 1'f32) - 8
+  if maxH > 0 and h > maxH:
+    result.fullH = h
+    h = max(maxH, 3 * RowH)
+  result.setBounds(0, 0, ceil(max(w, MinPanelW)), h)
+
+proc scrollTo(p: MenuPanel, v: float32) =
+  if p.fullH <= 0: return
+  let nv = clamp(v, 0'f32, p.fullH - p.height)
+  if nv != p.scroll:
+    p.scroll = nv
+    p.invalidate()
+
+proc reveal(p: MenuPanel, i: int) =
+  ## Scrolls row `i` into view (a panel taller than the display).
+  if p.fullH <= 0 or i < 0 or i >= p.entries.len: return
+  let top = p.rowY[i] - PadV - 1
+  let bottom = p.rowY[i] + p.rowH[i] + PadV + 1
+  if top < p.scroll: p.scrollTo(top)
+  elif bottom > p.scroll + p.height: p.scrollTo(bottom - p.height)
 
 proc closeSub(p: MenuPanel) =
   if p.sub != nil:
@@ -411,6 +442,7 @@ proc setHot(p: MenuPanel, idx: int, fromMouse: bool) =
   p.hot = idx
   p.invalidate()
   if not fromMouse:
+    p.reveal(idx)
     p.closeSub()
   elif submenuDelay <= 0:
     p.syncSub()
@@ -508,6 +540,13 @@ method doMouseMove*(p: MenuPanel, shift: ShiftState, x, y: float32) =
   if not p.selectable(i): i = -1
   p.setHot(i, true)
   procCall doMouseMove(Container(p), shift, x, y)
+
+method doMouseWheel*(p: MenuPanel, shift: ShiftState, dx, dy: float32,
+                     handled: var bool) =
+  procCall doMouseWheel(Container(p), shift, dx, dy, handled)
+  if handled or p.fullH <= 0 or dy == 0: return
+  p.scrollTo(p.scroll - dy * RowH * 3)
+  handled = true
 
 method doMouseLeave*(p: MenuPanel) =
   if p.sub == nil or not p.sub.isOpen: p.setHot(-1, true)
@@ -875,7 +914,24 @@ method paint*(m: MainMenu, c: Canvas) =
 
 method preferredSize*(m: MainMenu): SizeF = sizeF(m.width, m.theme.controlHeight)
 
+proc panelUnder(m: MainMenu, x, y: float32): tuple[panel: MenuPanel, pt: PointF] =
+  ## The open menu panel under the bar-local point (x, y), with the point in
+  ## its coordinates.
+  let f = m.menuForm
+  if f == nil: return
+  let fp = m.clientToForm(pointF(x, y))
+  let chain = menuChain(f)
+  for k in countdown(chain.high, 0):
+    let b = chain[k].bounds
+    if b.contains(fp) and chain[k].content of MenuPanel:
+      return (MenuPanel(chain[k].content), pointF(fp.x - b.x, fp.y - b.y))
+
 method doMouseMove*(m: MainMenu, shift: ShiftState, x, y: float32) =
+  if m.fPressed and m.fDrop != nil and ssLeft in shift:   # dragging over the dropdown
+    let (pn, pt) = m.panelUnder(x, y)
+    if pn != nil:
+      let i = pn.rowAt(pt.x, pt.y)
+      pn.setHot(if pn.selectable(i): i else: -1, true)
   let i = m.itemAt(x, y)
   if i != m.fHot:
     m.fHot = i
@@ -894,9 +950,24 @@ method doMouseDown*(m: MainMenu, button: MouseButton, shift: ShiftState,
   if button == mbLeft:
     let i = m.itemAt(x, y)
     if i >= 0 and not m.fRoot[i].fDisabled:
-      if m.fRoot[i].hasSubmenu: m.openDropdown(i)
+      if m.fRoot[i].hasSubmenu:
+        m.openDropdown(i)
+        m.fPressed = m.fDrop != nil
       else: m.fRoot[i].click()
   procCall doMouseDown(Control(m), button, shift, x, y)
+
+method doMouseUp*(m: MainMenu, button: MouseButton, shift: ShiftState,
+                  x, y: float32) =
+  ## Press on a bar item, drag to a row and release there: the row is activated
+  ## (a release on the bar item itself leaves the dropdown open).
+  if button == mbLeft and m.fPressed:
+    m.fPressed = false
+    if m.fDrop != nil and m.itemAt(x, y) != m.fOpen:
+      let (pn, pt) = m.panelUnder(x, y)
+      if pn != nil:
+        let i = pn.rowAt(pt.x, pt.y)
+        if pn.selectable(i) and not pn.entries[i].hasSubmenu: pn.activate(i)
+  procCall doMouseUp(Control(m), button, shift, x, y)
 
 # ----------------------------------------------------------- form integration
 
