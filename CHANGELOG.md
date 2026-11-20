@@ -7,6 +7,8 @@ between minor versions.
 
 ## Unreleased
 
+## [0.4.0] - 2026-11-21
+
 ### Added
 
 - `MainMenu` overflow: when the top items do not fit the form width, the ones that do not fit move behind a » button at the right end of the bar; it opens a popup listing them, each a submenu with its own items. Alt+letter, F10 and Left/Right on the bar reach hidden items, the layout follows the form width, and an open overflow popup closes on resize. `overflowing`, `overflowItems`, `overflowRect` and `openOverflow` expose it.
@@ -330,3 +332,4 @@ First release. There are no earlier versions.
 [0.2.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.2.0
 [0.2.1]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.2.1
 [0.3.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.3.0
+[0.4.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.4.0
