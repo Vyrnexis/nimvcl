@@ -896,6 +896,21 @@ suite "codeedit":
     check e.lines == @["x a", "b", "c", "d", "x e"]
     check e.markerLines(mkBookmark) == @[2] and e.markerLines(mkBreakpoint) == @[3]
 
+  test "deleting or moving the empty line after the last break keeps the trailing newline":
+    let f = newShown()
+    let e = f.mk("a\nb\n")
+    e.caretPos = (2, 0)
+    f.ctrl('k', {ssShift})
+    check e.model.text == "a\nb\n"
+    f.key(keyUp, {ssAlt})
+    check e.model.text == "a\nb\n"
+    e.caretPos = (1, 0)
+    f.key(keyDown, {ssAlt})                         # "b" cannot go below the phantom line
+    check e.model.text == "a\nb\n"
+    e.select((0, 0), (2, 0))
+    f.ctrl('k', {ssShift})                          # a selection that reaches it
+    check e.model.text == ""
+
   test "find: no matches never changes the selection; wraps around":
     let f = newShown()
     let e = f.mk("a1\nb\na2")

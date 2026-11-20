@@ -23,9 +23,14 @@ suite "codemodel load":
     check r.mixedEndings and r.lineEnding == leCRLF and r.lines == 4
     check m.toText == "a\r\nb\r\nc\r\nd"
 
-  test "a lone CR stays in the line":
-    let m = mk("a\rb\nc")
-    check m.lineCount == 2 and m.line(0) == "a\rb"
+  test "a lone CR is a line break":
+    let m = newCodeModel()
+    let r = m.loadText("a\rb\nc\r\nd\r")
+    check m.lineCount == 5 and m.line(0) == "a" and m.line(1) == "b" and m.line(3) == "d"
+    check r.loneCr == 2 and m.trailingNewline and r.bytes == 9
+    check mk("a\rb").lineCount == 2 and mk("a\r\nb").lineCount == 2
+    let mac = mk("x\ry\rz")
+    check mac.lineCount == 3 and mac.lineEnding == leLF and not mac.mixedEndings
 
   test "invalid UTF-8 becomes U+FFFD and is counted":
     let m = newCodeModel()
@@ -58,8 +63,14 @@ suite "codemodel load":
     let m = newCodeModel()
     discard m.loadFile(p)
     check m.text == "hi"
+    check m.hasBom
     m.saveFile(p, ensureTrailingNewline = true)
-    check readFile(p) == "hi\n"
+    check readFile(p) == "\xEF\xBB\xBFhi\n"       # the BOM is kept
+    m.hasBom = false
+    m.saveFile(p)
+    check readFile(p) == "hi"
+    check not m.loadText("hi").bom and not m.hasBom
+    check m.loadText("\xEF\xBB\xBFa\r\nb").bom and m.toText == "a\r\nb"
     removeDir dir
 
 suite "codemodel positions":

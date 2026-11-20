@@ -59,6 +59,10 @@ between minor versions.
   column-0 comment no longer ends the open regions. (N15)
 - Enter after `if x:  # comment` indents like `if x:` (the last code token
   decides, a comment behind the caret is looked through). (N16)
+- CodeModel / CodeEdit keep a UTF-8 BOM (`hasBom`, `LoadReport.bom`) and write it
+  again on save; a lone `\r` is a line break on load (`LoadReport.loneCr`),
+  like other editors; Delete Line and Alt+Up/Down leave the empty line after
+  the last line break alone, so the trailing newline of the file stays. (N17)
 
 ## [0.2.1] - 2026-11-20
 

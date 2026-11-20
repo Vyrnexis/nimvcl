@@ -2298,7 +2298,7 @@ proc loadFromFile*(e: CodeEdit, path: string): LoadReport {.discardable.} =
   ## the trailing newline and invalid bytes are reported in the result and
   ## preserved by `saveToFile` (except that mixed endings become the dominant
   ## one).
-  let data = readTextFile(path)     # first: an unreadable file changes nothing
+  let data = readFile(path)         # first: an unreadable file changes nothing
   e.stopDrag()
   e.composition = ""
   e.fFileName = path
@@ -2319,8 +2319,13 @@ proc loadFromFile*(e: CodeEdit, path: string): LoadReport {.discardable.} =
   e.ensureWarm()
   e.touched(follow = false)
 
+proc hasBom*(e: CodeEdit): bool = e.fModel.hasBom
+  ## The loaded file started with a UTF-8 BOM; saving writes it again.
+proc `hasBom=`*(e: CodeEdit, v: bool) = e.fModel.hasBom = v
+
 proc saveToFile*(e: CodeEdit, path = "") =
-  ## Writes the text with its line endings (UTF-8, no BOM) to a temporary file
+  ## Writes the text with its line endings (UTF-8, with a BOM when the file had
+  ## one) to a temporary file
   ## that then replaces the target (IOError on failure, nothing marked saved),
   ## marks it saved and remembers `path` (default: `fileName`) as the file name
   ## (through `fileName=`, so the language follows the extension).

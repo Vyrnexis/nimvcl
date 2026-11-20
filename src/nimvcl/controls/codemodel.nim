@@ -69,6 +69,8 @@ type
     lineEnding*: LineEnding   ## the dominant style
     mixedEndings*: bool       ## both LF and CRLF terminators were present
     trailingNewline*: bool
+    bom*: bool                ## the data started with a UTF-8 BOM (kept on save)
+    loneCr*: int              ## lone "\r" characters that were made line breaks
 
   EditKind* = enum
     ekOther       ## its own undo step
@@ -93,6 +95,7 @@ type
     fLineEnding: LineEnding
     fMixed: bool
     fReadOnly: bool
+    fBom: bool
     fVersion: int
     listeners: seq[tuple[id: int, cb: ChangeHandler]]
     nextListenerId: int
@@ -193,6 +196,9 @@ func tabWidth*(m: CodeModel): int = m.fTabWidth
 func lineEnding*(m: CodeModel): LineEnding = m.fLineEnding
 func mixedEndings*(m: CodeModel): bool = m.fMixed
 func readOnly*(m: CodeModel): bool = m.fReadOnly
+func hasBom*(m: CodeModel): bool = m.fBom
+  ## A UTF-8 BOM was read with the text; `saveFile` / `saveCopy` write it again.
+proc `hasBom=`*(m: CodeModel, v: bool) = m.fBom = v
 func version*(m: CodeModel): int = m.fVersion
   ## Bumped by every change of the text.
 func modified*(m: CodeModel): bool = m.fModified
@@ -574,16 +580,15 @@ proc memchrNl(p: pointer, n: int): int =
   let r = memchr(p, 10, csize_t(n))
   if r == nil: -1 else: cast[int](r) - cast[int](p)
 
-proc loadText*(m: CodeModel, data: string): LoadReport =
-  ## Replaces the whole document with `data` (raw file bytes): detects the
-  ## line ending style, repairs invalid UTF-8 (U+FFFD) and clears the history.
+proc loadLines(m: CodeModel, data: string, off, bytes, loneCr: int, bom: bool): LoadReport =
   let oldN = m.lines.len
   var invalid = 0
   let bad = firstInvalidUtf8(data)
   var fixLines = bad >= 0           # repair line by line below
-  var crlf, lf = 0
+  var crlf = 0
+  var lf = loneCr
   var newLines = newSeqOfCap[string](max(16, data.len div 40))
-  var start = 0
+  var start = off
   let n = data.len
   while true:
     let rel = if start < n: memchrNl(unsafeAddr data[start], n - start) else: -1
@@ -602,6 +607,7 @@ proc loadText*(m: CodeModel, data: string): LoadReport =
     for i in 0 ..< newLines.len:
       newLines[i] = repairUtf8(newLines[i], invalid)
   m.lines = move newLines
+  m.fBom = bom
   m.fLineEnding = if crlf > lf: leCRLF else: leLF
   m.fMixed = crlf > 0 and lf > 0
   m.sels = @[sel((0, 0))]
@@ -612,11 +618,34 @@ proc loadText*(m: CodeModel, data: string): LoadReport =
   m.breakGroup()
   m.savedStep = 0
   m.fModified = false
-  result = LoadReport(bytes: data.len, lines: m.lines.len, invalidBytes: invalid,
+  result = LoadReport(bytes: bytes, bom: bom, loneCr: loneCr, lines: m.lines.len, invalidBytes: invalid,
                       lineEnding: m.fLineEnding, mixedEndings: m.fMixed,
                       trailingNewline: m.trailingNewline)
   m.fireChanged(0, oldN, m.lines.len)
   m.fireSel()
+
+proc loadText*(m: CodeModel, data: string): LoadReport =
+  ## Replaces the whole document with `data` (raw file bytes): remembers and
+  ## strips a UTF-8 BOM (`hasBom`), detects the line ending style (a lone "\r"
+  ## is a line break like "\n"), repairs invalid UTF-8 (U+FFFD) and clears the
+  ## history.
+  let bom = data.len >= 3 and data[0] == '\xEF' and data[1] == '\xBB' and data[2] == '\xBF'
+  let off = if bom: 3 else: 0
+  var lone = 0
+  var cr = data.find('\r', off)
+  while cr >= 0:
+    if cr + 1 >= data.len or data[cr + 1] != '\n': inc lone
+    cr = data.find('\r', cr + 1)
+  if lone == 0: return m.loadLines(data, off, data.len, 0, bom)
+  var fixed = newStringOfCap(data.len)
+  var i = off
+  while i < data.len:
+    if data[i] == '\r':
+      if i + 1 < data.len and data[i + 1] == '\n': fixed.add '\r'
+      else: fixed.add '\n'
+    else: fixed.add data[i]
+    inc i
+  m.loadLines(fixed, 0, data.len, lone, bom)
 
 proc setLineEnding*(m: CodeModel, e: LineEnding) =
   ## Changes the terminator `toText` / `saveFile` write. The document counts as
@@ -634,8 +663,9 @@ proc readTextFile*(path: string): string =
     result = result[3 .. ^1]
 
 proc loadFile*(m: CodeModel, path: string): LoadReport =
-  ## Reads `path` (raises IOError if it cannot be read). Strips a UTF-8 BOM.
-  m.loadText(readTextFile(path))
+  ## Reads `path` (raises IOError if it cannot be read). A UTF-8 BOM is
+  ## stripped and remembered (`hasBom`).
+  m.loadText(readFile(path))
 
 proc setText*(m: CodeModel, s: string) =
   ## Programmatic replacement (line endings detected like `loadText`).
@@ -657,6 +687,7 @@ proc saveCopy*(m: CodeModel, path: string, ensureTrailingNewline = false) =
           raise newException(IOError, "cannot write " & tmp)
         chunk.setLen 0
     var chunk = newStringOfCap(1 shl 20)
+    if m.fBom: chunk.add "\xEF\xBB\xBF"
     for i, l in m.lines:
       if i > 0: chunk.add eol
       chunk.add l

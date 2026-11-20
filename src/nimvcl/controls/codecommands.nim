@@ -154,7 +154,9 @@ proc deleteLines*(m: CodeModel, first, last: int): bool =
   ## Removes the lines including their line breaks; the caret keeps its column
   ## on the line that takes their place.
   if m.readOnly: return false
-  let hi = min(last, m.lineCount - 1)
+  var hi = min(last, m.lineCount - 1)
+  if hi == m.lineCount - 1 and m.trailingNewline: dec hi    # the empty line after the last break is no line
+  if hi < first: return false
   let col = m.caret.col
   var a, b: CodePos
   var target: int
@@ -180,14 +182,17 @@ proc moveLines*(m: CodeModel, first, last: int, up: bool,
   ## block `nbFirst .. nbLast` (default: the single line next to them). The
   ## selection moves with the text.
   if m.readOnly: return false
-  let hi = min(last, m.lineCount - 1)
+  var hi = min(last, m.lineCount - 1)
+  let lastReal = if m.trailingNewline: m.lineCount - 2 else: m.lineCount - 1   # not the empty line after the last break
+  hi = min(hi, lastReal)
+  if hi < first: return false
   var nf = nbFirst
   var nl = nbLast
   if nf < 0:
     if up: (nf, nl) = (first - 1, first - 1)
     else: (nf, nl) = (hi + 1, hi + 1)
   if up and nf < 0: return false
-  if not up and nl >= m.lineCount: return false
+  if not up and nl > lastReal: return false
   let blk = m.linesText(first, hi)
   let nb = m.linesText(nf, nl)
   let s = m.selection
