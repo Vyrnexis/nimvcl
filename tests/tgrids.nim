@@ -944,6 +944,26 @@ suite "grids (review fixes)":
     f.tap(keyTab)
     check (g.col, g.row) == (2, 1) and g.editing == false
 
+  test "the current cell moving on its own fires the selection events":
+    let f = newShown()
+    let g = mkString(f)
+    g.selectCell(3, 4)
+    var cells, changes = 0
+    g.onSelectCell = proc(s: Control, c, r: int, ok: var bool) = inc cells
+    g.onSelectionChanged = proc(s: Control) = inc changes
+    g.rowCount = 3                               # row 4 is gone
+    check g.row == 2 and cells == 1 and changes == 1
+    g.colCount = 2
+    check g.col == 1 and cells == 2 and changes == 2
+    g.rowCount = 8                               # nothing moved
+    check cells == 2 and changes == 2
+    g.selectCell(1, 4)
+    cells = 0; changes = 0
+    g.insertRow(2)
+    check g.row == 5 and cells == 1 and changes == 1
+    g.deleteRow(2)
+    check g.row == 4 and cells == 2 and changes == 2
+
   test "setSelection and a paste fire onSelectionChanged once":
     let f = newShown()
     let g = mkString(f)

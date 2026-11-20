@@ -123,6 +123,7 @@ type
     fFixedCols, fFixedRows: int        # effective (clamped to the counts)
     fReqFixedCols, fReqFixedRows: int  # as requested; survive count shrinking
     fSelQuiet: int                     # >0: selectionChanged only records
+    fMoveQuiet: int                    # >0: a count change leaves the notices to its caller
     fOptions: GridOptions
     fCol, fRow, fAnchorCol, fAnchorRow: int
     fHLines, fVLines, fHotTrack: bool
@@ -561,21 +562,39 @@ proc selectAll*(g: DrawGrid) =
 
 # --------------------------------------------------------- sizes and counts
 
+type CurrentCells = tuple[col, row, anchorCol, anchorRow: int]
+
+func currentCells(g: DrawGrid): CurrentCells = (g.fCol, g.fRow, g.fAnchorCol, g.fAnchorRow)
+
+proc notifyMoved(g: DrawGrid, was: CurrentCells) =
+  ## The current cell / selection changed on its own (the counts changed, rows
+  ## were inserted or deleted): tell the application like a user move would
+  ## (`onSelectCell` cannot veto it any more).
+  if g.fMoveQuiet > 0 or g.currentCells == was: return
+  if (g.fCol, g.fRow) != (was.col, was.row) and g.onSelectCell != nil:
+    var ok = true
+    g.onSelectCell(g, g.fCol, g.fRow, ok)
+  g.selectionChanged()
+
 proc `colCount=`*(g: DrawGrid, n: int) =
   if g.fEditing: g.endEdit(false)
+  let was = g.currentCells
   g.fCols.setCount(n)
   g.fFixedCols = min(g.fReqFixedCols, g.fCols.count)
   g.clampCurrent()
   g.sizeChanged()
   g.refreshContent()
+  g.notifyMoved(was)
 
 proc `rowCount=`*(g: DrawGrid, n: int) =
   if g.fEditing: g.endEdit(false)
+  let was = g.currentCells
   g.fRows.setCount(n)
   g.fFixedRows = min(g.fReqFixedRows, g.fRows.count)
   g.clampCurrent()
   g.sizeChanged()
   g.refreshContent()
+  g.notifyMoved(was)
 
 proc `fixedCols=`*(g: DrawGrid, n: int) =
   g.fReqFixedCols = max(n, 0)
@@ -1241,6 +1260,8 @@ proc insertRow*(g: StringGrid, at: int) =
   ## Inserts an empty row at `at` (clamped to the scrolling rows).
   let i = min(max(at, g.fixedRows), g.rowCount)
   g.endEdit(false)
+  let was = g.currentCells
+  inc g.fMoveQuiet
   let hadCurrent = g.rowCount > g.fFixedRows
   if i < g.fData.len: g.fData.insert(newSeq[string](), i)
   g.rowCount = g.rowCount + 1
@@ -1250,17 +1271,23 @@ proc insertRow*(g: StringGrid, at: int) =
     if g.fAnchorRow >= i: inc g.fAnchorRow
     g.clampCurrent()
   g.fSortCol = -1                         # the new empty row breaks the order
+  dec g.fMoveQuiet
   g.invalidate()
+  g.notifyMoved(was)
 
 proc deleteRow*(g: StringGrid, at: int) =
   if at < g.fixedRows or at >= g.rowCount: return
   g.endEdit(false)
+  let was = g.currentCells
+  inc g.fMoveQuiet
   if at < g.fData.len: g.fData.delete(at)
   g.fRows.shiftSlots(at, -1)
   if g.fRow > at: dec g.fRow             # keep the same cell current
   if g.fAnchorRow > at: dec g.fAnchorRow
   g.rowCount = g.rowCount - 1             # (the sort order of the rest stays)
+  dec g.fMoveQuiet
   g.invalidate()
+  g.notifyMoved(was)
 
 proc compareCells*(a, b: string): int =
   ## Default sort order: numbers before text, numbers by value, text without
