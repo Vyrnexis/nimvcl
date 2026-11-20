@@ -66,6 +66,8 @@ proc hintTarget(f: Form, p: PointF): Control =
   ## control under the mouse (which never gets hover) wins when it has its own
   ## hint.
   result = f.ui.hovered
+  # a hovered leaf with a hint of its own is the target: no second hit test
+  if result != nil and result.hint.len > 0 and not (result of Container): return
   let d = f.ui.root.controlAtPoint(p, includeDisabled = true)
   if d != nil and d != result and not d.isEnabled and d.hint.len > 0: result = d
 

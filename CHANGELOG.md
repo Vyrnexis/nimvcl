@@ -114,6 +114,11 @@ between minor versions.
 - Property registry: `classOf` is looked up once per run-time type and `findProp` (dotted names included) once per class and name, instead of scanning every class / property per call (object inspector rows, saving). (Q6)
 - Saving an inherited form no longer re-reads and re-parses the ancestor file each time: the parsed tree is cached by path, modification time and size (also for the ancestor chain of a load). (Q9)
 
+### Changed
+
+- Idle work: the action `onUpdate` pass after input batches runs at most every `actionUpdateIntervalMs` (default 100 ms; 0 restores every batch; a timer wakes the loop so the last change is still shown; opening a menu always updates). The hint skips its second hit test when the hovered leaf control has a hint. PageControl / TabControl and DockTabs re-measure their tab strips only when a tab, the font or the width changed, or on paint (they did on every mouse move). (Q5)
+
+
 ## [0.2.1] - 2026-11-20
 
 ### Fixed

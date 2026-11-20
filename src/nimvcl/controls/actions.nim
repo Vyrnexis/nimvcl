@@ -49,7 +49,8 @@
 ## `client.action = nil`, or `free(action)` (unlinks all clients and removes it
 ## from its list), or `free(list)`.
 
-import ../core/[form, application]
+import std/[monotimes, times]
+import ../core/[form, application, timer]
 import ./common, ./menus, ./toolbar, ./checkbox, ./imagelist
 
 export menus, imagelist
@@ -460,18 +461,45 @@ proc hasUpdateHandler(l: ActionList): bool =
   for a in l.fActions:
     if a.onUpdate != nil: return true
 
+var
+  actionUpdateIntervalMs* = 100
+    ## The idle hook runs `updateActions` at most this often (ms; 0: after every
+    ## batch of input events). A menu opening always updates.
+  gLastUpdate: MonoTime
+  gHasUpdated: bool
+  gWake: Timer
+
 proc updateActions*() =
   ## Runs `onUpdate` of every action of every ActionList of an open form.
-  ## Called by the application's idle hook and before menus open. Lists with
-  ## nothing to run are skipped, so a form without update handlers costs a few
-  ## comparisons, not a walk over its components.
+  ## Called by the application's idle hook (at most every
+  ## `actionUpdateIntervalMs`) and before menus open. Lists with nothing to run
+  ## are skipped, so a form without update handlers costs a few comparisons,
+  ## not a walk over its components.
+  gLastUpdate = getMonoTime()
+  gHasUpdated = true
   let lists = gLists          # a handler may create or free lists
   for l in lists:
     if not l.hasUpdateHandler: continue
     let f = formOf(l)
     if f != nil and f.hasWindow: l.update()
 
-Application.addIdleHook("actions", updateActions)
+proc idleUpdate() =
+  ## Throttled `updateActions`: mouse moves and key batches arrive many times a
+  ## second. When a call is skipped a timer wakes the loop when the interval is
+  ## over, so the last change is never left unshown.
+  if actionUpdateIntervalMs > 0 and gHasUpdated:
+    let since = int((getMonoTime() - gLastUpdate).inMilliseconds)
+    if since < actionUpdateIntervalMs:
+      if gWake == nil:
+        gWake = newTimer(nil, actionUpdateIntervalMs)
+        gWake.onTimer = proc(t: Timer) = t.enabled = false
+      gWake.interval = max(actionUpdateIntervalMs - since, 1) + 1
+      gWake.enabled = false
+      gWake.enabled = true
+      return
+  updateActions()
+
+Application.addIdleHook("actions", idleUpdate)
 block:
   let prev = menus.menuOpening
   menus.menuOpening = proc() =

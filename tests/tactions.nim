@@ -2,7 +2,7 @@
 ## reach the action, radio groups, unlinking, and ImageList icons in toolbars
 ## and menus. Headless (offscreen SDL).
 
-import std/[unittest, os]
+import std/[unittest, os, monotimes, times]
 import sdl3 except Color, Cursor
 import nimvcl
 
@@ -242,7 +242,26 @@ suite "actions":
     a.execute()
     check not a.checked and seen == @[true, false]
 
+  test "the idle update is throttled, the last change is still shown":
+    let x = fixture()
+    actionUpdateIntervalMs = 150
+    defer: actionUpdateIntervalMs = 100
+    var n = 0
+    let a = newAction(x.acts, "U")
+    a.onUpdate = proc(s: Action) = inc n
+    Application.processMessages(0)
+    updateActions()                       # starts the interval
+    let n0 = n
+    for i in 1 .. 5: Application.processMessages(0)
+    check n == n0                         # inside the interval: skipped
+    let t0 = getMonoTime()
+    while n == n0 and (getMonoTime() - t0).inMilliseconds < 3000:
+      Application.processMessages(20)     # the wake-up timer ends the wait
+    check n > n0
+
   test "onUpdate runs when the application goes idle, not while painting":
+    actionUpdateIntervalMs = 0
+    defer: actionUpdateIntervalMs = 100
     let x = fixture()
     var n = 0
     let a = newAction(x.acts, "U")

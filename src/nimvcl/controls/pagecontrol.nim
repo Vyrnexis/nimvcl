@@ -62,6 +62,7 @@ type
 
   TabBase* = ref object of Container
     fMetrics: StripMetrics
+    fMetricsDirty: bool         # a tab was added, removed, renamed or hidden: re-measure
     fIndex: int
     fFirst: int                 # first tab shown (strip scroll position)
     fHotTab: int                # -1 none, tab index, or -2/-3 scroll arrows
@@ -113,6 +114,7 @@ proc `showTabs=`*(t: TabBase, v: bool) =
   ## code still can (`tabIndex`, `activePage`, `cycle`). Default `true`.
   if v == not t.fHideTabs: return
   t.fHideTabs = not v
+  t.fMetricsDirty = true
   t.fFirst = 0
   t.fHotTab = -1
   t.needsLayout = true      # the padding (strip height) changed
@@ -140,16 +142,21 @@ proc place(t: TabBase, r: RectF): RectF =
   ## top), in client coordinates: mirrored for `tpBottom`.
   if t.fPos == tpTop: r else: rectF(r.x, t.height - r.y - r.h, r.w, r.h)
 
-proc refreshMetrics(t: TabBase) =
-  ## Re-measures the strip when something it depends on changed. Called once
-  ## per paint / hit test / tab change; the helpers below then work on the
-  ## cached prefix sums.
-  var texts: seq[string]
-  var shown: seq[bool]
-  t.collectTabs(texts, shown)
+proc refreshMetrics(t: TabBase, force = false) =
+  ## Re-measures the strip when something it depends on changed. Paint
+  ## (`force`) compares every tab text, so a text an override of `tabText`
+  ## computes is always current; hit tests and the like reuse the cached prefix
+  ## sums unless a tab was added, removed, renamed or hidden (`fMetricsDirty`)
+  ## or the font changed.
   let f = t.font
   let measured = t.canMeasure
   let m = addr t.fMetrics
+  if not force and not t.fMetricsDirty and m.valid and m.measured == measured and
+     m.font == f: return
+  var texts: seq[string]
+  var shown: seq[bool]
+  t.collectTabs(texts, shown)
+  t.fMetricsDirty = false
   if m.valid and m.measured == measured and m.font == f and m.texts == texts and
      m.shown == shown: return
   m.xs.setLen(texts.len + 1)
@@ -370,7 +377,7 @@ method paint*(t: TabBase, c: Canvas) =
   let en = t.isEnabled
   let h = t.stripHeight
   let w = t.width
-  t.refreshMetrics()
+  t.refreshMetrics(force = true)
   t.normalizeFirst()
   if t.fEnsure:
     t.fEnsure = false
@@ -450,6 +457,7 @@ method tabText*(t: TabControl, i: int): string = t.fTabs[i]
 func tabs*(t: TabControl): seq[string] = t.fTabs
 proc `tabs=`*(t: TabControl, v: seq[string]) =
   t.fTabs = v
+  t.fMetricsDirty = true
   if t.fIndex >= v.len: t.fIndex = v.high
   if t.fIndex < 0 and v.len > 0: t.fIndex = 0
   t.fFirst = 0
@@ -457,6 +465,7 @@ proc `tabs=`*(t: TabControl, v: seq[string]) =
 
 proc addTab*(t: TabControl, caption: string): int {.discardable.} =
   t.fTabs.add caption
+  t.fMetricsDirty = true
   if t.fIndex < 0: t.fIndex = 0
   t.invalidate()
   t.fTabs.high
@@ -484,7 +493,9 @@ method paint*(s: TabSheet, c: Canvas) =
 proc `caption=`*(s: TabSheet, v: string) =
   ## Sets the tab text (and repaints the strip of the owning PageControl).
   `caption=`(Control(s), v)
-  if s.parent != nil: s.parent.invalidate()
+  if s.parent != nil:
+    if s.parent of PageControl: PageControl(s.parent).fMetricsDirty = true
+    s.parent.invalidate()
 
 func caption*(s: TabSheet): string = Control(s).caption
 
@@ -625,6 +636,7 @@ proc `tabVisible=`*(s: TabSheet, v: bool) =
     s.parent.invalidate()
     if s.parent of PageControl:
       let p = PageControl(s.parent)
+      p.fMetricsDirty = true
       if not v and p.fActive == s:
         var n = p.nextSelectable(p.fIndex, 1)
         if n < 0: n = p.nextSelectable(p.fIndex, -1)
@@ -648,6 +660,7 @@ proc ensureHook(p: PageControl) =
 method childBoundsChanged*(p: PageControl, child: Control) =
   procCall childBoundsChanged(Container(p), child)
   if child of TabSheet:
+    p.fMetricsDirty = true
     p.syncPages()   # a sheet was added / removed
     p.fEnsure = true    # the strip scroll may now be past the last tab
     p.invalidate()

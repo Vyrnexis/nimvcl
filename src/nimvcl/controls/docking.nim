@@ -126,6 +126,11 @@ type
     fDragging: bool
     fMenu: PopupMenu
     fTabScroll: float32        ## strip scroll when the tabs do not fit
+    fMet: tuple[widths: seq[float32], total, avail: float32]   ## cached tab widths
+    fMetW: float32             ## group width the cache was made for
+    fMetFont: FontSpec
+    fMetActive: DockPanel      ## the active tab the cache was made for
+    fMetOk, fMetDirty: bool    ## fMetDirty: a tab was added, renamed, ... re-measure
 
   DockSplit* = ref object of Container
     fOrient: Orientation
@@ -247,8 +252,13 @@ proc floatForm*(p: DockPanel): Form =
   if s != nil and s.isFloating: s.fForm else: nil
 
 func closable*(p: DockPanel): bool = p.fClosable
+proc tabsDirty(p: DockPanel) =
+  ## One of the group's tabs changed (caption, icon, close button).
+  if p.parent != nil and p.parent of DockTabs: DockTabs(p.parent).fMetDirty = true
+
 proc `closable=`*(p: DockPanel, v: bool) =
   p.fClosable = v
+  p.tabsDirty()
   if p.parent != nil: p.parent.invalidate()
 
 func content*(p: DockPanel): Control = p.fContent
@@ -522,12 +532,14 @@ proc revealActiveTab(g: DockTabs)
 
 proc setActiveTab(g: DockTabs, p: DockPanel) =
   g.fActive = p
+  g.fMetDirty = true                  # the active tab reserves room for its close button
   g.showActive()
   g.revealActiveTab()
   g.invalidate()
 
 method childBoundsChanged*(g: DockTabs, child: Control) =
   procCall childBoundsChanged(Container(g), child)
+  g.fMetDirty = true
   # keep the selection valid when panels come and go
   var found = false
   for c in g.children:
@@ -1291,9 +1303,13 @@ proc tabWidthNatural(g: DockTabs, p: DockPanel): float32 =
   if p.fClosable and p == g.fActive: w += 20   # only the selected tab reserves room
   clamp(w, 56'f32, 220'f32)
 
-proc tabMetrics(g: DockTabs): tuple[widths: seq[float32], total, avail: float32] =
+proc tabMetrics(g: DockTabs, force = false): tuple[widths: seq[float32], total, avail: float32] =
   ## Tab widths: shrunk to fit but never below `MinTabW`; when even that does
-  ## not fit the strip scrolls (`fTabScroll`).
+  ## not fit the strip scrolls (`fTabScroll`). Cached until a tab, the width or
+  ## the font changes; paint (`force`) always measures again.
+  if not force and g.fMetOk and not g.fMetDirty and g.fMetW == g.width and
+     g.fMetFont == g.font and g.fMetActive == g.fActive:
+    return g.fMet
   var sum = 0'f32
   var nat: seq[float32]
   for p in g.panels:
@@ -1306,6 +1322,12 @@ proc tabMetrics(g: DockTabs): tuple[widths: seq[float32], total, avail: float32]
     let tw = max(floor(w * k), min(w, MinTabW))
     result.widths.add tw
     result.total += tw
+  g.fMet = result
+  g.fMetW = g.width
+  g.fMetFont = g.font
+  g.fMetActive = g.fActive
+  g.fMetOk = true
+  g.fMetDirty = false
 
 proc clampTabScroll(g: DockTabs, m: tuple[widths: seq[float32], total, avail: float32]) =
   g.fTabScroll = clamp(g.fTabScroll, 0'f32, max(m.total - m.avail, 0'f32))
@@ -1766,6 +1788,7 @@ method paint*(g: DockTabs, c: Canvas) =
   c.fillRect(rectF(0, h - 1, g.width, 1), if active: th.accent.withAlpha(150) else: th.border)
   c.frameRect(g.clientRect, if active: th.accent.withAlpha(150) else: th.border, 1)
   let ps = g.panels
+  discard g.tabMetrics(force = true)             # texts may have changed under us
   let rs = g.tabRects
   c.pushClip(rectF(1, 0, max(g.width - 2, 0), h))
   for i, p in ps:
@@ -1907,6 +1930,7 @@ method doMouseLeave*(g: DockTabs) =
 
 method `caption=`*(p: DockPanel, v: string) =
   procCall `caption=`(Control(p), v)
+  p.tabsDirty()
   if p.parent != nil:
     p.parent.invalidate()
     let s = p.site
@@ -1916,12 +1940,15 @@ proc `images=`*(p: DockPanel, il: ImageList) =
   ## The icon source for `imageIndex`.
   if p.fImages.list == il: return
   p.fImages.attach(il, proc() =
+    p.tabsDirty()
     if p.parent != nil: p.parent.invalidate())
+  p.tabsDirty()
   if p.parent != nil: p.parent.invalidate()
 
 proc `imageIndex=`*(p: DockPanel, v: int) =
   ## Icon of the tab: an index into `images` (-1: none).
   p.fImageIndex = v
+  p.tabsDirty()
   if p.parent != nil: p.parent.invalidate()
 
 method releaseResources*(p: DockPanel) =
