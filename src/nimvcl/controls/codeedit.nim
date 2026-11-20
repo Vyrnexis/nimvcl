@@ -136,6 +136,9 @@ type
     fFileName: string
     fEnsureNewline: bool
     fMarkers: seq[Marker]
+    fCompShown: string               ## the line being composed, as drawn
+    fVisKey: tuple[version, first, last, gen: int]   ## `fVisMatches` is for this
+    fVisMatches: seq[Match]
     fMarkerStash: seq[MarkerStash]   ## markers an edit dropped, for undo / redo
     fSpliced: bool                   ## the markers were moved by `markersSplice`
     fMove: tuple[active: bool, first, last, nbFirst, nbLast: int, up: bool]
@@ -453,13 +456,15 @@ proc caretDisplayCol(e: CodeEdit): int =
   let c = e.fModel.caret
   if e.compActive and c.line == e.compLine: e.compCol + e.compCursor else: c.col
 
-proc displayText(e: CodeEdit, line: int): string =
-  ## The line with the IME composition inserted at its caret.
-  let t = e.fModel.line(line)
+proc displayText(e: CodeEdit, line: int): lent string =
+  ## The line with the IME composition inserted at its caret (no copy of the
+  ## text of a line that is not being composed).
   if e.compActive and line == e.compLine:
+    let t = e.fModel.line(line)
     let c = min(e.compCol, t.len)
-    t[0 ..< c] & e.composition & t[c .. ^1]
-  else: t
+    e.fCompShown = t[0 ..< c] & e.composition & t[c .. ^1]
+    result = e.fCompShown
+  else: result = e.fModel.line(line)
 
 proc caretX(e: CodeEdit): float32 =
   ## Client x of the caret.
@@ -1707,6 +1712,7 @@ method doMouseMove*(e: CodeEdit, shift: ShiftState, x, y: float32) =
     return
   e.dragX = x
   e.dragY = y
+  let before = e.fModel.selections
   e.dragTo()
   let vp = e.viewport
   let outside = y < vp.y or y > vp.bottom or x < vp.x + e.gutterW or x > vp.right
@@ -1721,12 +1727,13 @@ method doMouseMove*(e: CodeEdit, shift: ShiftState, x, y: float32) =
         elif e.dragY > vp.bottom: e.scrollBy(0, rh)
         if e.dragX < vp.x + e.gutterW: e.scrollBy(-20, 0)
         elif e.dragX > vp.right: e.scrollBy(20, 0)
+        let before = e.fModel.selections
         e.dragTo()
-        e.touched(follow = false)
+        if e.fModel.selections != before: e.touched(follow = false)
     e.dragTimer.enabled = true
   elif e.dragTimer != nil:
     e.dragTimer.enabled = false
-  e.touched(follow = false)
+  if e.fModel.selections != before: e.touched(follow = false)   # not per event of a still drag
 
 method doMouseLeave*(e: CodeEdit) =
   procCall doMouseLeave(ScrollingControl(e))
@@ -1976,14 +1983,27 @@ proc matchingBracket(e: CodeEdit): BracketMatch =
   result = findMatchingBracket(m, hl, m.caret, maxLines = if hl == nil: 2000 else: 20000)
   e.fBrCache = (version: cv.version, pos: cv.pos, bm: result, valid: true)
 
-proc visibleMatches(e: CodeEdit, first, last: int): seq[Match] =
-  if not e.findBarVisible: return
+proc visibleMatches(e: CodeEdit, first, last: int): lent seq[Match] =
+  ## The matches of the find bar in the lines `first .. last`; kept for as long
+  ## as the text, the lines shown and the search stay the same.
+  if not e.findBarVisible:
+    e.fVisKey = (-1, 0, 0, 0)
+    e.fVisMatches.setLen 0
+    return e.fVisMatches
   let s = e.ensureSearcher()
-  if s == nil: return
+  let key = (version: e.fModel.version, first: first, last: last, gen: e.fSearcherGen)
+  if s == nil:
+    e.fVisKey = (-1, 0, 0, 0)
+    e.fVisMatches.setLen 0
+    return e.fVisMatches
+  if key == e.fVisKey: return e.fVisMatches
+  e.fVisKey = key
+  e.fVisMatches.setLen 0
   let m = e.fModel
   for mt in s.matches(m, (first, 0), (last, m.lineLen(last))):
-    result.add mt
-    if result.len >= MaxVisMatches: break
+    e.fVisMatches.add mt
+    if e.fVisMatches.len >= MaxVisMatches: break
+  e.fVisMatches
 
 proc drawTokens(e: CodeEdit, c: Canvas, text: string, toks: openArray[Token],
                 x0, ty: float32, enabled: bool, textArea: RectF) =
@@ -2072,7 +2092,9 @@ method paint*(e: CodeEdit, c: Canvas) =
   let selCol = if selFoc: t.selection else: t.selectionInactive
   let caretLine = m.caret.line
   let bm = if e.fHiBrackets and enabled: e.matchingBracket() else: BracketMatch()
-  let matches = if rowLines.len > 0: e.visibleMatches(rowLines[0], rowLines[^1]) else: @[]
+  if rowLines.len > 0: discard e.visibleMatches(rowLines[0], rowLines[^1])
+  else: e.fVisMatches.setLen 0
+  template matches: untyped = e.fVisMatches
   var mi = 0
   let lineHi = mix(bg, t.accent, 0.07'f32)
   let guideCol = mix(bg, ink, 0.12'f32)
@@ -2085,8 +2107,8 @@ method paint*(e: CodeEdit, c: Canvas) =
     let y = rowTops[ri]
     let rowRect = rectF(textArea.x, y, textArea.w, rh)
     if c.isClippedOut(rowRect): continue
-    let text = e.displayText(line)
-    let plainText = m.line(line)
+    template text: untyped = e.displayText(line)        # no copies of the line
+    template plainText: untyped = m.line(line)
     # current line
     if e.fHiLine and line == caretLine and enabled and (not showSel or selFoc):
       c.fillRect(rowRect, lineHi)

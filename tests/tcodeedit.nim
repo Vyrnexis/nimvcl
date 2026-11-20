@@ -918,6 +918,22 @@ suite "codeedit":
     f.key(keyBackspace, {ssAlt})
     check e.lineAt(0) == "one  three" and e.caretPos == (0, 4)
 
+  test "find bar matches in view are cached per version and refreshed after an edit":
+    let f = newShown()
+    let e = f.mk("ab\nab\ncd")
+    f.ctrl('f')
+    e.setSearch("ab")
+    settle(f)
+    check e.fVisMatches.len == 2
+    let key = e.fVisKey
+    e.invalidate()
+    settle(f)
+    check e.fVisKey == key and e.fVisMatches.len == 2
+    discard e.model.insert((2, 2), "ab")
+    e.touched()
+    settle(f)
+    check e.fVisMatches.len == 3 and e.fVisKey != key
+
   test "find: no matches never changes the selection; wraps around":
     let f = newShown()
     let e = f.mk("a1\nb\na2")

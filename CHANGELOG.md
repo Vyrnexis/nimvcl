@@ -64,6 +64,11 @@ between minor versions.
   like other editors; Delete Line and Alt+Up/Down leave the empty line after
   the last line break alone, so the trailing newline of the file stays. (N17)
 - CodeEdit: Alt+Backspace deletes the word before the caret. (N18)
+- CodeEdit paint no longer copies the text of every visible line, the find
+  bar matches of the visible lines are cached until the text, the lines shown
+  or the search change, and a mouse drag that does not change the selection no
+  longer runs the whole `touched` update (find recount, IME, events) per mouse
+  move. (Q4)
 
 ## [0.2.1] - 2026-11-20
 
