@@ -10,7 +10,9 @@ putEnv("NIMVCL_ASSETS", "/nonexistent/nimvcl-assets")
 
 suite "lazy system fonts":
   test "a family lookup does not scan every font":
-    if findExe("fc-list").len == 0 or defined(nimvclFontScan): skip()
+    # Windows and macOS scan the font folders (cached) instead of asking fontconfig
+    if findExe("fc-list").len == 0 or defined(nimvclFontScan) or defined(windows) or
+       defined(macosx): skip()
     else:
       let name = execProcess("fc-list : family").splitLines[0].split(',')[0].strip
       if name.len == 0: skip()
