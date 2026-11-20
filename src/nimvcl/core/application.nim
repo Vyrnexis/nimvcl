@@ -362,7 +362,7 @@ proc shutdown*(a: TApplication) =
   ## SDL_ttf and SDL. A later `init` starts them again.
   stopAllTimers()
   closeAllPopups(nil)
-  for f in openForms(): f.freeWindow()
+  for f in shutdownOrder(): f.freeWindow()
   freeCursors()
   setMainForm(nil)
   resetModalState()

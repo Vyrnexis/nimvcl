@@ -11,6 +11,7 @@ between minor versions.
 
 - The numpad Enter key arrives as Enter (default buttons, Edit, CodeEdit, grids
   handled only the main Enter key). (N19)
+- `Application.shutdown` frees the windows modal forms first, then the others in reverse order of creation. (N22)
 - Closing the main form first closes the other open forms (`onCloseQuery`, `onClose`); one that stays open cancels the close. A form closed with `caFree` fires `onHide`. (N21)
 - A form released with `caFree` stops the `Timer`s it owns (they kept firing after the window was gone). (N23)
 - A form's `constraints` reach the OS window (`PlatformWindow.setMinSize` / `setMaxSize`), so the window manager no longer lets the user resize below the minimum and the form does not fight back. (N20)

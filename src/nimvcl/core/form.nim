@@ -274,6 +274,15 @@ proc freeWindow*(f: Form) =
   ## Destroys the window without running `close` events (application shutdown).
   releaseWindow(f)
 
+proc shutdownOrder*(): seq[Form] =
+  ## The forms that own a window in the order to free them at shutdown: modal
+  ## forms first (innermost first), then the others in reverse registration
+  ## order, so a window is never destroyed before the windows that depend on it.
+  for i in countdown(gModals.high, 0):
+    if gModals[i].fUi.win != nil and gModals[i] notin result: result.add gModals[i]
+  for i in countdown(gForms.high, 0):
+    if gForms[i] notin result: result.add gForms[i]
+
 proc syncMetrics*(f: Form) =
   ## Re-reads window size and scale (after a resize/scale event).
   f.fUi.syncMetrics()

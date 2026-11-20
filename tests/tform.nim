@@ -639,3 +639,20 @@ suite "closing the main form":
     m.close()
     check log == @["m.query", "o.query", "o.close", "o.hide"]
     check not o.hasWindow and not m.visible
+
+suite "shutdown order":
+  test "modal forms first, then reverse registration order":
+    let a = newForm(nil, 100, 80)
+    let b = newForm(nil, 100, 80)
+    let d = newForm(nil, 100, 80)
+    a.show()
+    b.show()
+    var order: seq[Form]
+    d.onShow = proc(s: Control) =
+      order = shutdownOrder()
+      d.modalResult = mrOk
+    discard d.showModal()
+    check order[0] == d
+    check order.find(b) < order.find(a)
+    check order.find(a) >= 0
+    check order.len == openForms().len
