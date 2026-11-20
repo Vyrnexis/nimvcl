@@ -20,6 +20,7 @@ between minor versions.
 
 ### Fixed
 
+- `FileDialog.executeModal` resets `isRunning` (and drops its pending callback) when the application ends or the loop raises before the dialog reports. (N42)
 - `PageControl` / `TabControl`: the tab strip is re-clamped when a sheet is added or removed (a scroll past the last tab showed no tabs), and the mouse wheel over the strip scrolls tabs that do not fit. (N41)
 - A disabled `ToolButton` with an `image` is dimmed like one with an image list icon. (N40)
 - `Action.execute` of an `autoCheck` action (and a click on a checkable client) keeps the toggled `checked` only when a handler ran; the handler still sees the new state. Grouped actions are unchanged. (N39)

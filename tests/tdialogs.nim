@@ -255,6 +255,15 @@ suite "file dialogs":
       Application.processMessages(50)
     check n == 1
 
+  test "executeModal resets running when the application ends mid-loop":
+    let d = newOpenDialog()
+    showFileDialogImpl = proc(req: FileDialogRequest, token: int, done: FileDialogDone) = discard
+    defer: showFileDialogImpl = fakeImpl
+    Application.queue(proc() {.closure, gcsafe.} =
+      {.cast(gcsafe).}: Application.terminate())
+    check not d.executeModal()
+    check not d.isRunning
+
   test "the parent window is the active form's":
     let f = newForm(nil, 200, 100)
     f.show()

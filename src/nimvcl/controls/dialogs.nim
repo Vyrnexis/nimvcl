@@ -344,10 +344,16 @@ proc executeModal*(d: FileDialogBase): bool =
   ## Starts the dialog and runs a nested event loop until it reports.
   if d.running: return false
   var finished, accepted = false
+  let token = nextToken
   d.start(d.kind, proc(ok: bool, files: seq[string]) =
     finished = true
     accepted = ok)
-  runModalLoop(proc(): bool = finished)
+  try:
+    runModalLoop(proc(): bool = finished)
+  finally:
+    if not finished:                   # the application ended (or the loop raised) first
+      pending.del token                # a late answer must not reach this call
+      d.running = false
   result = accepted
 
 proc newOpenDialog*(owner: Component = nil): OpenDialog {.discardable.} =
