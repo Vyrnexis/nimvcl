@@ -64,6 +64,7 @@ type
     frame: int
     closed: bool
     epoch: int                    # font registry epoch the caches were built for
+    fontClient: int               # id for font.registerFontClient
     fonts: Table[FontKey, FontEntry]
     paths: seq[string]            # font files seen; FontKey.path indexes it
     pathIds: Table[string, int32]
@@ -98,9 +99,11 @@ proc newRenderContext*(renderer: Renderer, scale: float32 = 1): RenderContext =
   let eng = createRendererTextEngine(renderer)
   if eng == nil:
     raise newException(IOError, "createRendererTextEngine: " & $getError())
+  let epoch = fontRegistryEpoch()
   RenderContext(renderer: renderer, engine: eng, scale: quantiseScale(scale),
                 maxIdleFrames: DefaultMaxIdleFrames,
-                textCacheCap: DefaultTextCacheCap, epoch: fontRegistryEpoch())
+                textCacheCap: DefaultTextCacheCap, epoch: epoch,
+                fontClient: registerFontClient(epoch))
 
 func renderer*(ctx: RenderContext): Renderer = ctx.renderer
 func scale*(ctx: RenderContext): float32 = ctx.scale
@@ -158,6 +161,7 @@ proc close*(ctx: RenderContext) =
     ctx.engine = nil
   ctx.destroyFonts()
   ctx.destroyTextures()
+  dropFontClient(ctx.fontClient)
   ctx.closed = true
 
 proc destroy*(ctx: RenderContext) = ctx.close()
@@ -174,6 +178,7 @@ proc beginFrameTick*(ctx: RenderContext) =
   if e != ctx.epoch:
     ctx.epoch = e
     ctx.flushFontCaches()
+    updateFontClient(ctx.fontClient, e)
   inc ctx.frame
 
 # ------------------------------------------------------------------- fonts

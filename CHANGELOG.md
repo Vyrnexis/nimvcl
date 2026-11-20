@@ -11,6 +11,7 @@ between minor versions.
 
 - The numpad Enter key arrives as Enter (default buttons, Edit, CodeEdit, grids
   handled only the main Enter key). (N19)
+- The first use of a system font family no longer waits for a listing of every installed font: on Linux/BSD `fc-list` is asked for that family only; the Windows/macOS font folder scan is cached in the user's cache folder (`nimvcl/fontscan.tsv`). Replaced `registerFontFamilyData` bytes are freed once no rendering context can read them (they were kept forever). (Q7)
 - `Application.shutdown` frees the windows modal forms first, then the others in reverse order of creation. (N22)
 - Closing the main form first closes the other open forms (`onCloseQuery`, `onClose`); one that stays open cancels the close. A form closed with `caFree` fires `onHide`. (N21)
 - A form released with `caFree` stops the `Timer`s it owns (they kept firing after the window was gone). (N23)

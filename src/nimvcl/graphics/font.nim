@@ -4,7 +4,7 @@
 ## logical size and a style. It holds no SDL handle; the `RenderContext`
 ## resolves it to a rasterised font at `size * scale` when text is drawn.
 
-import std/[os, tables, sets, strutils, algorithm, streams]
+import std/[os, tables, sets, strutils, algorithm, streams, times]
 from std/unicode import Rune, toUTF8
 when not (defined(windows) or defined(macosx)): import std/osproc
 import ./color
@@ -93,7 +93,11 @@ else:
 var
   families: Table[string, FontFiles]
   memoryFonts: Table[string, ref string]   ## `embedded:` paths of registered font data
-  retiredFonts: seq[ref string]            ## replaced data: still referenced by open fonts, never freed
+  retiredFonts: seq[tuple[data: ref string, epoch: int]]
+    ## replaced data that open fonts may still read; dropped once every
+    ## rendering context has flushed its fonts for registry epoch `epoch`
+  fontClients: Table[int, int]             ## rendering context id -> registry epoch its fonts were built for
+  nextFontClient = 0
   sysVariants: Table[string, SysVariant]   ## system lookups (also misses), see `systemVariant`
   sysFamilies: seq[string]
   sysFamiliesDone = false
@@ -134,6 +138,38 @@ proc assetsDir*(): string =
 
 proc fontsDir(): string = assetsDir() / "fonts"
 
+proc releaseRetired() =
+  ## Drops replaced font data that no rendering context reads any more.
+  if retiredFonts.len == 0: return
+  var oldest = high(int)
+  for _, e in fontClients.pairs: oldest = min(oldest, e)
+  var keep: seq[tuple[data: ref string, epoch: int]]
+  for r in retiredFonts:
+    if r.epoch > oldest: keep.add r
+  retiredFonts = keep
+
+proc registerFontClient*(epoch: int): int =
+  ## For `RenderContext`: a context that opens fonts announces the registry
+  ## epoch its fonts are built for, so replaced font data is kept while it may
+  ## still be read. Returns the id for `updateFontClient` / `dropFontClient`.
+  inc nextFontClient
+  fontClients[nextFontClient] = epoch
+  nextFontClient
+
+proc updateFontClient*(id, epoch: int) =
+  ## The context flushed its fonts and now matches registry epoch `epoch`.
+  if id in fontClients:
+    fontClients[id] = epoch
+    releaseRetired()
+
+proc dropFontClient*(id: int) =
+  ## The context was closed: it holds no fonts any more.
+  fontClients.del id
+  releaseRetired()
+
+proc retiredFontCount*(): int = retiredFonts.len
+  ## Replaced font data still kept alive (for tests and diagnostics).
+
 proc registerFontFamily*(family, regular: string, bold = "", italic = "",
                          boldItalic = "") =
   ## Registers (or replaces) a family from TTF file paths. Missing variants
@@ -154,7 +190,7 @@ proc registerFontFamilyData*(family, regular: string, bold = "", italic = "",
   proc put(variant, data: string): string =
     if data.len == 0: return ""
     let name = "user/" & key & "/" & variant
-    if name in memoryFonts: retiredFonts.add memoryFonts[name]
+    if name in memoryFonts: retiredFonts.add (memoryFonts[name], fallbackEpoch + 1)
     var r = new string
     r[] = data
     memoryFonts[name] = r
@@ -165,6 +201,7 @@ proc registerFontFamilyData*(family, regular: string, bold = "", italic = "",
   userFamilies.incl key
   families[key] = ff
   inc fallbackEpoch
+  releaseRetired()
 
 proc embeddedFontData*(path: string): tuple[data: pointer, len: int] =
   ## Bytes of a font held in the binary (`path` is `embedded:<file name>`),
@@ -199,14 +236,14 @@ proc unregisterFontFamily*(family: string) =
   ## (case-insensitive); a bundled family of the same name comes back. Safe for
   ## unknown names. Rendering contexts flush their opened fonts and text caches
   ## using it at the start of the next frame (the registry epoch changes). The
-  ## memory of font data is kept, since open fonts may still read it.
+  ## memory of font data is freed once no rendering context can still read it.
   let key = family.toLowerAscii
   if key notin userFamilies: return
   userFamilies.excl key
   for variant in ["regular", "bold", "italic", "bolditalic"]:
     let name = "user/" & key & "/" & variant
     if name in memoryFonts:
-      retiredFonts.add memoryFonts[name]
+      retiredFonts.add (memoryFonts[name], fallbackEpoch + 1)
       memoryFonts.del name
   families.del key
   case key   # a bundled family that was replaced comes back
@@ -218,6 +255,7 @@ proc unregisterFontFamily*(family: string) =
     families[key] = FontFiles(regular: bundledFont("NotoSansMono-Regular.ttf"))
   else: discard
   inc fallbackEpoch
+  releaseRetired()
 
 proc winFontsDir(): string =
   ## `%WINDIR%\\Fonts` ("" off Windows, so the candidates never match there).
@@ -292,7 +330,8 @@ type
 
 var
   scanned: seq[ScanEntry]
-  scanDone = false
+  scanDone = false                 ## every installed font was read
+  scanFamilies: HashSet[string]    ## families read one by one (fontconfig)
 
 proc scanDirs(): seq[string] =
   when defined(windows):
@@ -403,13 +442,12 @@ proc runTool(cmd: string, args: openArray[string]): string =
     except CatchableError:
       result = ""
 
-proc scanFonts() =
-  if scanDone: return
-  scanDone = true
-  when HaveFontconfig:
-    # one line per face: family names (comma separated), style, weight, slant,
-    # face index, file. SDL_ttf opens face 0 of a collection, so only that one counts.
-    let o = runTool("fc-list", ["-f", "%{family}\t%{style}\t%{weight}\t%{slant}\t%{index}\t%{file}\n"])
+const FcFormat = "%{family}\t%{style}\t%{weight}\t%{slant}\t%{index}\t%{file}\n"
+
+when HaveFontconfig:
+  proc parseFcLines(o: string) =
+    ## One line per face: family names (comma separated), style, weight, slant,
+    ## face index, file. SDL_ttf opens face 0 of a collection, so only that one counts.
     for line in o.splitLines:
       let parts = line.split('\t')
       if parts.len != 6 or parts[5].len == 0: continue
@@ -424,16 +462,75 @@ proc scanFonts() =
         if name.len > 0:
           scanned.add ScanEntry(family: name, plain: plain, bold: w >= 180,
                                 italic: sl > 0, path: parts[5])
+
+elif HaveFontScan:
+  # The name tables of all fonts are read once; the result is kept in a small
+  # tab separated file (path, size and time stamp, family, subfamily) so the
+  # next run only stats the files.
+  const ScanCacheHeader = "nimvcl-fontscan 1"
+
+  proc scanCachePath(): string = getCacheDir("nimvcl") / "fontscan.tsv"
+
+  proc loadScanCache(): Table[string, tuple[stamp, family, sub: string]] =
+    try:
+      var first = true
+      for line in lines(scanCachePath()):
+        if first:
+          first = false
+          if line != ScanCacheHeader: return
+          continue
+        let p = line.split('\t')
+        if p.len == 4: result[p[0]] = (p[1], p[2], p[3])
+    except CatchableError:
+      result.clear()
+
+  proc saveScanCache(c: Table[string, tuple[stamp, family, sub: string]]) =
+    try:
+      createDir(scanCachePath().parentDir)
+      var o = ScanCacheHeader & "\n"
+      for path, e in c.pairs:
+        o.add path & "\t" & e.stamp & "\t" & e.family & "\t" & e.sub & "\n"
+      let tmp = scanCachePath() & ".tmp"
+      writeFile(tmp, o)
+      moveFile(tmp, scanCachePath())
+    except CatchableError:
+      discard
+
+proc scanFonts() =
+  ## Reads the installed fonts: all of them (`fc-list`, or the font folders on
+  ## Windows and macOS). Fontconfig lookups of one family use `scanFamily`.
+  if scanDone: return
+  scanDone = true
+  scanned.setLen 0
+  when HaveFontconfig:
+    parseFcLines(runTool("fc-list", ["-f", FcFormat]))
   elif HaveFontScan:
+    let old = loadScanCache()
+    var fresh: Table[string, tuple[stamp, family, sub: string]]
+    var changed = false
     for d in scanDirs():
       try:
         if not dirExists(d): continue
         for path in walkDirRec(d):
           let ext = path.splitFile.ext.toLowerAscii
           if ext notin [".ttf", ".otf", ".ttc", ".otc"]: continue
-          var (fam, sub) = readNameTable(path)
-          if fam.len == 0: (fam, sub) = guessFromFileName(path)
+          var fam, sub: string
+          var stamp = ""
+          try:
+            let fi = getFileInfo(path)
+            stamp = $fi.size & ":" & $fi.lastWriteTime.toUnix
+          except CatchableError: discard
+          var cacheable = stamp.len > 0 and "\t" notin path and "\n" notin path
+          if cacheable and path in old and old[path].stamp == stamp:
+            (fam, sub) = (old[path].family, old[path].sub)
+          else:
+            (fam, sub) = readNameTable(path)
+            if fam.len == 0: (fam, sub) = guessFromFileName(path)
+            changed = true
           if fam.len == 0: continue
+          if "\t" in fam or "\n" in fam or "\t" in sub or "\n" in sub:
+            cacheable = false
+          if cacheable: fresh[path] = (stamp, fam, sub)
           let sl = sub.toLowerAscii
           let bold = "bold" in sl
           let italic = "italic" in sl or "oblique" in sl
@@ -443,6 +540,26 @@ proc scanFonts() =
                                 italic: italic, path: path)
       except CatchableError:
         discard
+    if changed or fresh.len != old.len: saveScanCache(fresh)
+
+proc fcEscape(family: string): string =
+  ## A family name as a fontconfig pattern (its special characters escaped).
+  for c in family.strip:
+    if c in {'\\', '-', ':', ',', '='}: result.add '\\'
+    result.add c
+
+proc scanFamily(family: string) =
+  ## Makes sure the installed faces of `family` are in `scanned`. With
+  ## fontconfig only that family is asked for (`fc-list <family>`), so the first
+  ## use of a font name does not wait for a listing of every font.
+  if scanDone: return
+  let key = family.strip.toLowerAscii
+  if key in scanFamilies: return
+  scanFamilies.incl key
+  when HaveFontconfig:
+    parseFcLines(runTool("fc-list", ["-f", FcFormat, fcEscape(family)]))
+  else:
+    scanFonts()
 
 proc scanLookup(family: string, bold, italic: bool): SysVariant =
   ## Best file of an installed family: an exact style match with a plain
@@ -466,9 +583,13 @@ proc systemVariant(family: string, bold, italic: bool): SysVariant =
   let key = family.toLowerAscii & (if bold: "|b" else: "|r") & (if italic: "i" else: "")
   if key in sysVariants: return sysVariants[key]
   when HaveFontList:
-    scanFonts()
+    scanFamily(family)
     result = scanLookup(family, bold, italic)
   sysVariants[key] = result
+
+proc systemFontsScanned*(): bool = scanDone
+  ## True once every installed font was read (`systemFontFamilies`, or the
+  ## folder scan of Windows and macOS); a lookup of one family on Linux does not.
 
 proc systemFontFamilies*(): seq[string] =
   ## Family names installed on the system, sorted and without duplicates
@@ -491,6 +612,7 @@ proc refreshSystemFonts*() =
   sysFamilies.setLen 0
   sysFamiliesDone = false
   scanned.setLen 0
+  scanFamilies.clear()
   scanDone = false
   inc fallbackEpoch
 
