@@ -876,6 +876,18 @@ suite "codeedit":
     e.readOnly = true
     check e.replaceAll("BA", "x") == 0
 
+  test "replace all keeps the markers of lines between the matches; one undo step":
+    let f = newShown()
+    let e = f.mk("x a\nb\nc\nd\nx e")
+    e.addMarker(2, mkBookmark)
+    e.addMarker(3, mkBreakpoint)
+    check e.replaceAll("x", "y\nz", SearchOptions()) == 2
+    check e.lines == @["y", "z a", "b", "c", "d", "y", "z e"]
+    check e.markerLines(mkBookmark) == @[3] and e.markerLines(mkBreakpoint) == @[4]
+    e.undo()
+    check e.lines == @["x a", "b", "c", "d", "x e"]
+    check e.markerLines(mkBookmark) == @[2] and e.markerLines(mkBreakpoint) == @[3]
+
   test "find: no matches never changes the selection; wraps around":
     let f = newShown()
     let e = f.mk("a1\nb\na2")

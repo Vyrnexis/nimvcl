@@ -218,27 +218,49 @@ proc replaceMatch*(s: Searcher, m: CodeModel, mt: Match, replacement: string): b
 
 proc replaceAll*(s: Searcher, m: CodeModel, replacement: string,
                  a: CodePos = (0, 0), b: CodePos = (-1, -1)): int =
-  ## Replaces every match inside [a, b] (default: everything) as ONE edit (one
-  ## undo step, one change notification) and returns how many matches were
-  ## replaced. Nothing happens when the model is read-only. The selection is
-  ## left where it was.
+  ## Replaces every match inside [a, b] (default: everything) in one undo
+  ## step and returns how many matches were replaced. The edits are made per
+  ## line, from the last line up, so markers and folds of the lines in between
+  ## (and the lines that did not match) stay where they are. A very large
+  ## replacement (thousands of lines, or many line-adding edits in a big
+  ## document) is made as one edit from the first to the last match instead.
+  ## Nothing happens when the model is read-only. The selection is left where
+  ## it was.
   if s.pattern.len == 0 or m.readOnly: return 0
   let e = if b.line < 0: m.docEnd else: m.snapPos(b)
   let st = m.snapPos(a)
-  var spanStart, lastEnd: CodePos       # from the first match to the end of the last
-  var outText = ""
+  var edits: seq[tuple[a, b: CodePos, text: string]]   # one per line with matches
+  var lineAdding = false
   var lm: LineMatch
   for l in st.line .. e.line:
     let ln = m.line(l)
     var c = if l == st.line: st.col else: 0
+    var first = -1
+    var lastEnd = 0
+    var outText = ""
     while c <= ln.len and s.matchInLine(ln, c, lm):
       if l == e.line and lm.b > e.col: break
-      if result == 0: spanStart = (l, lm.a)
-      else: outText.add m.textBetween(lastEnd, (l, lm.a))
+      if first < 0: first = lm.a
+      else: outText.add ln[lastEnd ..< lm.a]
       outText.add(if s.opts.regex: expandReplacement(lm.rm, ln, replacement)
                   else: replacement)
-      lastEnd = (l, lm.b)
+      lastEnd = lm.b
       inc result
       if lm.b > lm.a: c = lm.b
       else: c = if lm.a >= ln.len: ln.len + 1 else: nextBoundary(ln, lm.a)
-  if result > 0: discard m.replaceInGroup(spanStart, lastEnd, outText)
+    if first >= 0:
+      if not lineAdding and outText.find('\n') >= 0: lineAdding = true
+      edits.add (a: (l, first), b: (l, lastEnd), text: outText)
+  if edits.len == 0: return
+  if edits.len > 5000 or (lineAdding and edits.len.int64 * m.lineCount > 20_000_000):
+    var outText = ""                    # too many edits: one span (each edit moves the lines below)
+    for i, ed in edits:
+      if i > 0: outText.add m.textBetween(edits[i - 1].b, ed.a)
+      outText.add ed.text
+    discard m.replaceInGroup(edits[0].a, edits[^1].b, outText)
+    return
+  m.beginGroup()
+  try:
+    for i in countdown(edits.high, 0):
+      discard m.replaceInGroup(edits[i].a, edits[i].b, edits[i].text)
+  finally: m.endGroup()

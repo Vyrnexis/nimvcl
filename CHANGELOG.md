@@ -50,6 +50,10 @@ between minor versions.
   into the previous one loses its markers, Alt+Up/Down carry the markers of the
   moved lines, and undo/redo put the markers of the edit back. New
   `CodeModel.onSplice` hook (called before every raw replacement). (N13)
+- Replace All edits line by line from the bottom up in one undo step, so
+  markers and collapsed folds of the lines between the matches survive (and
+  undo no longer keeps one huge span). Very large replacements still use one
+  edit. (N14)
 
 ## [0.2.1] - 2026-11-20
 
