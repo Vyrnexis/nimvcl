@@ -20,6 +20,7 @@ between minor versions.
 
 ### Fixed
 
+- `PageControl` / `TabControl`: the tab strip is re-clamped when a sheet is added or removed (a scroll past the last tab showed no tabs), and the mouse wheel over the strip scrolls tabs that do not fit. (N41)
 - A disabled `ToolButton` with an `image` is dimmed like one with an image list icon. (N40)
 - `Action.execute` of an `autoCheck` action (and a click on a checkable client) keeps the toggled `checked` only when a handler ran; the handler still sees the new state. Grouped actions are unchanged. (N39)
 - Menus: a popup menu taller than the display is capped to it and scrolls (mouse wheel, arrow keys reveal the hot row); press on a menu bar item, drag to a row and release there activates the row. (N38)

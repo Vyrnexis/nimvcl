@@ -563,6 +563,29 @@ suite "standard controls":
     check pc.firstVisibleTab == prev - 1
     Application.processMessages()
 
+  test "pagecontrol: the wheel scrolls the strip; removing sheets re-clamps it":
+    let f = newShown(300, 200)
+    let pc = newPageControl(f)
+    pc.align = alClient
+    var shs: seq[TabSheet]
+    for i in 1 .. 10: shs.add newTabSheet(pc, "Tab number " & $i)
+    lay f
+    check pc.overflowing
+    f.moveTo(pc.fx(20), pc.fy(10))                    # over the strip
+    f.wheel(pc.fx(20), pc.fy(10), -1)
+    check pc.firstVisibleTab == 1
+    f.wheel(pc.fx(20), pc.fy(10), 1)
+    check pc.firstVisibleTab == 0
+    pc.activePageIndex = 9
+    let first = pc.firstVisibleTab
+    check first > 5
+    for i in 1 ..< 8: shs[i].free()                   # not the active sheet
+    lay f
+    discard f.paintIfDirty()
+    check pc.pageCount == 3
+    check pc.tabRect(pc.activePageIndex).w > 0
+    check pc.tabRect(pc.activePageIndex).right <= pc.width
+
   test "pagecontrol: hit test follows captions, hidden tabs and removals":
     let f = newShown(700, 200)
     let pc = newPageControl(f)

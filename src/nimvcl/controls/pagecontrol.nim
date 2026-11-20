@@ -347,6 +347,21 @@ method doKeyDown*(t: TabBase, key: var Key, shift: ShiftState) =
   else: handled = false
   if handled: key = Key(0)
 
+method doMouseWheel*(t: TabBase, shift: ShiftState, dx, dy: float32,
+                     handled: var bool) =
+  ## Over the strip, the wheel scrolls tabs that do not fit.
+  procCall doMouseWheel(Control(t), shift, dx, dy, handled)
+  if handled or t.fHotTab == -1 or t.fHideTabs: return
+  t.refreshMetrics()
+  t.normalizeFirst()
+  if not t.isOverflowing: return
+  let d = if dy != 0: dy else: dx
+  if d > 0 and t.fFirst > 0: dec t.fFirst
+  elif d < 0 and t.tabsRight > t.stripRight: inc t.fFirst
+  else: return
+  t.invalidate()
+  handled = true
+
 method inheritedColor*(t: TabBase): Color =
   if t.fFillBody: t.theme.surface else: procCall inheritedColor(Control(t))
 
@@ -632,7 +647,10 @@ proc ensureHook(p: PageControl) =
 
 method childBoundsChanged*(p: PageControl, child: Control) =
   procCall childBoundsChanged(Container(p), child)
-  if child of TabSheet: p.syncPages()   # a sheet was added / removed
+  if child of TabSheet:
+    p.syncPages()   # a sheet was added / removed
+    p.fEnsure = true    # the strip scroll may now be past the last tab
+    p.invalidate()
 
 method visibilityChanged*(p: PageControl) =
   p.ensureHook()                    # fires when inserted into a form/host tree
