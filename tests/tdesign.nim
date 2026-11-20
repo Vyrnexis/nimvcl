@@ -3,6 +3,7 @@
 
 import std/[unittest, os, strutils]
 import nimvcl
+import nimvcl/dsl/props_std
 
 proc feed(f: Form, kind: EventKind, x = 0'f32, y = 0'f32,
           button = mbLeft, clicks = 1, shift: ShiftState = {}) =
@@ -991,4 +992,81 @@ suite "unique names (N6)":
     check x.d.uniqueName("Timer") == "Timer2"
     x.a.name = "Button_1"                    # the same Nim identifier as Button1
     check x.d.uniqueName("Button") == "Button2"
+    x.done
+
+suite "designer: undoable property changes":
+  test "setProps records old and new values, one step for several targets":
+    let x = build()
+    var seen: seq[string]
+    var mods = 0
+    x.d.onModified = proc(d: FormDesigner) = inc mods
+    x.d.onPropertyChanged = proc(d: FormDesigner, t: Obj, prop: string, o, n: PropValue) =
+      seen.add objectName(t) & "." & prop & ":" & o.s & ">" & n.s
+    x.d.setProps([Obj(x.a), Obj(x.b)], "caption", pvString("Go"))
+    check x.a.caption == "Go" and x.b.caption == "Go"
+    check seen == @["A.caption:A>Go", "B.caption:B>Go"]
+    check mods == 1 and x.d.canUndo
+    x.d.setProp(x.c, "caption", pvString("C"))     # no change: nothing recorded
+    check mods == 1
+    seen.setLen 0
+    check x.d.undo()
+    check x.a.caption == "A" and x.b.caption == "B"
+    check seen == @["B.caption:Go>B", "A.caption:Go>A"]     # undone in reverse
+    check x.d.redo()
+    check x.a.caption == "Go" and x.b.caption == "Go"
+    # a property of a control that is not a Button is skipped, not an error
+    x.d.setProps([Obj(x.e), Obj(x.a)], "caption", pvString("Z"))
+    check x.a.caption == "Z"
+    x.done
+
+  test "a property change and a move undo in order; the selection follows":
+    let x = build()
+    x.d.select(x.a)
+    x.d.nudge(8, 0)
+    x.d.setProp(x.a, "left", pvFloat(100))
+    check x.a.left == 100
+    x.d.select(x.b)
+    check x.d.undo()
+    check x.a.left == 28 and x.d.selection == @[Control(x.a)]
+    check x.d.undo()
+    check x.a.left == 20
+    x.done
+
+  test "beginGroup merges several changes into one step":
+    let x = build()
+    x.d.beginGroup()
+    x.d.setProp(x.a, "caption", pvString("1"))
+    x.d.setProp(x.b, "caption", pvString("2"))
+    x.d.beginGroup()
+    x.d.setProp(x.c, "caption", pvString("3"))
+    x.d.endGroup()
+    x.d.endGroup()
+    check x.d.undo()
+    check x.a.caption == "A" and x.b.caption == "B" and x.c.caption == "C"
+    check not x.d.undo()
+    x.done
+
+  test "sizeSelection sets an exact size in one step":
+    let x = build()
+    x.d.select([Control(x.a), Control(x.b)])
+    x.d.sizeSelection(100, -1)
+    check x.a.width == 100 and x.b.width == 100 and x.a.height == 24
+    x.d.sizeSelection(-1, 31)
+    check x.a.height == 31 and x.b.height == 31 and x.a.width == 100
+    check x.d.undo()
+    check x.a.height == 24 and x.a.width == 100
+    check x.d.undo()
+    check x.a.width == 80 and x.b.width == 80
+    check x.d.redo()
+    check x.a.width == 100
+    x.done
+
+  test "setTabOrder is one undo step":
+    let x = build()
+    x.d.setTabOrder([Control(x.c), Control(x.b), Control(x.a)])
+    check x.c.tabOrder == 0 and x.b.tabOrder == 1 and x.a.tabOrder == 2
+    check x.d.undo()
+    check x.a.tabOrder == 0 and x.b.tabOrder == 0 and x.c.tabOrder == 0
+    check x.d.redo()
+    check x.a.tabOrder == 2 and x.c.tabOrder == 0
     x.done

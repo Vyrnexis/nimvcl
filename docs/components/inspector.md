@@ -124,6 +124,7 @@ are the object's child nodes in the form file.
 | `knownHandlers` | `seq[string]` | Handler names offered by the event editors |
 | `splitX` | float32 | Width of the name column |
 | `targets` | `seq[Obj]` | What is inspected (read-only) |
+| `designer` | `FormDesigner` | When set, edits go through `designer.setProps`: each edit (all targets together) is one undo step of the designer. Default nil: properties are set directly |
 | `lastError` | string | Why the last edit was rejected ("" when fine); shown at the bottom of the inspector until the next edit, `inspect` or Esc |
 
 ## Events
@@ -132,6 +133,7 @@ are the object's child nodes in the form file.
 |---|---|
 | `onPropertyChanging(sender, target: Obj, prop: string, newValue: PropValue, accept: var bool, message: var string)` | Before a value is applied, for each target. Set `accept = false` to refuse: nothing changes (with several targets one refusal stops the whole edit), `message` (or a default text) becomes `lastError` and shows in the error line, and a typed edit stays open. Also asked before a handler name is created by double click. `prop` is the dotted name (`font.size`) |
 | `onPropertyChanged(sender, target: Obj, prop: string)` | A value was changed by the user (after it was applied) |
+| `onPropertyChangedEx(sender, target: Obj, prop: string, oldValue, newValue: PropValue)` | Like `onPropertyChanged`, with the value before the edit and the one the property holds now (called first) |
 | `onCreateHandler(sender, target: Obj, event: string): string` | Double click on an event row without a handler: return the name of a new handler (the application writes the stub), or "" to do nothing. When nil, `<Name><Event>` is used |
 | `onEditExtra(sender, target: Obj, prop: string)` | The "..." button of a string list, image, image list or collection was pressed |
 | `onGetChoices(sender, target: Obj, prop: string): seq[Obj]` | The objects an object-reference property offers (filtered by the property's class). When nil, the named objects of the target's form are found by walking up from the target; set it when the target lives inside a design surface |

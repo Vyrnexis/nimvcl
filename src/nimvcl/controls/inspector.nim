@@ -44,6 +44,7 @@
 import std/[strutils, algorithm, sets, math]
 import ./common, ./scrolling, ./edit, ./combobox, ./listbox, ./viewsupport
 import ../core/form
+import ./designsurface
 import ../graphics/font
 import ../graphics/image
 import ../dsl/props_std
@@ -72,6 +73,8 @@ type
   EditKind = enum ekNone, ekText, ekCombo
 
   PropertyChangedEvent* = proc(sender: Control, target: Obj, prop: string)
+  PropertyChangedExEvent* = proc(sender: Control, target: Obj, prop: string,
+                                 oldValue, newValue: PropValue)
   PropertyChangingEvent* = proc(sender: Control, target: Obj, prop: string,
                                 newValue: PropValue, accept: var bool,
                                 message: var string)
@@ -105,6 +108,14 @@ type
     fHandlers: seq[string]
     onPropertyChanged*: PropertyChangedEvent
       ## A value was changed through the inspector (after it was applied).
+    onPropertyChangedEx*: PropertyChangedExEvent
+      ## Like `onPropertyChanged`, also with the value before the edit and the
+      ## one the property holds now (called right before `onPropertyChanged`).
+    designer*: FormDesigner
+      ## When set, edits go through `designer.setProps` so they are undoable
+      ## (one step per edit, several targets one step) and the designer's
+      ## `onModified` / `onPropertyChanged` fire. Unset: the property is set
+      ## directly.
     onPropertyChanging*: PropertyChangingEvent
       ## Called for each target before an edit is applied. Set `accept = false`
       ## to refuse it: the old value stays and `message` (a default text when
@@ -507,6 +518,16 @@ proc vetoed(ins: ObjectInspector, t: Obj, name: string, v: PropValue): bool =
   ins.invalidate()
   true
 
+proc assign(ins: ObjectInspector, t: Obj, q: PropInfo, name: string, v: PropValue) =
+  ## Sets one target (through the designer when there is one) and reports it.
+  let wantOld = ins.onPropertyChangedEx != nil
+  let old = if wantOld: q.get(t) else: PropValue()
+  if ins.designer != nil: ins.designer.setProp(t, name, v)
+  else: q.set(t, v)
+  ins.dropValueCache()
+  if wantOld: ins.onPropertyChangedEx(ins, t, name, old, q.get(t))
+  if ins.onPropertyChanged != nil: ins.onPropertyChanged(ins, t, name)
+
 proc applyValue(ins: ObjectInspector, row: Row, v: PropValue): bool =
   ## Sets `v` on every target; false (and `lastError`) when one refuses. Each
   ## target that took the value is reported through `onPropertyChanged` at once,
@@ -533,16 +554,18 @@ proc applyValue(ins: ObjectInspector, row: Row, v: PropValue): bool =
     if q != nil and ins.vetoed(t, name, v): return false
   ins.fError = ""
   result = true
-  for t in targets:
-    let q = infoFor(t, name)
-    if q == nil: continue
-    try: q.set(t, v)
-    except CatchableError as e:
-      ins.fError = e.msg
-      result = false
-      break
-    ins.dropValueCache()
-    if ins.onPropertyChanged != nil: ins.onPropertyChanged(ins, t, name)
+  if ins.designer != nil: ins.designer.beginGroup()   # all targets: one undo step
+  try:
+    for t in targets:
+      let q = infoFor(t, name)
+      if q == nil: continue
+      try: ins.assign(t, q, name, v)
+      except CatchableError as e:
+        ins.fError = e.msg
+        result = false
+        break
+  finally:
+    if ins.designer != nil: ins.designer.endGroup()
   ins.dropValueCache()
   ins.invalidate()
 
@@ -1094,9 +1117,7 @@ proc handleDouble(ins: ObjectInspector, i: int) =
       else: name = defaultHandlerName(t, q.name)
       if name.len == 0: continue
       if ins.vetoed(t, q.name, pvEvent(name)): continue
-      try:
-        q.set(t, pvEvent(name))
-        if ins.onPropertyChanged != nil: ins.onPropertyChanged(ins, t, q.name)
+      try: ins.assign(t, q, q.name, pvEvent(name))
       except CatchableError as e: ins.fError = e.msg
     ins.dropValueCache()
     ins.invalidate()

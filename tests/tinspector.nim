@@ -615,3 +615,32 @@ suite "ObjectInspector editors":
 # Close the windows the rigs left open, so no render context is freed after SDL has quit.
 for f in openForms(): f.freeWindow()
 Application.shutdown()
+
+suite "inspector with a designer":
+  test "edits are undoable, one step per edit; onPropertyChangedEx has the old value":
+    let r = rig()
+    let host = newForm(nil, 300, 200)
+    let a = newButton(host, "A", 10, 10, 80, 24)
+    let b = newButton(host, "B", 10, 50, 80, 24)
+    let d = newFormDesigner(host, attachNow = false)
+    var mods = 0
+    d.onModified = proc(x: FormDesigner) = inc mods
+    var log: seq[string]
+    r.ins.designer = d
+    r.ins.onPropertyChangedEx = proc(s: Control, t: Obj, prop: string, o, n: PropValue) =
+      log.add prop & ":" & o.s & ">" & n.s
+    r.ins.inspect([Obj(a), Obj(b)])
+    check r.ins.setValue("caption", pvString("X"))
+    check a.caption == "X" and b.caption == "X"
+    check mods == 1
+    check log == @["caption:A>X", "caption:B>X"]
+    check r.changes.len == 2
+    check d.undo()
+    check a.caption == "A" and b.caption == "B"
+    check not d.undo()
+    # without a designer the property is set directly
+    r.ins.designer = nil
+    check r.ins.setValue("caption", pvString("Y"))
+    check a.caption == "Y" and not d.canUndo
+    host.freeWindow()
+    r.f.freeWindow()

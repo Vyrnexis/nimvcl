@@ -174,6 +174,10 @@ For menus and toolbars:
 | `spaceEvenly(horizontal)` | Equal gaps between three or more controls |
 | `centerInParent(horizontal, vertical)` | Centre each selected control |
 | `nudge(dx, dy, resize)` | What the arrow keys do |
+| `sizeSelection(width, height)` | An exact size for each selected control in one undo step (a negative value leaves that dimension; aligned controls take only their free dimension) |
+| `setTabOrder(controls)` | `tabOrder` 0, 1, 2... in the order given, one undo step |
+| `setProps(targets, name, value)`, `setProp(target, name, value)` | Set a registered property (`dsl/props`) of the targets as one undo step that remembers the old and new values; `onPropertyChanged(sender, target, prop, oldValue, newValue)` fires for each target that changed, also when the step is undone or redone. Raises what the setter raises |
+| `beginGroup()`, `endGroup()` | Everything recorded in between (nestable) is one undo step |
 | `deleteSelection()` | What Delete does (returns false when vetoed) |
 | `select(c)`, `select(list)`, `toggle(c)`, `clearSelection()` | Selection |
 | `selectParent()` | What Esc does |

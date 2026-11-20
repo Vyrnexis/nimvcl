@@ -62,7 +62,8 @@ import ./common, ./panel, ./scrolling, ./scrollbar, ./scrollbox, ./pagecontrol
 import ../graphics/image
 import ../core/design
 from ../dsl/nfmsyntax import isReservedFieldName
-export design
+from ../dsl/props import Obj, PropValue, PropKind, pkObject, PropInfo, classOf, findProp, getProp, setProp, `==`
+export design, Obj, PropValue
 
 type
   DesignHandle* = enum
@@ -80,6 +81,8 @@ type
 
   SelectionEvent* = proc(sender: FormDesigner, selection: seq[Control])
   DesignNotify* = proc(sender: FormDesigner)
+  DesignPropertyEvent* = proc(sender: FormDesigner, target: Obj, prop: string,
+                              oldValue, newValue: PropValue)
   DesignControlEvent* = proc(sender: FormDesigner, c: Control)
   DesignControlsEvent* = proc(sender: FormDesigner, controls: seq[Control])
   DesignDeletingEvent* = proc(sender: FormDesigner, controls: seq[Control],
@@ -106,9 +109,18 @@ type
     before, after: Placement
     snap: string
     tree: seq[Control]          ## the deleted control and its descendants (preorder), to remap history on restore
+    hasTab: bool                ## a tab order change: `tabBefore` / `tabAfter`
+    tabBefore, tabAfter: int
+
+  PropEdit = object
+    ## One property of one object changed through `setProps`.
+    target: Obj
+    name: string
+    before, after: PropValue
 
   DesignOp = ref object
     items: seq[OpItem]
+    props: seq[PropEdit]
 
   FormDesigner* = ref object of DesignHook
     grid*: float32              ## grid size in px (default 8; < 2 = no snapping)
@@ -125,6 +137,9 @@ type
     restore*: RestoreHook
     onSelectionChanged*: SelectionEvent
     onModified*: DesignNotify
+    onPropertyChanged*: DesignPropertyEvent
+      ## `setProps` / `setProp` changed a property, and so did undoing or
+      ## redoing such a step (the old and new value of that moment).
     onCreated*: DesignControlEvent
     onDeleting*: DesignDeletingEvent
     onDeleted*: DesignControlsEvent
@@ -153,6 +168,8 @@ type
     fCreating: string
     fCreateTarget: Container
     fUndo, fRedo: seq[DesignOp]
+    fGroup: DesignOp            ## the step `beginGroup` collects changes into
+    fGroupDepth: int
     fLastOver: seq[RectF]
     fAttached: bool
     fShowGrid, fShowHidden: bool
@@ -475,6 +492,12 @@ proc replaceRef(d: FormDesigner, op: DesignOp, old, nw: Control) =
         if oldBox != nil and newBox != nil:
           if it.before.parent == oldBox: it.before.parent = newBox
           if it.after.parent == oldBox: it.after.parent = newBox
+  for st in [d.fUndo, d.fRedo, @[op]]:
+    for o in st:
+      for pe in o.props.mitems:
+        if pe.target == RootRef(old): pe.target = nw
+        if pe.before.kind == pkObject and pe.before.obj == RootRef(old): pe.before.obj = nw
+        if pe.after.kind == pkObject and pe.after.obj == RootRef(old): pe.after.obj = nw
   for c in d.fSel.mitems:
     if c == old: c = nw
 
@@ -538,7 +561,11 @@ proc modified(d: FormDesigner) =
   if d.onModified != nil: d.onModified(d)
 
 proc record(d: FormDesigner, op: DesignOp) =
-  if op.items.len == 0: return
+  if op.items.len == 0 and op.props.len == 0: return
+  if d.fGroup != nil:                  # inside beginGroup: one step in the end
+    d.fGroup.items.add op.items
+    d.fGroup.props.add op.props
+    return
   d.fUndo.add op
   if d.undoLimit > 0 and d.fUndo.len > d.undoLimit: d.fUndo.delete 0
   d.fRedo.setLen 0
@@ -561,6 +588,8 @@ proc afterHistory(d: FormDesigner, op: DesignOp, undone: bool) =
   var sel: seq[Control]
   for it in op.items:
     if (undone and it.hasBefore) or (not undone and it.hasAfter): sel.add it.c
+  for pe in op.props:
+    if pe.target of Control and Control(pe.target) notin sel: sel.add Control(pe.target)
   d.prune()
   d.select(sel)
   d.refresh()
@@ -573,6 +602,16 @@ proc moved(c: Control, expect: Placement): bool =
   (c.isTile or (c.align == alNone and c.anchors == {akLeft, akTop})) and
     not sameRect(rectF(c.left, c.top, c.width, c.height), expect.bounds)
 
+proc applyEdit(d: FormDesigner, pe: PropEdit, undone: bool) =
+  ## Sets the value `undone` asks for (the old one when undoing) and reports it.
+  let ci = classOf(pe.target)
+  let q = if ci == nil: nil else: findProp(ci, pe.name)
+  if q == nil: return
+  let (cur, nv) = if undone: (pe.after, pe.before) else: (pe.before, pe.after)
+  try: q.set(pe.target, nv)
+  except CatchableError: return
+  if d.onPropertyChanged != nil: d.onPropertyChanged(d, pe.target, pe.name, cur, nv)
+
 proc undo*(d: FormDesigner): bool =
   ## Reverts the last operation. False when there is nothing to undo.
   if d.fUndo.len == 0: return false
@@ -581,9 +620,11 @@ proc undo*(d: FormDesigner): bool =
     let it = op.items[i]
     if it.hasBefore:
       if not it.hasAfter: d.attachItem(op, i, it.before)
+      elif it.hasTab: it.c.tabOrder = it.tabBefore
       elif not it.c.moved(it.after): d.applyPlacement(it.c, it.before)
     else:
       d.detachItem(op, i)
+  for i in countdown(op.props.high, 0): d.applyEdit(op.props[i], true)
   d.fRedo.add op
   d.afterHistory(op, true)
   true
@@ -595,12 +636,57 @@ proc redo*(d: FormDesigner): bool =
     let it = op.items[i]
     if it.hasAfter:
       if not it.hasBefore: d.attachItem(op, i, it.after)
+      elif it.hasTab: it.c.tabOrder = it.tabAfter
       elif not it.c.moved(it.before): d.applyPlacement(it.c, it.after)
     else:
       d.detachItem(op, i)
+  for pe in op.props: d.applyEdit(pe, false)
   d.fUndo.add op
   d.afterHistory(op, false)
   true
+
+proc beginGroup*(d: FormDesigner) =
+  ## Changes made until the matching `endGroup` (moves, `setProps`, commands)
+  ## become ONE undo step. Nestable.
+  if d.fGroupDepth == 0: d.fGroup = DesignOp()
+  inc d.fGroupDepth
+
+proc endGroup*(d: FormDesigner) =
+  if d.fGroupDepth == 0: return
+  dec d.fGroupDepth
+  if d.fGroupDepth == 0:
+    let op = d.fGroup
+    d.fGroup = nil
+    d.record op
+
+proc setProps*(d: FormDesigner, targets: openArray[Obj], name: string,
+               value: PropValue) =
+  ## Sets the registered property `name` of every target (the objects that
+  ## have it) to `value` and records one undo step with the old and the new
+  ## values (what the setter stored counts as new, so a clamped value is
+  ## redone as it was). `onPropertyChanged` is called for each target whose
+  ## value changed, then `onModified` once. A setter that raises stops the
+  ## loop and the error goes on; the targets set before it stay set and are
+  ## in the step. Geometry the properties changed is picked up by the overlay.
+  d.beginGroup()
+  try:
+    for t in targets:
+      let ci = classOf(t)
+      let q = if ci == nil: nil else: findProp(ci, name)
+      if q == nil: continue
+      let old = q.get(t)
+      q.set(t, value)
+      let nv = q.get(t)
+      if old == nv: continue
+      d.record DesignOp(props: @[PropEdit(target: t, name: name, before: old, after: nv)])
+      if d.onPropertyChanged != nil: d.onPropertyChanged(d, t, name, old, nv)
+  finally:
+    d.endGroup()
+    d.refresh()
+
+proc setProp*(d: FormDesigner, target: Obj, name: string, value: PropValue) =
+  ## `setProps` for one object.
+  d.setProps([target], name, value)
 
 # ------------------------------------------------------------ non-visuals
 
@@ -697,6 +783,31 @@ proc nudge*(d: FormDesigner, dx, dy: float32, resize = false) =
       c.setLocal(c.left, c.top, w, h)
     elif d.movable(c):
       c.setBounds(c.left + dx, c.top + dy, c.width, c.height))
+
+proc sizeSelection*(d: FormDesigner, width = -1'f32, height = -1'f32) =
+  ## Gives each selected control this exact size (a negative value leaves that
+  ## dimension), as one undo step. Like `nudge` with `resize`, aligned controls
+  ## only take the dimension along their free edge, `alClient` ones none; the
+  ## size honours `constraints` and `minSize`.
+  let sel = d.sameParentSel().filterIt(not it.isTile)
+  d.applyAll(sel, proc(c: Control, i: int) =
+    let freeW = c.align in {alNone, alCustom, alLeft, alRight}
+    let freeH = c.align in {alNone, alCustom, alTop, alBottom}
+    let (w, h) = d.sizeOk(c, if width >= 0 and freeW: width else: c.width,
+                          if height >= 0 and freeH: height else: c.height)
+    c.setLocal(c.left, c.top, w, h))
+
+proc setTabOrder*(d: FormDesigner, controls: openArray[Control]) =
+  ## Gives `controls` the tab orders 0, 1, 2... in the order passed, as one
+  ## undo step (a control that already has its number is left out).
+  let op = DesignOp()
+  for i, c in controls:
+    if c.tabOrder == i: continue
+    let pl = d.placementOf(c)
+    op.items.add OpItem(c: c, hasBefore: true, hasAfter: true, before: pl,
+                        after: pl, hasTab: true, tabBefore: c.tabOrder, tabAfter: i)
+    c.tabOrder = i
+  d.record op
 
 proc bringToFront*(d: FormDesigner) =
   ## Raises the selection above its siblings (one undo step).
