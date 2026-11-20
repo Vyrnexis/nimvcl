@@ -47,7 +47,7 @@ import ../core/form
 import ../graphics/font
 import ../graphics/image
 import ../dsl/props_std
-from ../dsl/nfmsyntax import formatNumber
+from ../dsl/nfmsyntax import formatNumber, validNfmName
 export props_std
 
 type
@@ -513,6 +513,14 @@ proc applyValue(ins: ObjectInspector, row: Row, v: PropValue): bool =
   ## so a failure on a later one does not hide the change of the earlier ones.
   let targets = ins.fTargets
   let name = row.info.name
+  # a name the form file cannot hold (`end`, `a b`, empty...) is refused here, whoever asks
+  if (name == "name" and v.kind == pkString and not validNfmName(v.s)) or
+     (v.kind == pkEvent and v.handler.len > 0 and not validNfmName(v.handler)):
+    let bad = if v.kind == pkEvent: v.handler else: v.s
+    ins.fError = "`" & bad & "` is not a valid " &
+                 (if v.kind == pkEvent: "handler" else: "component") & " name"
+    ins.invalidate()
+    return false
   for t in targets:
     let q = infoFor(t, name)
     if q != nil and ins.vetoed(t, name, v): return false
@@ -570,11 +578,8 @@ proc parseText(info: PropInfo, text: string, v: var PropValue): string =
     try: v = pvColor(parseColor(t))
     except ValueError: return "`" & t & "` is not a colour (#rrggbb or a palette name)"
   of pkEvent:
-    if t.len > 0 and not (t[0] in {'a'..'z', 'A'..'Z', '_'}):
+    if t.len > 0 and not validNfmName(t):
       return "`" & t & "` is not a valid handler name"
-    for c in t:
-      if not (c in {'a'..'z', 'A'..'Z', '_', '0'..'9'}):
-        return "`" & t & "` is not a valid handler name"
     v = pvEvent(t)
   else: return "this property is not edited as text"
 

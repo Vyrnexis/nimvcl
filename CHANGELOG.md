@@ -30,6 +30,9 @@ between minor versions.
   identifiers (`Button_1` is `Button1`), so new names cannot collide. (N6)
 - The inspector no longer lists `name` when several objects are selected
   (they would all get the same name and the form file would not load). (N5)
+- The inspector refuses a component name or a handler name the form file cannot
+  hold (`end`, `object`, `inherited`, `true`, `false`, spaces, a leading digit;
+  an empty component name). New `validNfmName` in `nimvcl/dsl/nfmsyntax`. (N7)
 
 ## [0.2.1] - 2026-11-20
 

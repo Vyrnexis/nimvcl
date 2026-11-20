@@ -69,6 +69,15 @@ proc fail(lx: Lexer, line, col: int, msg: string) {.noreturn.} =
 proc isIdentStart(c: char): bool = c in {'a'..'z', 'A'..'Z', '_'}
 proc isIdentChar(c: char): bool = c in {'a'..'z', 'A'..'Z', '_', '0'..'9'}
 
+proc validNfmName*(s: string): bool =
+  ## True when `s` can be written as an object or handler name in a form file:
+  ## letters, digits and `_`, not starting with a digit, and not one of the
+  ## words the format reserves (`end`, `object`, `inherited`, `true`, `false`).
+  if s.len == 0 or not isIdentStart(s[0]): return false
+  for c in s:
+    if not isIdentChar(c): return false
+  s notin ["end", "object", "inherited", "true", "false"]
+
 proc cur(lx: Lexer): char =
   if lx.pos < lx.src.len: lx.src[lx.pos] else: '\0'
 

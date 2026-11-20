@@ -3,6 +3,7 @@
 import std/[unittest, strutils]
 import nimvcl
 import nimvcl/controls/inspector
+from nimvcl/dsl/nfmsyntax import validNfmName
 
 proc feed(f: Form, kind: EventKind, x = 0'f32, y = 0'f32, button = mbLeft,
           clicks = 1, shift: ShiftState = {}) =
@@ -525,6 +526,23 @@ suite "ObjectInspector editors":
     check r.ins.indexOfProp("name") < 0
     check r.ins.indexOfProp("caption") >= 0
 
+  test "names the form file cannot hold are rejected (N7)":
+    let r = rig()
+    let b = r.mkButton("keep")
+    r.ins.inspect(b)
+    for bad in ["end", "object", "true", "a b", "1x", ""]:
+      check not r.ins.setValue("name", pvString(bad))
+      check "valid" in r.ins.lastError
+      check b.name == "keep"
+    check r.ins.setValue("name", pvString("fine_1"))
+    check b.name == "fine_1"
+    for bad in ["inherited", "false", "on click"]:
+      check not r.ins.setValue("onClick", pvEvent(bad))
+      check "handler name" in r.ins.lastError
+    check r.ins.setValue("onClick", pvEvent(""))
+    check r.ins.setValue("onClick", pvEvent("okClick"))
+    check validNfmName("okClick") and not validNfmName("end")
+
   test "numbers that are not finite are rejected":
     let r = rig()
     let b = r.mkButton()
@@ -583,3 +601,7 @@ suite "ObjectInspector editors":
     r.ins.refresh()
     check not r.ins.overridden("caption")
     r.f.settle                             # painting with the predicate set works
+
+# Close the windows the rigs left open, so no render context is freed after SDL has quit.
+for f in openForms(): f.freeWindow()
+Application.shutdown()
