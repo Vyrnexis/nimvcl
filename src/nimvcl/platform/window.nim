@@ -115,6 +115,18 @@ proc setIcon*(w: PlatformWindow, img: Image) =
   if w.window != nil and img != nil:
     discard setWindowIcon(w.window, img.surface)
 
+proc setMinSize*(w: PlatformWindow, lw, lh: float32) =
+  ## The smallest size the window manager lets the user resize to (logical
+  ## units; 0 = no limit).
+  let s = w.coordScale
+  discard setWindowMinimumSize(w.window, cint(max(lw, 0) * s), cint(max(lh, 0) * s))
+
+proc setMaxSize*(w: PlatformWindow, lw, lh: float32) =
+  ## The largest size the window manager lets the user resize to (logical
+  ## units; 0 = no limit).
+  let s = w.coordScale
+  discard setWindowMaximumSize(w.window, cint(max(lw, 0) * s), cint(max(lh, 0) * s))
+
 proc show*(w: PlatformWindow) = discard showWindow(w.window)
 proc hide*(w: PlatformWindow) = discard hideWindow(w.window)
 proc raiseWindow*(w: PlatformWindow) = discard sdl3.raiseWindow(w.window)

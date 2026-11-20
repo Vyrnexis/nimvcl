@@ -601,3 +601,20 @@ suite "form icon and menu":
     check f.menu == other and mm.parent == nil
     f.menu = nil
     check f.menu == nil
+
+suite "window size limits":
+  test "constraints reach the OS window when it exists and when it is created":
+    var a, b: cint
+    let f = newForm(nil, 300, 200)
+    f.constraints = constraints(100, 80, 500, 400)   # no window yet
+    f.show()
+    discard getWindowMinimumSize(f.win.window, a, b)
+    check (a, b) == (cint(100), cint(80))
+    discard getWindowMaximumSize(f.win.window, a, b)
+    check (a, b) == (cint(500), cint(400))
+    f.constraints = constraints(150, 90)
+    discard getWindowMinimumSize(f.win.window, a, b)
+    check (a, b) == (cint(150), cint(90))
+    discard getWindowMaximumSize(f.win.window, a, b)
+    check (a, b) == (cint(0), cint(0))
+    f.freeWindow()

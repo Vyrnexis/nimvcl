@@ -210,6 +210,16 @@ proc applyPosition(f: Form) =
     else: w.centerOnScreen()
   of poDesigned: w.setPosition(int(f.left), int(f.top))
 
+proc applyConstraints(f: Form) =
+  let w = f.fUi.win
+  if w == nil: return
+  let k = f.constraints
+  w.setMinSize(k.minWidth, k.minHeight)
+  w.setMaxSize(k.maxWidth, k.maxHeight)
+
+method constraintsChanged*(f: Form) =
+  f.applyConstraints()
+
 proc ensureWindow(f: Form) =
   if f.fUi.win != nil: return
   initPlatform()
@@ -225,6 +235,7 @@ proc ensureWindow(f: Form) =
     raise
   if f.fBorderStyle == bsSingle: w.setResizable(false)
   if f.fIcon != nil: w.setIcon(f.fIcon)
+  f.applyConstraints()
   f.fUi.useBackbuffer = true      # partial repaints into a persistent target
   gForms.add f
   f.fUi.dirty = true

@@ -598,9 +598,14 @@ proc `padding=`*(c: Container, v: Spacing) =
   markLayout(c)
   c.invalidate()
 
+method constraintsChanged*(c: Control) {.base.} = discard
+  ## Called after `constraints=` changed the value (a Form pushes the limits
+  ## to its window).
+
 proc `constraints=`*(c: Control, v: SizeConstraints) =
   if v == c.fConstraints: return
   c.fConstraints = v
+  c.constraintsChanged()
   c.setBounds(c.fLeft, c.fTop, c.fWidth, c.fHeight)  # re-clamp
   c.requestLayout()
 
