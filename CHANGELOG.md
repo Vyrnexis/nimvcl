@@ -7,6 +7,10 @@ between minor versions.
 
 ## Unreleased
 
+### Added
+
+- `ToolBar` overflow: buttons that do not fit the width are hidden (separators at the boundary too) and a chevron (>>) at the right end opens a popup menu with them (caption, else hint; icon from the bar's `images`, enabled and checked state); choosing an entry clicks the button, so `onClick` and linked actions run as for a click. The set follows resizes and button changes. `ToolBar.overflowMenu` (default on, registered in `props_std`) turns it off (buttons are clipped as before); `overflowCount`, `showOverflowMenu` and `overflowPopup` for code.
+
 ## [0.3.0] - 2026-11-21
 
 ### Added
