@@ -305,7 +305,12 @@ proc `caretPos=`*(e: Edit, v: int) = e.model.setCaret(v); e.touched()
 proc select*(e: Edit, start, length: int) = e.model.select(start, length); e.touched()
 proc selectAll*(e: Edit) = e.model.selectAll(); e.touched()
 proc clearSelection*(e: Edit) = e.model.setCaret(e.model.caret); e.touched()
-proc clear*(e: Edit) = e.model.clear()
+proc clear*(e: Edit) =
+  ## Removes all text (one undo step), also when `readOnly` (as in Delphi).
+  let ro = e.model.readOnly
+  e.model.readOnly = false
+  e.model.clear()
+  e.model.readOnly = ro
 
 proc canUndo*(e: Edit): bool = e.model.canUndo
 proc canRedo*(e: Edit): bool = e.model.canRedo

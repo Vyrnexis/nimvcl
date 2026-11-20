@@ -316,6 +316,13 @@ suite "edit":
     e.readOnly = false
     check e.wantsTextInput
 
+  test "clear works on a read-only edit":
+    let f = newShown()
+    let e = f.mkEdit("fixed text")
+    e.readOnly = true
+    e.clear()
+    check e.text == "" and e.readOnly
+
   test "password edits never copy or cut":
     let f = newShown()
     let e = f.mkEdit("secret")

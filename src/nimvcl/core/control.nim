@@ -599,6 +599,12 @@ proc `padding=`*(c: Container, v: Spacing) =
   c.invalidate()
 
 method constraintsChanged*(c: Control) {.base.} = discard
+method parentChanged*(c: Control) {.base.} =
+  ## `c` was inserted into a container (`insertControl`). Base: nothing.
+  discard
+method enabledChanged*(c: Control) {.base.} =
+  ## `enabled` of `c` itself was toggled. Base: nothing.
+  discard
   ## Called after `constraints=` changed the value (a Form pushes the limits
   ## to its window).
 
@@ -645,6 +651,7 @@ proc `enabled=`*(c: Control, v: bool) =
   c.fEnabled = v
   let h = c.host
   if not v and h != nil: h.controlLost(c)
+  c.enabledChanged()
   c.invalidate()
 
 func caption*(c: Control): string = c.fCaption
@@ -777,6 +784,7 @@ proc insertControl*(c: Container, child: Control, index = -1) =
   c.fChildren.insert(child, at)
   child.fParent = c
   child.recordDesign()     # added later: positions are relative to NOW
+  child.parentChanged()
   markLayout(c)
   c.invalidate(child.visualRect)
   c.childBoundsChanged(child)

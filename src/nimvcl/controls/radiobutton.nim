@@ -59,6 +59,20 @@ proc `checked=`*(r: RadioButton, v: bool) =
     if o.onChange != nil: o.onChange(o)
   if r.onChange != nil: r.onChange(r)
 
+method parentChanged*(r: RadioButton) =
+  ## A button checked before it had a parent joins its group: the others in it
+  ## are unchecked (it keeps the check, like checking it there would).
+  procCall parentChanged(Control(r))
+  if not r.fChecked: return
+  var others: seq[RadioButton]
+  for o in r.groupMembers:
+    if o != r and o.fChecked:
+      o.fChecked = false
+      others.add o
+  for o in others:
+    o.invalidate()
+    if o.onChange != nil: o.onChange(o)
+
 method preferredSize*(r: RadioButton): SizeF = indicatorPreferredSize(r)
 
 method doClick*(r: RadioButton) =

@@ -92,6 +92,31 @@ suite "combobox":
     c.dropDown()
     check c.popupWindow.bounds.w == 260
 
+  test "csDropDown: itemIndex follows the text after the items changed":
+    let f = newShown()
+    let c = f.mk(csDropDown, items = ["a", "b"])
+    c.text = "zz"
+    check c.itemIndex == -1
+    c.add "zz"
+    check c.itemIndex == 2
+    c.insert(0, "q")
+    check c.itemIndex == 3
+    c.items = ["x", "zz"]
+    check c.itemIndex == 1
+
+  test "the popup closes when the combo is hidden or disabled":
+    let f = newShown()
+    let c = f.mk(csDropDownList)
+    f.clickCombo(c)
+    check c.droppedDown
+    c.visible = false
+    check not c.droppedDown
+    c.visible = true
+    f.clickCombo(c)
+    check c.droppedDown
+    c.enabled = false
+    check not c.droppedDown
+
   test "empty combo does not open":
     let f = newShown()
     let c = f.mk(csDropDownList, items = newSeq[string]())

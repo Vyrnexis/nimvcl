@@ -417,6 +417,14 @@ method doMouseDown*(c: ComboBox, button: MouseButton, shift: ShiftState,
   else:
     c.toggleDrop()
 
+method visibilityChanged*(c: ComboBox) =
+  procCall visibilityChanged(Container(c))
+  if not c.isShowing: c.closeUp()
+
+method enabledChanged*(c: ComboBox) =
+  procCall enabledChanged(Container(c))
+  if not c.enabled: c.closeUp()
+
 method doExit*(c: ComboBox) =
   procCall doExit(Container(c))
   c.invalidate()
@@ -472,6 +480,14 @@ proc upperBound(c: ComboBox, s: string): int =
     if cmpIgnoreCase(c.fItems[mid], s) <= 0: lo = mid + 1 else: hi = mid
   lo
 
+proc refindIndex(c: ComboBox) =
+  ## csDropDown: the selected item is the one equal to the text; after the
+  ## items changed it may be another one (or none).
+  if c.fStyle != csDropDown: return
+  c.fIndex = c.findItem(c.fEdit.text)
+  c.fLastIndex = c.fIndex
+  c.showHighlight()
+
 proc itemsChanged(c: ComboBox) =
   ## The items changed: an open list shows the new ones and the committed item.
   if c.fList != nil:
@@ -502,6 +518,7 @@ proc insert*(c: ComboBox, index: int, s: string) =
     inc c.fIndex
     c.fLastIndex = c.fIndex
   c.itemsChanged()
+  c.refindIndex()
 proc add*(c: ComboBox, s: string) = c.insert(c.fItems.len, s)
 proc delete*(c: ComboBox, i: int) =
   if i < 0 or i >= c.fItems.len: return
@@ -522,6 +539,7 @@ proc `items=`*(c: ComboBox, v: openArray[string]) =
   if c.fSorted: c.fIndex = -1; c.resort()
   c.itemsChanged()
   c.commit(-1, false, false, false)
+  c.refindIndex()
 proc `sorted=`*(c: ComboBox, v: bool) =
   if v == c.fSorted: return
   c.fSorted = v

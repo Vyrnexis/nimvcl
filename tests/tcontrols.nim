@@ -209,6 +209,13 @@ suite "controls":
     s2.checked = true
     check s2.checked and not s1.checked and r2.checked
 
+  test "radiobutton: checked before insertion joins the group":
+    let f = newShown()
+    let r1 = newRadioButton(f, "a", true, 10, 10)
+    let loose = newRadioButton(nil, "b", true)
+    f.insertControl loose
+    check loose.checked and not r1.checked
+
   test "radiobutton: arrows move and check, one tab stop per group":
     let f = newShown()
     let r1 = newRadioButton(f, "a", false, 10, 10)

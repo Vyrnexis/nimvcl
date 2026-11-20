@@ -20,6 +20,7 @@ between minor versions.
 
 ### Fixed
 
+- Small controls: a `RadioButton` checked before it had a parent unchecks its new group mates when inserted; `Edit.clear` works on a read-only edit (as in Delphi); a csDropDown `ComboBox` recomputes `itemIndex` from its text after `items=`, `add`, `insert`; its popup closes when the combo is hidden or disabled (new `Control.parentChanged` and `enabledChanged` hooks). (N36)
 - `Memo.lines.add "a\nb"` on a pristine memo makes two lines like it does later (it made one line with a space). (N34)
 - `SpinEdit`: `value` takes typed text into account (it was stale until Enter or focus loss), a paste keeps only the digits (and a leading minus), a number too large for an `int` clamps to the range instead of reverting, and the commit on focus loss no longer depends on the edit's `onExit`, which the application may replace. (N33)
 - Grids: when the current cell moves on its own (`rowCount` / `colCount` shrink, `insertRow`, `deleteRow`) `onSelectCell` and `onSelectionChanged` fire. A sort leaves the cell in place, so it fires nothing. (N31)
