@@ -234,9 +234,13 @@ suite "actions":
     let a = newAction(x.acts, "T")
     a.autoCheck = true
     a.execute()
+    check not a.checked                   # nothing handled it: unchanged
+    var seen: seq[bool]
+    a.onExecute = proc(s: Action) = seen.add s.checked
+    a.execute()
     check a.checked
     a.execute()
-    check not a.checked
+    check not a.checked and seen == @[true, false]
 
   test "onUpdate runs when the application goes idle, not while painting":
     let x = fixture()

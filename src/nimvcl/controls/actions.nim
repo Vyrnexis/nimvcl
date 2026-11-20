@@ -15,7 +15,7 @@
 ## ```
 ##
 ## Action properties: `caption` (with `&` mnemonic), `hint`, `enabled`,
-## `visible`, `checked`, `autoCheck` (executing toggles `checked`), `groupIndex`
+## `visible`, `checked`, `autoCheck` (executing toggles `checked` when a handler runs), `groupIndex`
 ## (> 0: radio group within the ActionList; executing checks the action and
 ## unchecks the others), `shortcut`, `imageIndex` (into `ActionList.images`),
 ## `category`, and the events `onExecute(sender)` and `onUpdate(sender)`.
@@ -222,12 +222,15 @@ proc run(a: Action): bool =
 
 proc execute*(a: Action): bool {.discardable.} =
   ## Runs the action: ignored (false) while disabled; an `autoCheck` action
-  ## toggles `checked` first; a grouped one (autoCheck or not) becomes checked. True when a
-  ## handler ran.
+  ## toggles `checked` first (so the handler sees the new state) and puts it
+  ## back when nothing handled the action; a grouped one (autoCheck or not)
+  ## becomes checked. True when a handler ran.
   if a.fDisabled: return false
+  let before = a.fChecked
   if a.fAutoCheck or a.fGroup > 0:
     a.checked = if a.fGroup > 0: true else: not a.fChecked
-  a.run()
+  result = a.run()
+  if not result and a.fGroup == 0 and a.fAutoCheck: a.checked = before
 
 proc update*(a: Action) =
   ## Runs the list's and the action's `onUpdate` (done by the idle hook).
@@ -252,9 +255,12 @@ method clientClicked(l: ActionLink) =
     checkable = true
     state = ToolButton(l.ctl).down
   if checkable:          # the client toggled itself: the action follows
+    let before = a.fChecked
     a.checked = state
     l.apply()            # resync a client that toggled against the action's state
-    discard a.run()
+    if not a.run() and a.fGroup == 0:    # nothing handled it: the check goes back
+      a.checked = before
+      l.apply()
   else:
     discard a.execute()
 
