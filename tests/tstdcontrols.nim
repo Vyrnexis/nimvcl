@@ -953,6 +953,7 @@ suite "standard controls":
   test "toolbar: one pass places buttons end to end, skipping hidden ones, again after relayout":
     let f = newShown(900, 300)
     let tb = newToolBar(f)
+    tb.overflowMenu = false          # the pass itself, not the chevron
     var btns: seq[ToolButton]
     for i in 0 ..< 40: btns.add newToolButton(tb, "B" & $i)
     btns[3].visible = false

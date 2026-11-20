@@ -331,6 +331,8 @@ registerClass(StatusPanel, parent = nil, create = newPanelOf(parent),
 registerClass(ToolBar, parent = Container):
   category Appearance:
     flat: bool
+  category Behaviour:
+    overflowMenu: bool
   category Data:
     images: ImageList
 

@@ -21,9 +21,20 @@
 ##   system, not here). Buttons never take keyboard focus (as in the VCL).
 ## * `onClick` fires after the state change.
 ## `flat` (ToolBar) draws buttons without a face until hovered (default).
+##
+## Overflow: when the visible `alCustom` children do not fit the bar's width
+## (and `overflowMenu` is on, the default), the ones that do not fit are hidden
+## (not drawn, not hit; separators at the boundary go too) and a chevron button
+## (>>) is shown at the right end. Pressing it opens a popup menu with the
+## hidden buttons (caption, else hint; icon, enabled and checked state);
+## choosing an entry clicks the button, so `onClick` / the linked action run
+## exactly as for a click. The set is recomputed on every layout, so resizing
+## the bar or changing buttons updates it. `overflowCount` and
+## `showOverflowMenu` let code query and open it.
 
 import ../graphics/image
-import ./common, ./imagelist
+import ../core/[form, popup]
+import ./common, ./imagelist, ./menus
 
 export image, imagelist
 
@@ -38,16 +49,25 @@ type
     fGlyph: GlyphProc
     fImage: Image
     fImageIndex: int
+    fOverflowed: bool        # hidden by the bar's overflow (set by layout)
 
   ToolBar* = ref object of Container
     fFlat: bool
     fImages: ImageListRef
     fNextX: float32          # layout cursor: where the next custom child starts
+    fOverflowMenu: bool      # chevron instead of clipping (default true)
+    fItemIdx: int            # layout: index of the next custom child
+    fFirstHidden: int        # layout: custom children from this index are hidden
+    fHiddenKids: seq[Control]
+    fChevron: RectF          # empty (w = 0) when nothing overflows
+    fChevHot, fChevDown: bool
+    fMenu: PopupMenu
 
 const
   GlyphSize = 16'f32
   BtnPad = 7'f32
   SepWidth = 8'f32
+  ChevronWidth = 16'f32
 
 # -------------------------------------------------------------- ToolButton
 
@@ -133,7 +153,7 @@ method preferredSize*(b: ToolButton): SizeF =
 method canFocus*(b: ToolButton): bool = false    # never takes the keyboard focus
 
 method hitTest*(b: ToolButton, p: PointF): bool =
-  b.fKind in {tbsButton, tbsCheck}
+  not b.fOverflowed and b.fKind in {tbsButton, tbsCheck}
 
 method doClick*(b: ToolButton) =
   if b.fKind == tbsCheck:
@@ -147,7 +167,7 @@ method doClick*(b: ToolButton) =
 method paint*(b: ToolButton, c: Canvas) =
   let t = b.theme
   let r = b.clientRect
-  if b.fKind == tbsSeparator: return
+  if b.fOverflowed or b.fKind == tbsSeparator: return
   if b.fKind == tbsDivider:
     c.line(r.w / 2, 5, r.w / 2, r.h - 5, t.border, 1)
     return
@@ -225,7 +245,16 @@ proc `images=`*(t: ToolBar, v: ImageList) =
   t.requestLayout()
   for c in t.children: c.requestLayout()
 
+func isBreak(c: Control): bool =
+  c of ToolButton and ToolButton(c).fKind in {tbsSeparator, tbsDivider}
+
+proc closeMenu(t: ToolBar) =
+  if t.fMenu != nil:
+    t.fMenu.free()
+    t.fMenu = nil
+
 method releaseResources*(t: ToolBar) =
+  t.closeMenu()
   t.fImages.detach()
 
 func flat*(t: ToolBar): bool = t.fFlat
@@ -233,6 +262,23 @@ proc `flat=`*(t: ToolBar, v: bool) =
   if v == t.fFlat: return
   t.fFlat = v
   t.invalidate()
+
+func overflowMenu*(t: ToolBar): bool = t.fOverflowMenu
+proc `overflowMenu=`*(t: ToolBar, v: bool) =
+  ## On (default): buttons that do not fit are moved into a chevron menu; off:
+  ## they are clipped.
+  if v == t.fOverflowMenu: return
+  t.fOverflowMenu = v
+  t.invalidate()
+  t.relayout()
+
+func overflowCount*(t: ToolBar): int =
+  ## Number of children currently hidden in the chevron menu (separators
+  ## included), as of the last layout.
+  t.fHiddenKids.len
+
+func overflowPopup*(t: ToolBar): PopupMenu = t.fMenu
+  ## The chevron menu last opened (nil before the first time).
 
 method preferredSize*(t: ToolBar): SizeF =
   var h = t.theme.controlHeight
@@ -245,27 +291,167 @@ method preferredSize*(t: ToolBar): SizeF =
 method beforeLayout*(t: ToolBar) =
   procCall beforeLayout(Container(t))
   t.fNextX = low(float32)
+  t.fItemIdx = 0
+  t.fFirstHidden = high(int)
+
+proc setOverflowed(c: Control, v: bool) =
+  if c of ToolButton:
+    let b = ToolButton(c)
+    if b.fOverflowed != v:
+      b.fOverflowed = v
+      b.invalidate()
+
+proc planOverflow(t: ToolBar, available: RectF) =
+  ## Decides which custom children do not fit (called once per layout pass,
+  ## from the first `customAlign`, when the children's sizes are known).
+  var kids: seq[Control]
+  var total = 0'f32
+  for c in t.children:
+    if c.visible and c.align == alCustom:
+      kids.add c
+      total += c.margins.left + c.width + c.margins.right
+  var chev = RectF()
+  var hidden: seq[Control]
+  if t.fOverflowMenu and total > available.w + 0.01'f32:
+    let limit = available.right - ChevronWidth
+    var cum = available.x
+    var fit = 0                       # number of children that fit
+    for c in kids:
+      let e = cum + c.margins.left + c.width + c.margins.right
+      if e > limit: break
+      cum = e
+      inc fit
+    while fit > 0 and kids[fit - 1].isBreak: dec fit   # no dangling separator
+    t.fFirstHidden = fit
+    for i in fit ..< kids.len: hidden.add kids[i]
+    chev = rectF(available.right - ChevronWidth, available.y, ChevronWidth, available.h)
+  for i, c in kids: c.setOverflowed(i >= t.fFirstHidden)
+  if chev != t.fChevron or hidden.len != t.fHiddenKids.len:
+    t.invalidate()
+  t.fChevron = chev
+  t.fHiddenKids = hidden
+  if hidden.len == 0:
+    t.fChevHot = false
+    t.fChevDown = false
 
 method customAlign*(t: ToolBar, child: Control, available: RectF) =
   ## The layout pass hands over the visible custom children in order: one
-  ## running x position places them in a single linear pass.
+  ## running x position places them in a single linear pass. Children that
+  ## overflow are parked past the right edge (clipped) and flagged.
+  if t.fItemIdx == 0: t.planOverflow(available)
+  let idx = t.fItemIdx
+  inc t.fItemIdx
   let m = child.margins
+  let y = round(available.y + (available.h - child.height) / 2)
+  if idx >= t.fFirstHidden:
+    child.setBounds(round(t.width + m.left), y, child.width, child.height)
+    return
   let x = max(t.fNextX, available.x)
   t.fNextX = x + m.left + child.width + m.right
-  child.setBounds(round(x + m.left),
-                  round(available.y + (available.h - child.height) / 2),
-                  child.width, child.height)
+  child.setBounds(round(x + m.left), y, child.width, child.height)
+
+method afterLayout*(t: ToolBar) =
+  procCall afterLayout(Container(t))
+  if t.fItemIdx == 0 and (t.fChevron.w > 0 or t.fHiddenKids.len > 0):
+    t.fChevron = RectF()              # no custom children left: nothing overflows
+    t.fHiddenKids = @[]
+    t.invalidate()
+
+proc buttonText(c: Control, n: int): string =
+  if c of ToolButton and ToolButton(c).caption.len > 0: ToolButton(c).caption
+  elif c.hint.len > 0: c.hint
+  elif c.name.len > 0: c.name
+  else: "Button " & $(n + 1)
+
+proc showOverflowMenu*(t: ToolBar): PopupWindow {.discardable.} =
+  ## Opens the chevron menu below the chevron (nil when nothing overflows or
+  ## the form is not shown).
+  if t.fHiddenKids.len == 0: return nil
+  t.closeMenu()
+  let r = t.root
+  if not (r of Form): return nil
+  let f = Form(r)
+  let m = newPopupMenu(t)
+  t.fMenu = m
+  let il = t.fImages.list
+  if il != nil: m.images = il
+  var targets: seq[Control]           # parallel to the menu's items
+  let h = proc(s: MenuItem) =
+    let i = s.parent.indexOf(s)
+    if i >= 0 and i < targets.len:
+      let c = targets[i]
+      if c != nil and c.isVisible and c.isEnabled: c.doClick()
+  var pendingSep = false
+  for i, c in t.fHiddenKids:
+    if c.isBreak:
+      pendingSep = m.items.count > 0
+      continue
+    if pendingSep:
+      m.addSeparator()
+      targets.add nil
+      pendingSep = false
+    let it = m.addItem(buttonText(c, i), h)
+    targets.add c
+    it.enabled = c.isEnabled
+    if c of ToolButton:
+      let b = ToolButton(c)
+      if b.fKind == tbsCheck: it.checked = b.fDown
+      if il != nil and b.listIcon: it.imageIndex = b.fImageIndex
+  let p = t.clientToForm(pointF(t.fChevron.right, t.fChevron.bottom))
+  result = m.popup(f, p.x, p.y)
+
+method doMouseMove*(t: ToolBar, shift: ShiftState, x, y: float32) =
+  let hot = t.fChevron.w > 0 and t.fChevron.contains(pointF(x, y))
+  if hot != t.fChevHot:
+    t.fChevHot = hot
+    t.invalidate()
+  procCall doMouseMove(Container(t), shift, x, y)
+
+method doMouseLeave*(t: ToolBar) =
+  if t.fChevHot or t.fChevDown:
+    t.fChevHot = false
+    t.fChevDown = false
+    t.invalidate()
+  procCall doMouseLeave(Container(t))
+
+method doMouseDown*(t: ToolBar, button: MouseButton, shift: ShiftState,
+                    x, y: float32) =
+  if button == mbLeft and t.fChevron.w > 0 and t.fChevron.contains(pointF(x, y)):
+    t.fChevDown = true
+    t.invalidate()
+    t.showOverflowMenu()
+  procCall doMouseDown(Container(t), button, shift, x, y)
+
+method doMouseUp*(t: ToolBar, button: MouseButton, shift: ShiftState,
+                  x, y: float32) =
+  if t.fChevDown:
+    t.fChevDown = false
+    t.invalidate()
+  procCall doMouseUp(Container(t), button, shift, x, y)
 
 method paint*(t: ToolBar, c: Canvas) =
   let th = t.theme
   let r = t.clientRect
   c.fillRect(r, if t.ownColor: t.color else: th.surface)
   c.line(0, r.h - 0.5, r.w, r.h - 0.5, th.border, 1)
+  if t.fChevron.w > 0:
+    let cr = t.fChevron
+    let face = cr.inflate(-1)
+    if t.fChevDown: c.fillRoundRect(face, th.radius, th.pressed.withAlpha(120))
+    elif t.fChevHot: c.fillRoundRect(face, th.radius, th.hover.withAlpha(150))
+    let cx = cr.x + cr.w / 2
+    let cy = cr.y + cr.h / 2
+    let col = th.text
+    for dx in [-3'f32, 2]:                    # a double chevron, ">>"
+      c.line(cx + dx - 1.5, cy - 4, cx + dx + 1.5, cy, col, 1.5)
+      c.line(cx + dx + 1.5, cy, cx + dx - 1.5, cy + 4, col, 1.5)
   procCall paint(Control(t), c)
 
 proc initToolBar*(t: ToolBar, owner: Component = nil) =
   t.initContainer(owner)
   t.fFlat = true
+  t.fOverflowMenu = true
+  t.fFirstHidden = high(int)
   t.setBounds(0, 0, 200, currentTheme().controlHeight + 6)
   t.padding = spacing(4, 3, 4, 3)
   t.align = alTop
