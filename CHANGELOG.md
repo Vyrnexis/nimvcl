@@ -9,6 +9,7 @@ between minor versions.
 
 ### Added
 
+- `ListBox.onSelect`: fires only when the user changed the selection (click, drag, keys, type-ahead), after `onChange`, which keeps firing for code changes too. `ListBox.items=` keeps the scroll position. (N35)
 - Window state: `Form.windowState` (`wsNormal`, `wsMinimized`, `wsMaximized`, a
   property the designer lists), `maximize`, `minimize`, `restore`,
   `isMaximized`, `isMinimized` (also on `PlatformWindow`). The state is kept

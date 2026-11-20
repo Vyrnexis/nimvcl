@@ -33,6 +33,8 @@
 ## Deleting the focused row sets `itemIndex` to -1. Turning `multiSelect` off
 ## keeps only the focused row selected (the first selected one if none is focused).
 ## `onChange` fires when `itemIndex` or the selection changes (user or code);
+## `onSelect` only when the USER changed it (click, drag, keys, type-ahead),
+## after `onChange`. `items=` keeps the scroll position (clamped).
 ## `onClick`, `onDblClick` are the usual mouse events.
 ##
 ## Display
@@ -83,6 +85,7 @@ type
     fType: TypeAhead
     fDragScroll: DragScroll
     onChange*: NotifyEvent
+    onSelect*: NotifyEvent         ## the user changed the selection (after onChange)
     fOnData: DataEvent
     onDrawItem*: DrawItemEvent
 
@@ -166,6 +169,12 @@ proc notify(lb: ListBox, ver: int) =
     if lb.onChange != nil: lb.onChange(lb)
 
 proc touch(lb: ListBox) = inc lb.fVer
+
+proc notifyUser(lb: ListBox, ver: int) =
+  ## `notify` for a change made by the user: `onSelect` follows `onChange`.
+  let changed = lb.fVer != ver
+  lb.notify(ver)
+  if changed and lb.onSelect != nil: lb.onSelect(lb)
 
 proc selectOnly(lb: ListBox, i: int) =
   if lb.fSel.selectOnly(i): lb.touch()
@@ -447,12 +456,14 @@ iterator items*(l: ItemList): string =
 proc `items=`*(lb: ListBox, v: openArray[string]) =
   ## Replaces all items (does nothing in virtual mode).
   if lb.isVirtual: return
+  let (sx, sy) = (lb.scrollPosX, lb.scrollPosY)
   lb.clear()
   if lb.fSorted:
     for s in v: lb.add s
   else:
     for s in v: lb.fItems.add s
     lb.refresh()
+  lb.scrollTo(sx, sy)                    # clamped to the new content
 
 proc `[]`*(lb: ListBox, i: int): string = lb.itemText(i)
 proc `[]=`*(lb: ListBox, i: int, s: string) = lb.items[i] = s
@@ -484,7 +495,7 @@ method doMouseDown*(lb: ListBox, button: MouseButton, shift: ShiftState,
       lb.applyClick(i, shift)
       lb.fDragging = (not lb.fMulti or lb.fExtended) and ssCtrl notin shift
       lb.makeVisible(i)
-      lb.notify(v)
+      lb.notifyUser(v)
   procCall doMouseDown(Control(lb), button, shift, x, y)
 
 proc dragSelect(lb: ListBox) =
@@ -501,7 +512,7 @@ proc dragSelect(lb: ListBox) =
     else: lb.selectOnly(i)
     lb.setFocusRow(i)
     lb.makeVisible(i)
-    lb.notify(v)
+    lb.notifyUser(v)
 
 proc stopDrag(lb: ListBox) =
   lb.fDragging = false
@@ -541,7 +552,7 @@ proc moveFocus(lb: ListBox, target: int, shift: ShiftState) =
     lb.touch()
   lb.setFocusRow(target)
   lb.makeVisible(target)
-  lb.notify(v)
+  lb.notifyUser(v)
 
 proc typeAheadTimeout*(lb: ListBox): int = lb.fType.timeout
 proc `typeAheadTimeout=`*(lb: ListBox, ms: int) = lb.fType.timeout = ms
@@ -557,7 +568,7 @@ proc typeAhead(lb: ListBox, ch: char) =
     lb.fAnchor = i
     lb.setFocusRow(i)
   lb.makeVisible(i)
-  lb.notify(v)
+  lb.notifyUser(v)
 
 method doKeyDown*(lb: ListBox, key: var Key, shift: ShiftState) =
   procCall doKeyDown(Control(lb), key, shift)
@@ -574,7 +585,7 @@ method doKeyDown*(lb: ListBox, key: var Key, shift: ShiftState) =
     if lb.fIndex >= 0:
       let v = lb.fVer
       lb.applyClick(lb.fIndex, if lb.fExtended: {ssCtrl} else: {})
-      lb.notify(v)
+      lb.notifyUser(v)
   elif lb.fMulti and lb.fExtended and ssCtrl in shift and key == 'a'.key:
     key = Key(0)
     lb.selectAll()

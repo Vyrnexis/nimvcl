@@ -62,6 +62,26 @@ suite "listbox":
     lb.setSelection([6, 7])
     check lb.selectedIndices == @[6]
 
+  test "onSelect fires for the user only; items= keeps the scroll position":
+    let f = newShown()
+    let lb = mkList(f, 30)
+    var sel, chg = 0
+    lb.onSelect = proc(s: Control) = inc sel
+    lb.onChange = proc(s: Control) = inc chg
+    lb.itemIndex = 2
+    check chg == 1 and sel == 0
+    f.click(rowX, rowY(4))
+    check chg == 2 and sel == 1 and lb.itemIndex == 4
+    f.tap(keyDown)
+    check sel == 2 and lb.itemIndex == 5
+    lb.scrollTo(0, 100)
+    var v: seq[string]
+    for i in 0 ..< 40: v.add "n" & $i
+    lb.items = v
+    check lb.scrollPosY == 100
+    lb.items = @["a", "b"]
+    check lb.scrollPosY == 0
+
   test "items API and index bookkeeping":
     let f = newForm(nil, 400, 300)
     f.show()
