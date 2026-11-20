@@ -155,6 +155,8 @@ type
     level: int                           ## 1 for a root class, parent's + 1 below
     defaultsReady: bool
     defaults: Table[string, PropValue]
+    propIndex: Table[string, PropInfo]   ## `findProp` results by name (dotted ones too)
+    indexStamp: int                      ## `registryStamp` the index was built for
     propsCache: seq[PropInfo]
     propsStamp: int                      ## `registryStamp` the cache was built for
 
@@ -163,6 +165,7 @@ var
   classList: seq[ClassInfo]
   aliasTable: Table[string, string]
   registryStamp = 1       ## bumped whenever a property list or an ordering changes
+  classOfCache: Table[pointer, ClassInfo]   ## by the run-time type of the object
 
 # ------------------------------------------------------------------ values
 
@@ -433,6 +436,7 @@ proc registerClassInfo*(ci: ClassInfo) =
     raise newException(PropError, "class " & ci.name & " is already registered")
   classTable[ci.name] = ci
   classList.add ci
+  classOfCache.clear()
 
 proc classByName*(name: string): ClassInfo =
   ## The registered class `name` (an alias such as `Image` for `ImageControl`
@@ -458,6 +462,11 @@ proc isA*(ci, base: ClassInfo): bool =
 proc classOf*(o: Obj): ClassInfo =
   ## The most derived registered class `o` is an instance of (a user subclass
   ## of `Panel` answers `Panel`); nil when none matches.
+  if o == nil: return nil
+  # the first word of a ref object is its run-time type: the answer only
+  # depends on it, so it is looked up once per type
+  let key = cast[ptr pointer](o)[]
+  if classOfCache.hasKey(key): return classOfCache[key]
   var best = 0
   for ci in classList:
     if ci.matches != nil and ci.matches(o):
@@ -465,6 +474,7 @@ proc classOf*(o: Obj): ClassInfo =
       if d > best:
         best = d
         result = ci
+  classOfCache[key] = result
 
 proc inApplyOrder(props: seq[PropInfo]): seq[PropInfo] =
   ## `props` with every property after those it depends on (`propdeps`),
@@ -629,10 +639,7 @@ proc subProps*(p: PropInfo): seq[PropInfo] =
     for sn in subNames(p.kind): p.subs.add makeSub(p, sn)
   p.subs
 
-proc findProp*(ci: ClassInfo, name: string): PropInfo =
-  ## Property `name` (inherited ones included); nil when there is none. A dotted
-  ## name addresses a sub-property (`"font.size"`, `"anchors.akLeft"`,
-  ## `"font.style.fsBold"`).
+proc lookupProp(ci: ClassInfo, name: string): PropInfo =
   let parts = if '.' in name: name.split('.') else: @[name]
   var c = ci
   var cur: PropInfo = nil
@@ -654,6 +661,18 @@ proc findProp*(ci: ClassInfo, name: string): PropInfo =
     if next == nil: return nil
     cur = next
   cur
+
+proc findProp*(ci: ClassInfo, name: string): PropInfo =
+  ## Property `name` (inherited ones included); nil when there is none. A dotted
+  ## name addresses a sub-property (`"font.size"`, `"anchors.akLeft"`,
+  ## `"font.style.fsBold"`). Answers are cached per class until a property is
+  ## added.
+  if ci.indexStamp != registryStamp:
+    ci.propIndex.clear()
+    ci.indexStamp = registryStamp
+  if ci.propIndex.hasKey(name): return ci.propIndex[name]
+  result = ci.lookupProp(name)
+  ci.propIndex[name] = result
 
 # ------------------------------------------------------------ object access
 

@@ -48,6 +48,15 @@ suite "registry":
       check o != nil
       check classOf(o) == ci
     check classByName("Image") == classByName("ImageControl")
+    # lookups are cached per type and per name: same answers the second time (Q6)
+    let b1 = newButton(nil, "x")
+    let bci = classOf(b1)
+    check bci == classByName("Button") and classOf(newButton(nil, "y")) == bci
+    check classOf(Obj(nil)) == nil
+    let fs1 = bci.findProp("font.size")
+    check fs1 != nil and bci.findProp("font.size") == fs1
+    check bci.findProp("font.nope") == nil and bci.findProp("font.nope") == nil
+    check bci.findProp("font.style.fsBold") != nil
     # every property of the base classes is a reserved field name (N25)
     for cn in ["Component", "Control", "Container", "Form"]:
       let ci = classByName(cn)

@@ -95,6 +95,7 @@ between minor versions.
 - The reserved component names of `form`/`loadForm` now cover every property and public proc of Component, Control and Form (`icon`, `menu`, `text`, `show`, `close`, `popupMenu`...). New `isReservedFieldName` in `nimvcl/dsl/nfmsyntax`; the designer's `uniqueName` skips them and the inspector refuses such a component name. (N25)
 - Loading a form file with `strict = false` skips a property whose value has the wrong type (with a warning) instead of failing the whole load; a root object that is not a Form is detached from the owner on error; `parseNfm` skips a UTF-8 byte order mark. (N27)
 - Design surface: the rubber band no longer mixes controls and non-visual tiles in one selection; the tile of an inherited component cannot be moved; `onDeleted` receives the controls before they are released; undo/redo of a move or resize leaves a control whose bounds were changed since (inspector) as it is. (N28)
+- Property registry: `classOf` is looked up once per run-time type and `findProp` (dotted names included) once per class and name, instead of scanning every class / property per call (object inspector rows, saving). (Q6)
 
 ## [0.2.1] - 2026-11-20
 
