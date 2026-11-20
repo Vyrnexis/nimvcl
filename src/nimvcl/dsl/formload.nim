@@ -297,7 +297,7 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
               "` is a `" & anc.classes[n.name] & "` in the ancestor, not a `" &
               n.className & "`", site)
       continue
-    if n.name in reservedNames and n != root:
+    if isReservedFieldName(n.name) and n != root:
       error("loadForm: " & nfmPos(file, n.line, n.col) & ": `" & n.name &
             "` is reserved in `" & formName & "`: it is a field or property of " &
             "Component/Control/Form, so an object cannot use that name", site)

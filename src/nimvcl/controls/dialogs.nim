@@ -122,7 +122,7 @@ form MsgDlgForm:
   var showIcon: bool
   var buttonSet: MsgDlgButtons
   var buttonList: seq[Button]
-  PaintBox icon:
+  PaintBox iconBox:
     width = IconSize; height = IconSize
     onPaint = proc(sender: Control, canvas: Canvas) =
       let d = MsgDlgForm(sender.parent)
@@ -137,7 +137,7 @@ form MsgDlgForm:
     self.showIcon = showIcon
     self.buttonSet = buttons
     self.msg.caption = text
-    self.icon.visible = showIcon
+    self.iconBox.visible = showIcon
     let list = orderedButtons(buttons)
     let defBtn = if default in buttons: default else: list[0]
     let escBtn = escapeButton(buttons)
@@ -170,7 +170,7 @@ form MsgDlgForm:
     let contentW = max(iconW + textW, rowW)
     let w = max(contentW + 2 * DlgPad, 280'f32)
     let topH = max(if self.showIcon: IconSize else: 0'f32, textH)
-    self.icon.setBounds(DlgPad, DlgPad, IconSize, IconSize)
+    self.iconBox.setBounds(DlgPad, DlgPad, IconSize, IconSize)
     self.msg.setBounds(DlgPad + iconW, DlgPad + floor((topH - textH) / 2), textW, textH)
     let by = DlgPad + topH + 24
     var x = w - DlgPad - rowW

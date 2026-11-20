@@ -725,7 +725,8 @@ proc isDefault*(o: Obj, p: PropInfo): bool =
   if bp != nil and bp.defaultWhen.len > 0:
     let flag = ci.findProp(bp.defaultWhen)
     if flag != nil and flag.get(o).b: return true
-    if bp.inherited != nil:
+    # only where a fresh instance inherits (a CodeEdit starts with its own font)
+    if bp.inherited != nil and flag != nil and defaultOf(ci, flag).b:
       inheritsFrom = bp.inherited(o)
       hasInherited = true
   if p.kind == pkEvent:

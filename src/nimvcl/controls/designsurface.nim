@@ -61,6 +61,7 @@ import std/[algorithm, strutils, sequtils]
 import ./common, ./panel, ./scrolling, ./scrollbar, ./scrollbox, ./pagecontrol
 import ../graphics/image
 import ../core/design
+from ../dsl/nfmsyntax import isReservedFieldName
 export design
 
 type
@@ -443,7 +444,7 @@ proc uniqueName*(d: FormDesigner, className: string): string =
   var base = identOnly(className)
   if base.len == 0: base = "Control"
   var n = 1
-  while d.nameUsed(base & $n): inc n
+  while d.nameUsed(base & $n) or isReservedFieldName(base & $n): inc n
   base & $n
 
 proc placementOf(d: FormDesigner, c: Control): Placement =

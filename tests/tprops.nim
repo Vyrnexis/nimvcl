@@ -3,6 +3,7 @@
 import std/[unittest, tables]
 import nimvcl
 import nimvcl/dsl/props_std
+from nimvcl/dsl/nfmsyntax import isReservedFieldName
 
 const Expected = [
   "Form", "Label", "Button", "CheckBox", "RadioButton", "Panel", "GroupBox",
@@ -47,6 +48,14 @@ suite "registry":
       check o != nil
       check classOf(o) == ci
     check classByName("Image") == classByName("ImageControl")
+    # every property of the base classes is a reserved field name (N25)
+    for cn in ["Component", "Control", "Container", "Form"]:
+      let ci = classByName(cn)
+      if ci == nil: continue
+      for p in ci.propsOf:
+        check isReservedFieldName(p.name)
+    check isReservedFieldName("icon") and isReservedFieldName("menu")
+    check not isReservedFieldName("Button1") and not isReservedFieldName("")
     check classByName("NoSuchThing") == nil
 
   test "inheritance and property lists":

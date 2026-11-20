@@ -92,6 +92,7 @@ between minor versions.
   history on every edit. (Q8)
 - A font or colour set explicitly to the class default is saved when the parent's value differs (the reload inherited the parent's instead). (N24)
 - `loadForm`: an enum value written like a component name (`align = alClient` with a component called `alClient`) stays the enum value; an identifier becomes a component reference only where the property takes an object. (N26)
+- The reserved component names of `form`/`loadForm` now cover every property and public proc of Component, Control and Form (`icon`, `menu`, `text`, `show`, `close`, `popupMenu`...). New `isReservedFieldName` in `nimvcl/dsl/nfmsyntax`; the designer's `uniqueName` skips them and the inspector refuses such a component name. (N25)
 
 ## [0.2.1] - 2026-11-20
 

@@ -78,6 +78,56 @@ proc validNfmName*(s: string): bool =
     if not isIdentChar(c): return false
   s notin ["end", "object", "inherited", "true", "false"]
 
+const reservedNames = [
+  # Component / Control / Container / Form fields, properties and public procs:
+  # a form field of the same name would clash with (or shadow) them. Kept in
+  # step with the property registry by a test (tnfm).
+  "acceptsInput", "actionLink", "activateMnemonic", "activeControl",
+  "addKeyHandler", "afterLayout", "align", "altChanged", "anchors",
+  "arrangeChildren", "autoSize", "beforeLayout", "beginModalState",
+  "borderStyle", "boundsRect", "bringToFront", "canFocus", "caption",
+  "captureLost", "childBoundsChanged", "children", "clientClicked",
+  "clientRect", "clientToForm", "clientToParent", "close", "color",
+  "componentCount", "components", "constraints", "constraintsChanged",
+  "controlAtPoint", "controlCount", "controlLost", "controls", "cursor",
+  "cursorChanged", "customAlign", "designBase", "designBaseSet",
+  "designRect", "doClick", "doDblClick", "doEnter", "doExit", "doKeyDown",
+  "doKeyPress", "doKeyUp", "doMouseDown", "doMouseEnter", "doMouseLeave",
+  "doMouseMove", "doMouseUp", "doMouseWheel", "doResize", "doTextEditing",
+  "enabled", "endModalState", "findComponent", "focusTarget", "font",
+  "fontColor", "forcedScale", "formOrigin", "formStyle", "formToClient",
+  "free", "freeWindow", "hasWindow", "height", "hide", "hint", "hitTest",
+  "host", "icon", "images", "inheritedColor", "insertComponent",
+  "insertControl", "invalidate", "invalidateRect", "isAncestorOf",
+  "isEnabled", "isMaximized", "isMinimized", "isModal", "isShowing",
+  "isTabStop", "isVisible", "keyPreview", "left", "margins",
+  "maximize", "menu", "menuBar", "minimize", "modalOwner", "modalResult",
+  "name", "notifyCreated", "notifyVisibility", "onActivate", "onClick",
+  "onClose", "onCloseQuery", "onCreate", "onDblClick", "onDeactivate",
+  "onEnter", "onExit", "onHide", "onMouseDown", "onMouseEnter",
+  "onMouseLeave", "onMouseMove", "onMouseUp", "onResize", "onShow", "owner",
+  "padding", "paint", "paintIfDirty", "paintTree", "parent", "parentColor",
+  "parentFont", "parentToClient", "popupMenus", "position", "preferredSize",
+  "rectInAncestor", "relayout", "relayoutAll", "release", "releaseResources",
+  "removeComponent", "removeControl", "removeKeyHandler", "requestLayout",
+  "resetModalState", "restore", "revealControl", "root", "screenshot",
+  "scrollChanged", "scrollOffset", "sendToBack", "setBounds",
+  "setForcedScale", "setHostSize", "setScrollOffset", "show", "showModal",
+  "style", "syncMetrics", "tabOrder", "tabStop", "tag", "text",
+  "textInputRect", "theme", "top", "ui", "viewportRect", "visibilityChanged",
+  "visible", "visualRect", "wantsTextInput", "width", "win",
+  "windowActivated", "windowState",
+  "popupMenu", "action", "onMouseWheel", "onKeyDown", "onKeyUp", "onKeyPress",
+  "onPaint"]
+
+proc isReservedFieldName*(s: string): bool =
+  ## True when a child or variable called `s` would clash with a field,
+  ## property or public proc of Component/Control/Form (`icon`, `menu`, `text`,
+  ## `show`, `close`...; compared like Nim identifiers); the `form`/`loadForm` macros refuse such names, so the
+  ## designer should not hand them out (the form's own name is exempt).
+  for r in reservedNames:
+    if s.len > 0 and r[0] == s[0] and cmpIgnoreStyle(r, s) == 0: return true
+
 proc cur(lx: Lexer): char =
   if lx.pos < lx.src.len: lx.src[lx.pos] else: '\0'
 

@@ -543,6 +543,16 @@ suite "ObjectInspector editors":
     check r.ins.setValue("onClick", pvEvent("okClick"))
     check validNfmName("okClick") and not validNfmName("end")
 
+  test "names that shadow a member of Form are rejected (N25)":
+    let r = rig()
+    let b = r.mkButton("keep")
+    r.ins.inspect(b)
+    for bad in ["icon", "menu", "text", "sho_w", "close"]:
+      check not r.ins.setValue("name", pvString(bad))
+      check "reserved" in r.ins.lastError
+      check b.name == "keep"
+    check r.ins.setValue("name", pvString("Text"))      # another Nim identifier
+
   test "numbers that are not finite are rejected":
     let r = rig()
     let b = r.mkButton()

@@ -47,7 +47,7 @@ import ../core/form
 import ../graphics/font
 import ../graphics/image
 import ../dsl/props_std
-from ../dsl/nfmsyntax import formatNumber, validNfmName
+from ../dsl/nfmsyntax import formatNumber, validNfmName, isReservedFieldName
 export props_std
 
 type
@@ -521,6 +521,13 @@ proc applyValue(ins: ObjectInspector, row: Row, v: PropValue): bool =
                  (if v.kind == pkEvent: "handler" else: "component") & " name"
     ins.invalidate()
     return false
+  # a child called like a member of Component/Control/Form would not compile in the form's source
+  if name == "name" and v.kind == pkString and isReservedFieldName(v.s):
+    for t in targets:
+      if not (t of Form):
+        ins.fError = "`" & v.s & "` is reserved (a field or property of Component, Control or Form)"
+        ins.invalidate()
+        return false
   for t in targets:
     let q = infoFor(t, name)
     if q != nil and ins.vetoed(t, name, v): return false

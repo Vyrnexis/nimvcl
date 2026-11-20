@@ -62,22 +62,8 @@ proc whenElse(cond: NimNode, yes, no: NimNode, src: NimNode): NimNode =
      nn(nnkElifBranch, src, cond, nn(nnkStmtList, src, yes)),
      nn(nnkElse, src, nn(nnkStmtList, src, no)))
 
-const reservedNames = [
-  # Component / Control / Container / Form fields and common properties: a form
-  # field of the same name would clash with (or shadow) them
-  "name", "tag", "owner", "components", "actionLink", "caption", "parent",
-  "left", "top", "width", "height", "align", "anchors", "margins", "padding",
-  "constraints", "autoSize", "visible", "enabled", "hint", "cursor", "font",
-  "parentFont", "color", "parentColor", "tabStop", "tabOrder", "children",
-  "host", "ui", "win", "menuBar", "popupMenus", "position", "borderStyle",
-  "formStyle", "modalResult", "designRect", "designBase", "designBaseSet",
-  "onClick", "onDblClick", "onMouseEnter", "onMouseLeave", "onEnter", "onExit",
-  "onResize", "onMouseDown", "onMouseUp", "onMouseMove", "onShow", "onHide",
-  "onActivate", "onDeactivate", "onClose", "onCloseQuery", "onCreate",
-  "windowState"]
-
 proc claim(g: var Gen, name: string, src: NimNode) =
-  if name in reservedNames:
+  if isReservedFieldName(name):
     error("nimvcl form: `" & name & "` is reserved in `" & g.formName &
           "`: it is a field or property of Component/Control/Form, so a child " &
           "or `var` cannot use that name; pick another (e.g. `" & name &
