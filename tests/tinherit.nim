@@ -193,6 +193,21 @@ suite "formToNfm of an inherited form":
     let f = loadNfm("inherited D: D\n  ancestor = 'base.nfm'\nend\n", nil, nil, dir / "d.nfm")
     check formToNfm(f) == "inherited D: D\n  ancestor = 'base.nfm'\nend\n"
 
+suite "the parsed ancestor is cached (Q9)":
+  test "a change of the ancestor file is seen by the next save":
+    let tmp = getTempDir() / ("nimvcl_q9_" & $getCurrentProcessId())
+    createDir tmp
+    defer: removeDir tmp
+    writeFile(tmp / "base.nfm", "object Base: Form\n  width = 300\n  height = 200\nend\n")
+    let desc = "inherited D: D\n  ancestor = 'base.nfm'\nend\n"
+    let f = loadNfm(desc, nil, nil, tmp / "d.nfm")
+    check f.width == 300
+    check formToNfm(f) == desc                     # parsed once, cached
+    check formToNfm(f) == desc
+    writeFile(tmp / "base.nfm", "object Base: Form\n  width = 640\n  height = 200\nend\n")
+    check "width = 300" in formToNfm(f)            # the form is 300 now, the ancestor says 640
+    check loadNfm(desc, nil, nil, tmp / "d.nfm").width == 640
+
 suite "designer and inspector with inherited components":
   test "inherited components cannot be deleted or renamed; new ones can":
     Application.init()

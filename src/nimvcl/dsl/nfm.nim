@@ -29,7 +29,7 @@
 ## What is defined here is the run-time use of the registry: `loadNfm`,
 ## `formToNfm`, `nfmToFormMacro`.
 
-import std/[strutils, tables, macros, os, sets, hashes, math]
+import std/[strutils, tables, macros, os, sets, hashes, math, times]
 import ../graphics/[color, image]
 import ../core/[component, control, form]
 import ../controls/[menus, statusbar, listview, actions, flowpanel]
@@ -113,6 +113,27 @@ proc enumList(info: PropInfo): string =
   var parts: seq[string]
   for n in info.enumNames: parts.add n
   parts.join(", ")
+
+type AncestorEntry = object
+  mtime: Time
+  size: int64
+  root: NfmNode
+
+var ancestorCache: Table[string, AncestorEntry]
+
+proc parseCached(path: string): NfmNode =
+  ## The parsed (and legacy-renamed) form file `path`, kept while its
+  ## modification time and size stay the same: an inherited form is rebuilt from
+  ## its ancestor on every save. The tree is only read by the loader.
+  let key = absolutePath(path)
+  if not fileExists(path): discard readFile(path)     # raises IOError like a plain read
+  let info = getFileInfo(path)
+  if ancestorCache.hasKey(key):
+    let e = ancestorCache[key]
+    if e.mtime == info.lastWriteTime and e.size == info.size: return e.root
+  result = parseNfm(readFile(path), path)
+  legacyNames(result)
+  ancestorCache[key] = AncestorEntry(mtime: info.lastWriteTime, size: info.size, root: result)
 
 proc loadPicture(opt: NfmOptions, baseDir, file: string, v: NfmValue,
                  path: string): Image =
@@ -339,8 +360,7 @@ proc buildNfmImpl(root: NfmNode, owner: Component, opt: NfmOptions,
   if not fileExists(apath):
     raise nfmError(fileName, root.line, root.col,
                    "the ancestor form file `" & apath & "` does not exist")
-  let aroot = parseNfm(readFile(apath), apath)
-  legacyNames(aroot)
+  let aroot = parseCached(apath)
   let aobj = buildNfmImpl(aroot, owner, opt, apath, byName, chain & @[absolutePath(fileName)])
   if aobj == nil:
     raise nfmError(fileName, root.line, root.col, "the ancestor `" & root.ancestor &
@@ -399,12 +419,9 @@ proc buildNfm*(root: NfmNode, owner: Component = nil, options: NfmOptions = nil,
         owner.removeComponent(owner.components[^1])
     raise
 
-proc loadNfm*(text: string, owner: Component = nil, options: NfmOptions = nil,
-              fileName = ""): Form =
-  ## Parses `text` and builds the form it describes. The root object must be a
-  ## `Form` (or a registered subclass). Raises `NfmError` with `file:line:col`.
-  let root = parseNfm(text, fileName)
-  legacyNames(root)
+proc loadRoot(root: NfmNode, owner: Component, options: NfmOptions,
+              fileName: string): Form =
+  ## `loadNfm` for a tree that is parsed already (and legacy-renamed).
   let o = buildNfm(root, owner, options, fileName)
   if o == nil or not (o of Form):
     # leave nothing of the wrong root in the owner
@@ -413,6 +430,14 @@ proc loadNfm*(text: string, owner: Component = nil, options: NfmOptions = nil,
                    "the root object `" & root.className & "` is not a Form")
   Form(o).notifyCreated()
   Form(o)
+
+proc loadNfm*(text: string, owner: Component = nil, options: NfmOptions = nil,
+              fileName = ""): Form =
+  ## Parses `text` and builds the form it describes. The root object must be a
+  ## `Form` (or a registered subclass). Raises `NfmError` with `file:line:col`.
+  let root = parseNfm(text, fileName)
+  legacyNames(root)
+  loadRoot(root, owner, options, fileName)
 
 proc loadNfm*(text: string, handlers: Table[string, NotifyEvent],
               owner: Component = nil): Form =
@@ -600,7 +625,8 @@ proc formToNfmNode*(f: Form, kids: openArray[Obj], rootName = ""): NfmNode =
     for x in kc.scope: ctx.scope.incl x
   var anc: Obj
   if f.ancestorPath.len > 0:
-    anc = loadNfmFile(f.ancestorPath, nil, newNfmOptions(strict = false))
+    anc = loadRoot(parseCached(f.ancestorPath), nil, newNfmOptions(strict = false),
+                   f.ancestorPath)
     ctx.inheriting = true
     var all: seq[Obj]
     var seen: HashSet[Obj]

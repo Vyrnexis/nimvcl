@@ -96,6 +96,7 @@ between minor versions.
 - Loading a form file with `strict = false` skips a property whose value has the wrong type (with a warning) instead of failing the whole load; a root object that is not a Form is detached from the owner on error; `parseNfm` skips a UTF-8 byte order mark. (N27)
 - Design surface: the rubber band no longer mixes controls and non-visual tiles in one selection; the tile of an inherited component cannot be moved; `onDeleted` receives the controls before they are released; undo/redo of a move or resize leaves a control whose bounds were changed since (inspector) as it is. (N28)
 - Property registry: `classOf` is looked up once per run-time type and `findProp` (dotted names included) once per class and name, instead of scanning every class / property per call (object inspector rows, saving). (Q6)
+- Saving an inherited form no longer re-reads and re-parses the ancestor file each time: the parsed tree is cached by path, modification time and size (also for the ancestor chain of a load). (Q9)
 
 ## [0.2.1] - 2026-11-20
 
