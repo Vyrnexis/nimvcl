@@ -13,8 +13,10 @@
 ## Closing: `close()` runs `onCloseQuery`, then `onClose` (which may change
 ## the `CloseAction`): `caHide` hides, `caFree` frees the window (the form can
 ## be shown again later), `caNone` aborts. Closing the main form ends the
-## application. A modal form that is closed gets `mrCancel` unless a result was
-## set.
+## application, after the other open forms were closed the same way (a form
+## that stays open, e.g. by a veto in its `onCloseQuery`, cancels the close of
+## the main form). `caFree` fires `onHide` like `caHide`. A modal form that is
+## closed gets `mrCancel` unless a result was set.
 ##
 ## Freeing order (UI thread): RenderContext.close, renderer, window.
 
@@ -344,6 +346,14 @@ proc close*(f: Form) =
     if not can:
       if f.fModal: f.fModalResult = mrNone
       return
+    if f == gMainForm and not f.fModal:
+      # the main form takes the others with it: each is closed properly
+      # (onCloseQuery, onClose) and any that stays open cancels this close
+      for o in openForms():
+        if o != f and o.fShown: o.close()
+      for o in openForms():
+        if o != f and o.fShown:
+          return
     var action = caHide
     let hc = f.onClose
     if hc != nil: hc(f, action)
@@ -352,7 +362,12 @@ proc close*(f: Form) =
       return
     let wasMain = f == gMainForm and not f.fModal
     if f.fModal and f.fModalResult == mrNone: f.fModalResult = mrCancel
-    if action == caFree: f.releaseWindow() else: f.hide()
+    if action == caFree:
+      let wasShown = f.fShown
+      f.releaseWindow()
+      let hh = f.onHide
+      if wasShown and hh != nil: hh(f)
+    else: f.hide()
     if wasMain and terminateProc != nil: terminateProc()
   finally:
     f.fClosing = false

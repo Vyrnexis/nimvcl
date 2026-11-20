@@ -618,3 +618,24 @@ suite "window size limits":
     discard getWindowMaximumSize(f.win.window, a, b)
     check (a, b) == (cint(0), cint(0))
     f.freeWindow()
+
+suite "closing the main form":
+  test "the other forms are closed first; a veto cancels, caFree fires onHide":
+    let m = newForm(nil, 200, 150)
+    let o = newForm(nil, 200, 150)
+    var log: seq[string]
+    m.onCloseQuery = proc(s: Form, c: var bool) = log.add "m.query"
+    o.onCloseQuery = proc(s: Form, c: var bool) =
+      log.add "o.query"; c = false
+    o.onClose = proc(s: Form, a: var CloseAction) = log.add "o.close"; a = caFree
+    o.onHide = proc(s: Control) = log.add "o.hide"
+    m.show()
+    o.show()
+    m.close()
+    check log == @["m.query", "o.query"]
+    check m.visible and o.visible
+    o.onCloseQuery = proc(s: Form, c: var bool) = log.add "o.query"
+    log.setLen 0
+    m.close()
+    check log == @["m.query", "o.query", "o.close", "o.hide"]
+    check not o.hasWindow and not m.visible
