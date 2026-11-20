@@ -229,14 +229,20 @@ proc newlineInsert*(m: CodeModel, hl: Highlighter, pos: CodePos, unit: string,
   ## line, one more `unit` when the text before the caret ends with one of the
   ## characters of `indentAfter` (`:` `=` or an open bracket; a trailing `=`
   ## that belongs to an operator such as `==` or `+=` does not count; nothing
-  ## counts inside a comment or string), and, with the caret between `(` `)`,
+  ## counts inside a comment or string; a comment at the end of the line before
+  ## the caret is looked through: `if x:  # why` indents like `if x:`), and, with the caret between `(` `)`,
   ## `[` `]` or `{` `}`, a second line holding the closer.
   let ln = m.line(pos.line)
   let col = min(pos.col, ln.len)
   let ind = ln[0 ..< min(firstNonBlank(ln), col)]
   var extra = false
   var j = col
-  while j > 0 and ln[j - 1] in {' ', '\t'}: dec j
+  while true:                       # trailing blanks, and comments the caret is behind
+    while j > 0 and ln[j - 1] in {' ', '\t'}: dec j
+    if hl == nil or j == 0: break
+    let t = hl.tokenAt(pos.line, j - 1)
+    if t.kind notin {tkComment, tkDocComment} or t.stop > col or t.start >= j: break
+    j = t.start
   var opener = '\0'
   if j > 0:
     let c = ln[j - 1]

@@ -383,6 +383,14 @@ suite "codeedit":
     f.typeText("s = \"a:")
     f.key(keyEnter)
     check e.caretPos == (4, 0)
+    f.typeText("if x:  # why")                     # a trailing comment is looked through
+    f.key(keyEnter)
+    check e.caretPos == (5, 4)
+    e.text = ""
+    f.typeText("if x:  # why")
+    e.caretPos = (0, 10)                            # inside the comment: no extra indent
+    f.key(keyEnter)
+    check e.lineAt(1) == "hy" and e.caretPos == (1, 0)
     # between a bracket pair: three lines, caret in the middle
     e.text = "  call()"
     e.caretPos = (0, 7)
