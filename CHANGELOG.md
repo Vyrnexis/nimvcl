@@ -45,6 +45,11 @@ between minor versions.
   its actions. (N11)
 - The Nim highlighter closes a pragma on a bare `}` too (`{.inline}`), no longer
   colouring the following lines as pragma. (N12)
+- CodeEdit markers: those on lines deleted as a whole (selection delete, cut,
+  Delete Line) are dropped instead of piling onto the next line, a line joined
+  into the previous one loses its markers, Alt+Up/Down carry the markers of the
+  moved lines, and undo/redo put the markers of the edit back. New
+  `CodeModel.onSplice` hook (called before every raw replacement). (N13)
 
 ## [0.2.1] - 2026-11-20
 

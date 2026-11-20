@@ -108,6 +108,9 @@ type
     fModified: bool
     maxUndo: int
     onSelection*: proc()
+    onSplice*: proc(a, b: CodePos, repl: string)
+      ## Called before every raw replacement of [a, b) by `repl` (edits, undo
+      ## and redo), so a view can move what is attached to lines (markers).
 
 const
   DefaultMaxUndo = 10_000
@@ -342,6 +345,7 @@ proc spliceRaw(m: CodeModel, a, b: CodePos, repl: string): CodePos =
   ## Replaces [a, b) by `repl` ("\n" separated, valid UTF-8), records the
   ## change (see `flushChanged`) and returns the end of the inserted text. No
   ## history, no selection.
+  if m.onSplice != nil: m.onSplice(a, b, repl)
   let oldN = b.line - a.line + 1
   let head = m.lines[a.line][0 ..< a.col]
   let tail = m.lines[b.line][b.col .. ^1]

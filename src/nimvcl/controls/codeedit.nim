@@ -102,6 +102,13 @@ type
     line*: int
     kind*: MarkerKind
 
+  MarkerStash = object
+    ## What one edit did to the markers of the lines it touched (lines
+    ## relative to `pos.line`), to put them back when it is undone or redone.
+    pos: CodePos
+    removed, inserted: string
+    before, after: seq[Marker]
+
   MarkerPainter* = proc(c: Canvas, r: RectF, kind: MarkerKind): bool {.closure.}
     ## Draws the icon of `kind` inside `r` (the marker cell of one row) and
     ## returns true, or returns false to get the built-in icon.
@@ -129,6 +136,9 @@ type
     fFileName: string
     fEnsureNewline: bool
     fMarkers: seq[Marker]
+    fMarkerStash: seq[MarkerStash]   ## markers an edit dropped, for undo / redo
+    fSpliced: bool                   ## the markers were moved by `markersSplice`
+    fMove: tuple[active: bool, first, last, nbFirst, nbLast: int, up: bool]
     fMarkerPainter: MarkerPainter
     fAdv, fRowH: float32
     fMetFamily: string
@@ -604,8 +614,9 @@ func markerLess(a, b: Marker): int =
   if a.line != b.line: cmp(a.line, b.line) else: cmp(ord(a.kind), ord(b.kind))
 
 proc markersChanged(e: CodeEdit, first, oldN, newN: int) =
-  ## Markers below the change shift; those on lines that were merged away
-  ## move to the last surviving line of the change.
+  ## A change that is not an edit of the text (a load): markers below shift;
+  ## those on lines that were merged away move to the last surviving line.
+  e.fMarkerStash.setLen 0
   if e.fMarkers.len == 0: return
   var moved: seq[Marker]
   var changed = false
@@ -619,6 +630,83 @@ proc markersChanged(e: CodeEdit, first, oldN, newN: int) =
   moved.sort(markerLess)
   e.fMarkers.setLen 0
   for mk in moved:
+    if e.fMarkers.len == 0 or markerLess(e.fMarkers[^1], mk) != 0: e.fMarkers.add mk
+
+proc spliceMarkerLine(e: CodeEdit, i: int, a, b: CodePos, repl: string, k: int): int =
+  ## Where the marker of line `la + i` (of the lines [a, b] being replaced by
+  ## `k + 1` lines) goes, relative to `a.line`; -1 = the line is gone.
+  let span = b.line - a.line
+  if e.fMove.active:
+    let mv = e.fMove
+    let l = a.line + i
+    let blk = mv.last - mv.first + 1
+    let nb = mv.nbLast - mv.nbFirst + 1
+    result = l
+    if l >= mv.first and l <= mv.last: result = l + (if mv.up: -nb else: nb)
+    elif l >= mv.nbFirst and l <= mv.nbLast: result = l + (if mv.up: blk else: -blk)
+    return result - a.line
+  if span == 0:
+    # Enter at the start of a line pushes the line (and its markers) down
+    if k > 0 and a == b and a.col == 0 and repl.endsWith('\n'): k else: 0
+  elif k == 0:
+    if a.col == 0 and b.col == 0 and repl.len == 0:   # whole lines deleted
+      (if i == span: 0 else: -1)
+    else: (if i == 0: 0 else: -1)                     # joined into the first line
+  elif i == span: (if k >= span: k else: -1)
+  else: (if i <= k: i else: -1)
+
+proc markersSplice(e: CodeEdit, a, b: CodePos, repl: string) =
+  ## Called before the text between `a` and `b` is replaced by `repl`: moves
+  ## the markers with their lines. Markers of lines deleted as a whole are
+  ## dropped, a line joined into the previous one loses its markers, and the
+  ## markers an edit dropped come back when it is undone (see `MarkerStash`).
+  e.fSpliced = true
+  if e.fMarkers.len == 0 and e.fMarkerStash.len == 0: return
+  let la = a.line
+  let lb = b.line
+  var k = 0
+  for c in repl:
+    if c == '\n': inc k
+  if la == lb and k == 0: return
+  let delta = k - (lb - la)
+  # an undo or redo of an edit that dropped markers: put them back
+  if e.fMarkerStash.len > 0:
+    let now = e.fModel.textBetween(a, b)
+    for j in countdown(e.fMarkerStash.high, 0):
+      let st = e.fMarkerStash[j]
+      if st.pos != a: continue
+      let set = if st.inserted == now and st.removed == repl: st.before
+                elif st.removed == now and st.inserted == repl: st.after
+                else: continue
+      var res: seq[Marker]
+      for m in e.fMarkers:
+        if m.line < la: res.add m
+        elif m.line > lb: res.add Marker(line: m.line + delta, kind: m.kind)
+      for m in set: res.add Marker(line: la + m.line, kind: m.kind)
+      res.sort(markerLess)
+      e.fMarkers.setLen 0
+      for mk in res:
+        if e.fMarkers.len == 0 or markerLess(e.fMarkers[^1], mk) != 0: e.fMarkers.add mk
+      return
+  var res: seq[Marker]
+  var before, after: seq[Marker]
+  for m in e.fMarkers:
+    if m.line < la: res.add m
+    elif m.line > lb: res.add Marker(line: m.line + delta, kind: m.kind)
+    else:
+      before.add Marker(line: m.line - la, kind: m.kind)
+      let r = e.spliceMarkerLine(m.line - la, a, b, repl, k)
+      if r >= 0:
+        res.add Marker(line: la + r, kind: m.kind)
+        after.add Marker(line: r, kind: m.kind)
+  res.sort(markerLess)
+  after.sort(markerLess)
+  if before.len > 0 and before != after:
+    e.fMarkerStash.add MarkerStash(pos: a, removed: e.fModel.textBetween(a, b),
+                                   inserted: repl, before: before, after: after)
+    if e.fMarkerStash.len > 64: e.fMarkerStash.delete 0
+  e.fMarkers.setLen 0
+  for mk in res:
     if e.fMarkers.len == 0 or markerLess(e.fMarkers[^1], mk) != 0: e.fMarkers.add mk
 
 proc hasMarker*(e: CodeEdit, line: int, kind: MarkerKind): bool =
@@ -717,7 +805,8 @@ proc rebuildFold(e: CodeEdit) =
 
 proc modelChanged(e: CodeEdit, first, oldN, newN: int) =
   e.fChanged = true
-  e.markersChanged(first, oldN, newN)
+  if e.fSpliced: e.fSpliced = false
+  else: e.markersChanged(first, oldN, newN)
   # widest line bookkeeping: when the widest line itself changed the figure is
   # only an upper bound until `syncContent` rescans (documents up to 200k lines)
   let m = e.fModel
@@ -1058,13 +1147,7 @@ proc deleteLine*(e: CodeEdit) =
   var last = l
   for ln in f .. l:
     if e.isCollapsed(ln): last = max(last, e.fFold.foldEnd(ln))
-  var keep: seq[Marker]
-  for mk in e.fMarkers:
-    if mk.line < f or mk.line > last: keep.add mk
-  let before = e.fMarkers
-  e.fMarkers = keep
-  if not deleteLines(e.fModel, f, last): e.fMarkers = before
-  else:
+  if deleteLines(e.fModel, f, last):
     e.fDesiredX = -1
     e.touched()
 
@@ -1140,7 +1223,10 @@ proc moveLines(e: CodeEdit, up: bool) =
     nf = l + 1
     if nf >= m.lineCount: return
     nl = if e.isCollapsed(nf): e.fFold.foldEnd(nf) else: nf
-  if moveLines(m, f, l, up, nf, nl):
+  e.fMove = (true, f, l, nf, nl, up)       # the markers go with their lines
+  let moved = try: moveLines(m, f, l, up, nf, nl)
+              finally: e.fMove.active = false
+  if moved:
     e.touched()
 
 proc moveLineUp*(e: CodeEdit) = e.moveLines(true)
@@ -2196,6 +2282,7 @@ proc initCodeEdit*(e: CodeEdit, owner: Component = nil) =
   discard e.fModel.addChangeListener(proc(first, oldN, newN: int) =
     ed.modelChanged(first, oldN, newN))
   e.fModel.onSelection = proc() = ed.selectionChanged()
+  e.fModel.onSplice = proc(a, b: CodePos, repl: string) = ed.markersSplice(a, b, repl)
   e.fEmptyHit = ((-1, -1), -1)
 
 proc newCodeEdit*(parent: Container = nil, text = "", left = 0'f32, top = 0'f32,

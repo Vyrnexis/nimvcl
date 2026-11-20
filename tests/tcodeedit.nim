@@ -766,6 +766,36 @@ suite "codeedit":
     e.text = "new text"
     check e.markers.len == 0
 
+  test "markers: deleted lines drop theirs, moved lines carry theirs, undo restores":
+    let f = newShown()
+    let e = f.mk("a\nb\nc\nd\ne\nf")
+    e.addMarker(1, mkBookmark)
+    e.addMarker(2, mkBreakpoint)
+    e.addMarker(3, mkError)
+    e.addMarker(4, mkInfo)
+    e.select((1, 0), (3, 0))                        # lines 1 and 2 deleted whole
+    f.key(keyDelete)
+    check e.markers == @[Marker(line: 1, kind: mkError), Marker(line: 2, kind: mkInfo)]
+    f.ctrl('z')
+    check e.markerLines(mkBookmark) == @[1] and e.markerLines(mkBreakpoint) == @[2]
+    check e.markerLines(mkError) == @[3] and e.markerLines(mkInfo) == @[4]
+    f.ctrl('y')
+    check e.markerLines(mkBookmark) == @[] and e.markerLines(mkError) == @[1]
+    f.ctrl('z')
+    e.caretPos = (2, 0)                             # Backspace joins "c" into "b"
+    f.key(keyBackspace)
+    check e.markerLines(mkBookmark) == @[1] and e.markerLines(mkBreakpoint) == @[]
+    check e.markerLines(mkError) == @[2]
+    f.ctrl('z')
+    check e.markerLines(mkBreakpoint) == @[2]
+    e.caretPos = (2, 0)                             # Alt+Down: line 2 below line 3
+    f.key(keyDown, {ssAlt})
+    check e.markerLines(mkBreakpoint) == @[3] and e.markerLines(mkError) == @[2]
+    f.key(keyUp, {ssAlt})
+    check e.markerLines(mkBreakpoint) == @[2] and e.markerLines(mkError) == @[3]
+    f.ctrl('z')
+    check e.markerLines(mkBreakpoint) == @[3] and e.markerLines(mkError) == @[2]
+
   test "find bar: Ctrl+F, typing, Enter, Shift+Enter, options, Esc":
     let f = newShown()
     let e = f.mk(Sample, "nim")
