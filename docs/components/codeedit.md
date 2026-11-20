@@ -46,7 +46,7 @@ UTF-8 line (the status bar of an editor shows `line + 1`).
 | `color` | Color | Own editor background (the gutter is a shade of it); default `theme.surface`. Syntax token colors are kept, made readable on the fill |
 | `font.color` | Color | Color of the plain text (VCL `Font.Color`); alpha 0 uses the theme's text color |
 | `readOnly` | bool | No typing; programmatic edits and `text =` still work |
-| `modified` | bool | Differs from the last `markSaved` / `saveToFile` / `loadFromFile` |
+| `modified` | bool | Differs from the last `markSaved` / `saveToFile` / `loadFromFile`; assign `false` for `markSaved`, `true` to flag it without a change |
 | `fileName` | string | Remembered name; setting it picks the language (see `autoHighlighter`) |
 | `language` | string | `"nim"` or `"text"` (read); `language = "nim"` attaches the Nim highlighter |
 | `highlighter` | `Highlighter` | The language; nil is plain text. One highlighter per editor |

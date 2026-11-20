@@ -897,6 +897,12 @@ proc markSaved*(e: CodeEdit) =
   ## Declares the current text saved (`modified` becomes false).
   e.fModel.markSaved()
   e.touched(follow = false)
+proc `modified=`*(e: CodeEdit, v: bool) =
+  ## `false` declares the text saved (`markSaved`); `true` flags it as modified
+  ## (it stays so until saved or marked saved). `onModifiedChanged` fires when
+  ## the value changes.
+  e.fModel.modified = v
+  e.touched(follow = false)
 proc canUndo*(e: CodeEdit): bool = e.fModel.canUndo
 proc canRedo*(e: CodeEdit): bool = e.fModel.canRedo
 proc hasSelection*(e: CodeEdit): bool = e.fModel.hasSelection

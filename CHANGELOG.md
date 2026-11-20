@@ -9,6 +9,7 @@ between minor versions.
 
 ### Added
 
+- `CodeEdit.modified=` (`false` is `markSaved`, `true` flags the text as modified without a change); `saveCopyTo` stays.
 - `withModal(form): body` and `executeModalForm(form)`: show a form modally, free its window in a `finally`, give the `ModalResult` (`dlgResult` in the body).
 - `ClassInfo.defaultEvent` and `defaultEventOf(obj)` (Delphi's default event: `onClick`, `onChange` for the edit-like controls, `onTimer`, `onCreate` for a form), registered in `props_std`.
 - `FormDesigner.setProps` / `setProp` (undoable property changes with old and new values, `onPropertyChanged`), `beginGroup` / `endGroup`, `sizeSelection(width, height)` and `setTabOrder(controls)` (one undo step each); `ObjectInspector.designer` routes inspector edits through the designer, and `onPropertyChangedEx` reports the old value.

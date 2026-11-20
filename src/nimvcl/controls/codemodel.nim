@@ -607,6 +607,17 @@ proc markSaved*(m: CodeModel) =
   m.savedStep = m.undoStack.len
   m.fModified = false
 
+proc `modified=`*(m: CodeModel, v: bool) =
+  ## `false` is `markSaved`. `true` flags the text as changed without a change
+  ## (it stays modified, also after undoing back to a saved state, until it is
+  ## saved again).
+  if not v:
+    m.markSaved()
+    return
+  m.breakGroup()
+  m.fModified = true
+  m.savedStep = -1
+
 # --------------------------------------------------------------- load / save
 
 proc newCodeModel*(): CodeModel =

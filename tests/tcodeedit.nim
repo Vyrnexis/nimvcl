@@ -115,6 +115,25 @@ suite "codeedit":
     check not e.modified and modEvents >= 2
     check e.lineCount == 1 and e.encoding == "UTF-8"
 
+  test "modified= flags the text without a change, false is markSaved":
+    let f = newShown()
+    let e = f.mk()
+    e.onModifiedChanged = proc(s: Control) = inc modEvents
+    e.text = "abc"
+    e.markSaved()
+    let base = modEvents
+    e.modified = true
+    check e.modified and modEvents == base + 1 and e.text == "abc"
+    f.typeText("x")
+    f.ctrl('z')
+    check e.text == "abc" and e.modified          # no saved state to come back to
+    e.modified = false
+    check not e.modified and modEvents == base + 2
+    f.typeText("y")
+    check e.modified
+    f.ctrl('z')
+    check not e.modified                          # back at the saved state
+
   test "read-only blocks editing but not navigation":
     let f = newShown()
     let e = f.mk("abc\ndef")
