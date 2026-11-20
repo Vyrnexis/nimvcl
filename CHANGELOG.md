@@ -13,6 +13,8 @@ between minor versions.
   hook or paint no longer ends the application: it goes to `onException`, or
   without one it is logged to stderr and the loop continues. Set
   `Application.reraiseDefects = true` for the old behaviour. (N1)
+- A queued job that opens a modal dialog no longer holds back the jobs queued
+  after it (worker results stalled behind a message box). (N8)
 
 ## [0.2.1] - 2026-11-20
 

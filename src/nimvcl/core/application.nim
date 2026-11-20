@@ -186,31 +186,37 @@ proc handleError(a: TApplication, e: ref Exception) =
     stderr.writeLine "nimvcl: unhandled " & $e.name & ": " & e.msg & "\n" & e.getStackTrace()
 
 proc runQueued(a: TApplication) =
-  ## Runs the queued jobs. A job that raises goes to `handleError` and the
-  ## others still run; when `handleError` re-raises (the default), the jobs not
-  ## run yet are put back at the front of the queue for the next round.
-  var batch: seq[Job]
+  ## Runs the jobs queued when it starts, one at a time: a job is taken off the
+  ## queue just before it runs, so a job that opens a modal dialog (whose loop
+  ## runs the queue again) does not hold back the jobs behind it. A job that
+  ## raises goes to `handleError` and the others still run; when `handleError`
+  ## re-raises (the default), the jobs not run yet stay queued for the next round.
+  var count = 0
   {.cast(gcsafe).}:
     withLock queueLock:
-      swap(batch, queued)
-  var i = 0
+      count = queued.len
   try:
-    while i < batch.len:
-      var j = move batch[i]
-      inc i
+    for _ in 0 ..< count:
+      var j: Job
+      var got = false
+      {.cast(gcsafe).}:
+        withLock queueLock:
+          if queued.len > 0:
+            j = move queued[0]
+            queued.delete(0)
+            got = true
+      if not got: break
       try:
         if j.run != nil: j.run(j.box, j.handler)
         elif j.plain != nil: j.plain()
         elif j.closure != nil: j.closure()
       except Exception as e: a.handleError(e)
   finally:
-    if i < batch.len:
-      {.cast(gcsafe).}:
-        withLock queueLock:
-          var rest = batch[i .. ^1]
-          rest.add queued          # keep the order: leftovers first
-          queued = move rest
-      pushWake()
+    var more = false
+    {.cast(gcsafe).}:
+      withLock queueLock:
+        more = queued.len > 0
+    if more: pushWake()
 
 proc dropQueued() =
   ## Discards the queued jobs, freeing the data boxed for the UI thread.

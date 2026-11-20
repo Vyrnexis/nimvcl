@@ -198,6 +198,16 @@ suite "queue robustness (finding 2)":
     Application.processMessages()
     check errors == 1
 
+  test "a job that runs a nested loop does not hold back the next jobs (N8)":
+    var ran: seq[int]
+    queued:
+      ran.add 1
+      Application.processMessages()     # what a modal dialog's loop does
+      ran.add 10
+    queued: ran.add 2
+    Application.processMessages()
+    check ran == @[1, 2, 10]
+
   test "boxed jobs left over at shutdown are freed":
     destroyed = 0
     Application.queue(Counted(live: true), proc(c: Counted) = discard)
