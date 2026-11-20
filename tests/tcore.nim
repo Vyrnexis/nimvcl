@@ -769,3 +769,9 @@ suite "interaction and lifetime fixes":
     while pollPlatformEvent(pe):
       if pe.kind == ekWake: inc n
     check n == 1
+
+suite "numpad keys":
+  test "numpad Enter maps to Enter, other keys pass through":
+    check mapKey(0x40000058'u32) == keyEnter
+    check mapKey(0x0d'u32) == keyEnter
+    check mapKey(uint32(keyLeft)) == keyLeft

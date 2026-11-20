@@ -9,6 +9,8 @@ between minor versions.
 
 ### Fixed
 
+- The numpad Enter key arrives as Enter (default buttons, Edit, CodeEdit, grids
+  handled only the main Enter key). (N19)
 - A Defect (index error, assertion) in an event handler, queued job, idle
   hook or paint no longer ends the application: it goes to `onException`, or
   without one it is logged to stderr and the loop continues. Set

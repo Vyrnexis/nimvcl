@@ -102,6 +102,11 @@ proc pushTimerEvent*(id: int) =
 
 # ---------------------------------------------------------------- translate
 
+func mapKey*(code: uint32): Key =
+  ## SDL keycode to Key. The numpad Enter (SDLK_KP_ENTER) is the Enter key;
+  ## the other numpad keys already deliver their digits and operators as text.
+  if code == 0x40000058'u32: keyEnter else: Key(code)
+
 proc modsToShift*(m: uint32): ShiftState =
   if (m and KMOD_SHIFT) != 0: result.incl ssShift
   if (m and KMOD_CTRL) != 0: result.incl ssCtrl
@@ -155,7 +160,7 @@ proc translate*(ev: Event): PlatformEvent =
     let k = ev.key
     return PlatformEvent(
       kind: (if t == uint32(EVENT_KEY_DOWN): ekKeyDown else: ekKeyUp),
-      windowId: k.windowID, key: Key(k.key), repeat: k.repeat,
+      windowId: k.windowID, key: mapKey(uint32(k.key)), repeat: k.repeat,
       shift: modsToShift(uint32(k.`mod`)))
   elif t == uint32(EVENT_TEXT_INPUT):
     let s = if ev.text.text == nil: "" else: $ev.text.text
