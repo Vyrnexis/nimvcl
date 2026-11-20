@@ -540,3 +540,18 @@ suite "item data properties":
     # a width list is text, a cell list is a list
     expect NfmError: discard loadNfm("object F: Form\n  object g: StringGrid\n    cells = 'a'\n  end\nend\n")
     expect NfmError: discard loadNfm("object F: Form\n  object g: StringGrid\n    colWidths = (\n      '1'\n    )\n  end\nend\n")
+
+suite "references to objects outside the saved tree (N2)":
+  test "a reference to a component that was deleted is not written":
+    let f = loadNfm("object F: Form\n  object lbl: Label\n    focusControl = ed\n  end\n" &
+                    "  object ed: Edit\n  end\nend\n")
+    let lbl = Label(f.findComponent("lbl"))
+    check lbl.focusControl != nil
+    let ed = Edit(f.findComponent("ed"))
+    f.removeControl ed
+    check lbl.focusControl != nil               # still pointing at the removed edit
+    let text = formToNfm(f)
+    check "focusControl" notin text
+    discard loadNfm(text)                        # loads
+    check "focusControl" in formToNfm(loadNfm("object F: Form\n  object lbl: Label\n" &
+                                              "    focusControl = ed\n  end\n  object ed: Edit\n  end\nend\n"))

@@ -15,6 +15,9 @@ between minor versions.
   `Application.reraiseDefects = true` for the old behaviour. (N1)
 - A queued job that opens a modal dialog no longer holds back the jobs queued
   after it (worker results stalled behind a message box). (N8)
+- Saving a form writes an object reference (`focusControl`, `popupMenu`, `images`,
+  `action`, `menu`...) only when its target is in the saved tree; a deleted
+  component no longer makes a file that fails to load. (N2)
 
 ## [0.2.1] - 2026-11-20
 

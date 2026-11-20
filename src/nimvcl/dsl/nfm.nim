@@ -422,6 +422,8 @@ type SaveCtx = object
   nested: HashSet[Obj]    ## objects that are written as the child of another one
   ancestors: Table[string, Obj]  ## inherited form: the named objects of a fresh ancestor
   inheriting: bool
+  scope: HashSet[Obj]     ## every object the save writes; a reference to anything else is dropped
+  scoped: bool
 
 proc needsParent(ci: ClassInfo): bool =
   ## Classes created through `attach` (menu items) cannot stand alone.
@@ -453,13 +455,18 @@ proc newSaveCtx(root: Obj): SaveCtx =
   var seen: HashSet[Obj]
   gatherAll(root, all, seen)
   for o in all:
+    result.scope.incl o
     for k in kidsOf(o): result.nested.incl k
+  result.scoped = true
 
 proc sameValue(a, b: NfmValue): bool =
   a.kind == b.kind and a.text == b.text and a.items == b.items
 
-proc ownProps(o: Obj): seq[NfmProp] =
+proc ownProps(o: Obj, ctx: SaveCtx): seq[NfmProp] =
   ## The properties of `o` that differ from a fresh instance, in registry order.
+  ## An object reference is written only when its target is part of the saved
+  ## tree (`ctx.scope`, when set): a deleted component another one still points
+  ## at would make a file that cannot be loaded.
   let ci = classOf(o)
   if o of Component:
     let c = Component(o)
@@ -493,18 +500,21 @@ proc ownProps(o: Obj): seq[NfmProp] =
     of pkObject:
       if not isDefault(o, p):
         let v = p.get(o)
-        if v.obj == nil or objectName(v.obj).len > 0:
+        if v.obj == nil or (objectName(v.obj).len > 0 and
+                            (not ctx.scoped or v.obj in ctx.scope)):
           result.add NfmProp(name: p.name, value: toNfmValue(p, v))
     else:
       if not isDefault(o, p):
         result.add NfmProp(name: p.name, value: toNfmValue(p, p.get(o)))
 
-proc diffProps(o, anc: Obj): seq[NfmProp] =
+proc diffProps(o, anc: Obj, ctx: SaveCtx): seq[NfmProp] =
   ## What `o` sets differently from its ancestor's counterpart `anc`: changed or
   ## new values, plus the default value of a property the ancestor sets and `o`
   ## does not (an event cannot be unset, so it is skipped).
-  let mine = ownProps(o)
-  let theirs = ownProps(anc)
+  let mine = ownProps(o, ctx)
+  var plain = ctx
+  plain.scoped = false             # the ancestor's references are its own
+  let theirs = ownProps(anc, plain)
   var theirIdx = initTable[string, int]()
   for i, p in theirs: theirIdx[p.name] = i
   var mineNames = initHashSet[string]()
@@ -536,9 +546,9 @@ proc nodeOf(o: Obj, ctx: SaveCtx, nameOverride = "", anc: Obj = nil,
                    name: if nameOverride.len > 0: nameOverride else: objectName(o))
   if anc != nil:
     result.inherited = true
-    result.props = diffProps(o, anc)
+    result.props = diffProps(o, anc, ctx)
   else:
-    result.props = ownProps(o)
+    result.props = ownProps(o, ctx)
   var kids = if useKidList: kidList else: kidsOf(o)
   if o of Component and not useKidList:
     # non-visual components owned by this one, as Delphi writes them
@@ -575,8 +585,12 @@ proc formToNfmNode*(f: Form, kids: openArray[Obj], rootName = ""): NfmNode =
   let n = f.name
   let nm = if n.len > 0: n else: (if rootName.len > 0: rootName else: "Form1")
   var ctx: SaveCtx
+  ctx.scoped = true
+  ctx.scope.incl Obj(f)
   for k in kids:
-    for x in newSaveCtx(k).nested: ctx.nested.incl x
+    let kc = newSaveCtx(k)
+    for x in kc.nested: ctx.nested.incl x
+    for x in kc.scope: ctx.scope.incl x
   var anc: Obj
   if f.ancestorPath.len > 0:
     anc = loadNfmFile(f.ancestorPath, nil, newNfmOptions(strict = false))
