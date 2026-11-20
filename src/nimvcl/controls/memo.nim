@@ -817,7 +817,8 @@ proc insert*(l: MemoLines, i: int, s: string) =
   l.m.programmatic()
 proc add*(l: MemoLines, s: string) =
   let m = l.m.model
-  if l.m.fPristine and m.lineCount == 1 and m.line(0).len == 0: m.setLine(0, s)
+  if l.m.fPristine and m.lineCount == 1 and m.line(0).len == 0:
+    m.setText(s)                        # splits at "\n" like a later add does
   else: m.insertLine(m.lineCount, s)
   l.m.programmatic()
 proc delete*(l: MemoLines, i: int) =

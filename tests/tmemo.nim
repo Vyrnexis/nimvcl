@@ -60,6 +60,15 @@ suite "memo":
   teardown:
     for f in openForms(): f.freeWindow()
 
+  test "lines.add splits at newlines on a pristine memo too":
+    let m = newMemo(nil)
+    m.lines.add "a\nb"
+    check m.lines.count == 2 and m.lines[0] == "a" and m.lines[1] == "b"
+    let n = newMemo(nil)
+    n.lines.add "x"
+    n.lines.add "a\nb"
+    check n.lines.count == 3 and n.lines[2] == "b"
+
   test "typing and Enter make lines, onChange once per change":
     let f = newShown()
     let m = f.mkMemo()
