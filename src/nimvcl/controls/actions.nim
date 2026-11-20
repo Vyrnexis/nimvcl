@@ -64,6 +64,7 @@ type
     fHidden, fDisabled, fChecked, fAutoCheck: bool
     fGroup, fImageIndex: int
     fShortcut: Shortcut
+    fSecondary: seq[Shortcut]
     fList: ActionList
     fLinks: seq[ActionLink]
     onExecute*, onUpdate*: ActionEvent
@@ -183,6 +184,18 @@ proc `shortcut=`*(a: Action, v: Shortcut) =
   if v == a.fShortcut: return
   a.fShortcut = v
   a.notify()
+
+func secondaryShortcuts*(a: Action): seq[Shortcut] = a.fSecondary
+proc `secondaryShortcuts=`*(a: Action, v: seq[Shortcut]) =
+  ## Further shortcuts that run the action like `shortcut` does (Delphi's
+  ## SecondaryShortCuts). Menu items and buttons show only the primary one.
+  if v == a.fSecondary: return
+  a.fSecondary = v
+  a.notify()
+
+func hasShortcut*(a: Action, sc: Shortcut): bool =
+  ## True when `sc` is the primary or one of the secondary shortcuts.
+  sc.isSet and (a.fShortcut == sc or sc in a.fSecondary)
 
 func autoCheck*(a: Action): bool = a.fAutoCheck
 proc `autoCheck=`*(a: Action, v: bool) =
@@ -380,7 +393,7 @@ proc ensureHook(l: ActionList) =
     let sc = shortcut(k, mods)
     let actions = list.fActions   # an action may edit the list when it runs
     for a in actions:
-      if a.fShortcut.isSet and a.fShortcut == sc and not a.fDisabled and
+      if a.hasShortcut(sc) and not a.fDisabled and
          not a.fHidden:
         key = Key(0)
         a.execute()

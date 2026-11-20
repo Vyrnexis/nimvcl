@@ -5,6 +5,7 @@
 import std/[unittest, os, monotimes, times]
 import sdl3 except Color, Cursor
 import nimvcl
+import nimvcl/dsl/props_std
 
 proc ev(f: Form, kind: EventKind, x = 0'f32, y = 0'f32, k = Key(0),
         shift: ShiftState = {}): PlatformEvent =
@@ -170,6 +171,28 @@ suite "actions":
     a.visible = false
     x.f.tap(keyF6)
     check n == 2
+
+  test "secondary shortcuts fire like the primary and the menu shows the primary":
+    let x = fixture()
+    var n = 0
+    let a = newAction(x.acts, "Go", proc(s: Action) = (inc n), shortcut("F6"))
+    a.secondaryShortcuts = @[shortcut("Ctrl+G"), shortcut("F7")]
+    x.f.tap(keyF6)
+    x.f.tap('g', {ssCtrl})
+    x.f.tap(keyF7)
+    check n == 3
+    check a.hasShortcut(shortcut("F7")) and not a.hasShortcut(shortcut("F8"))
+    let mi = newMenuItem("Go")
+    mi.action = a
+    check mi.shortcut == shortcut("F6")
+    a.secondaryShortcuts = @[]
+    x.f.tap(keyF7)
+    check n == 3
+    # streamed as strings
+    a.secondaryShortcuts = @[shortcut("Ctrl+G")]
+    check getProp(a, "secondaryShortcuts").strs == @["Ctrl+G"]
+    setProp(a, "secondaryShortcuts", pvStrings(@["F7", "Ctrl+H"]))
+    check a.secondaryShortcuts == @[shortcut("F7"), shortcut("Ctrl+H")]
 
   test "list level onExecute sees the action first and can handle it":
     let x = fixture()

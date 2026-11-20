@@ -9,6 +9,7 @@ between minor versions.
 
 ### Added
 
+- `Action.secondaryShortcuts` (Delphi's SecondaryShortCuts): more shortcuts that run the action like `shortcut`; menus and buttons show only the primary one. Streamed as a string list.
 - `ListView.beginUpdate` / `endUpdate` and `ListBox.beginUpdate` / `endUpdate` (nestable): item changes in between do not relayout or repaint, one refresh at the end. `ListView` looks the text line height up once per font and render scale instead of several times per row and paint. (Q3)
 - `Memo.beginUpdate` / `endUpdate` (nestable: no layout, repaint or `onChange` in between, one refresh at the end) and `Memo.lines.addStrings` (several lines as one change; the caret, selection and undo history stay).
 - `ListBox.onSelect`: fires only when the user changed the selection (click, drag, keys, type-ahead), after `onChange`, which keeps firing for code changes too. `ListBox.items=` keeps the scroll position. (N35)

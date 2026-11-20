@@ -53,6 +53,7 @@ action in the list. Other members:
 | `autoCheck` | bool | Executing toggles `checked` |
 | `groupIndex` | int | `> 0`: radio group within the list |
 | `shortcut` | Shortcut | Fires anywhere in the form |
+| `secondaryShortcuts` | seq[Shortcut] | More shortcuts that fire the action (clients show only `shortcut`); streamed as a list of strings |
 | `imageIndex` | int | Icon in `ActionList.images` |
 | `onExecute`, `onUpdate` | `proc(sender: Action)` | Run and refresh |
 

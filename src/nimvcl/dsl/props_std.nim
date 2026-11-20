@@ -74,6 +74,14 @@ proc getShortcut(m: MenuItem): string = $m.shortcut
 proc setShortcut(m: MenuItem, v: string) = m.shortcut = shortcut(v)
 proc getShortcut(a: Action): string = $a.shortcut
 proc setShortcut(a: Action, v: string) = a.shortcut = shortcut(v)
+proc getSecondary(a: Action): seq[string] =
+  for sc in a.secondaryShortcuts: result.add $sc
+proc setSecondary(a: Action, v: seq[string]) =
+  var l: seq[Shortcut]
+  for t in v:
+    let sc = shortcut(t)
+    if sc.isSet: l.add sc
+  a.secondaryShortcuts = l
 
 proc scrollKids(c: ScrollingControl): seq[Obj] =
   for ch in c.children:
@@ -671,6 +679,7 @@ registerClass(Action, parent = Component, create = newActionOf(owner, parent)):
     hint: string
     imageIndex: int
     prop shortcut, string, getShortcut, setShortcut
+    prop secondaryShortcuts, seq[string], getSecondary, setSecondary
   category Behaviour:
     category: string
     enabled: bool
