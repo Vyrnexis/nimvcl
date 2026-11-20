@@ -7,6 +7,8 @@ between minor versions.
 
 ## Unreleased
 
+## [0.3.0] - 2026-11-21
+
 ### Added
 
 - `Label.textRole` and `Panel.textRole` are registered in `props_std`, so they stream in form files and show in the inspector (a muted label is still written as `muted`).
@@ -320,3 +322,5 @@ First release. There are no earlier versions.
 [0.1.3]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.3
 [0.1.4]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.1.4
 [0.2.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.2.0
+[0.2.1]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.2.1
+[0.3.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.3.0

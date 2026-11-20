@@ -6,7 +6,7 @@ events, actions, menus, and a `form` macro that works like a `.dfm` checked by
 the compiler. Forms can also live in `.nfm` text files, which is what the
 visual designer edits.
 
-**Status:** version 0.2.1. The API can still change before 1.0; see the
+**Status:** version 0.3.0. The API can still change before 1.0; see the
 [changelog](CHANGELOG.md). Source: <https://github.com/Vyrnexis/nimvcl>.
 
 The companion IDE, a Delphi 7-style RAD environment with a visual form designer
