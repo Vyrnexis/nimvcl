@@ -81,6 +81,8 @@ type
     fMulti, fExtended, fSorted, fDragging, fMouseIn, fShowFocusRect: bool
     fStyle: ListBoxStyle
     fItemHeight, fExtent, fLastIh: float32
+    fUpdating: int                   ## beginUpdate nesting
+    fUpdDirty: bool
     fMouseY: float32
     fType: TypeAhead
     fDragScroll: DragScroll
@@ -134,6 +136,9 @@ proc itemHeight*(lb: ListBox): float32 =
 method scrollLineSize*(lb: ListBox): SizeF = sizeF(24, lb.itemHeight)
 
 proc refresh(lb: ListBox) =
+  if lb.fUpdating > 0:                   # one refresh at endUpdate
+    lb.fUpdDirty = true
+    return
   let ih = lb.itemHeight
   let csW = float64(lb.fExtent)
   let csH = float64(lb.count) * float64(ih)   # float64: exact for millions of rows
@@ -149,6 +154,20 @@ proc refresh(lb: ListBox) =
     lb.fLastIh = ih
     lb.setContentSize(csW, csH)
   lb.invalidate()
+
+proc beginUpdate*(lb: ListBox) =
+  ## Defers the relayout and repaint of item changes until the matching
+  ## `endUpdate` (nestable).
+  inc lb.fUpdating
+
+proc endUpdate*(lb: ListBox) =
+  ## Ends a `beginUpdate`; the outermost call refreshes once.
+  if lb.fUpdating == 0: return
+  dec lb.fUpdating
+  if lb.fUpdating == 0 and lb.fUpdDirty:
+    lb.fUpdDirty = false
+    lb.refresh()
+    lb.scrollBy(0, 0)
 
 method beforeLayout*(lb: ListBox) =
   lb.refresh()

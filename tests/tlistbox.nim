@@ -82,6 +82,15 @@ suite "listbox":
     lb.items = @["a", "b"]
     check lb.scrollPosY == 0
 
+  test "beginUpdate / endUpdate batch the refresh":
+    let f = newShown()
+    let lb = mkList(f, 0)
+    lb.beginUpdate()
+    for i in 0 ..< 50: lb.add "x" & $i
+    check lb.contentSize.h == 0
+    lb.endUpdate()
+    check lb.contentSize.h == 50 * lb.itemHeight and lb.count == 50
+
   test "items API and index bookkeeping":
     let f = newForm(nil, 400, 300)
     f.show()

@@ -147,6 +147,11 @@ type
     fChecks: HashSet[int]
     fIndex, fAnchor, fHot, fEditIdx, fSlowIdx, fDownIdx: int
     fVer: int
+    fUpdating: int                   ## beginUpdate nesting
+    fUpdDirty: bool                  ## a refresh was skipped while updating
+    fLineKey: FontSpec               ## what the cached line height belongs to
+    fLineScale, fLineH: float32
+    fLineValid: bool
     fStyle: ListViewStyle
     fMulti, fExtended, fShowHeader, fGridLines, fRowSelect, fHotTrack: bool
     fCheckboxes, fReadOnly, fDragging, fMouseIn: bool
@@ -264,8 +269,16 @@ proc update*(it: ListItem) =
 # -------------------------------------------------------------- metrics
 
 proc lineH(lv: ListView): float32 =
-  if lv.canMeasure: ceil(lv.renderCtx.fontMetrics(lv.font).lineHeight)
-  else: 18
+  ## Text line height; looked up once per font / render scale (it was asked
+  ## for several times per row and paint).
+  if not lv.canMeasure: return 18
+  let ctx = lv.renderCtx
+  if not lv.fLineValid or lv.fLineScale != ctx.scale or lv.fLineKey != lv.font:
+    lv.fLineKey = lv.font
+    lv.fLineScale = ctx.scale
+    lv.fLineH = ceil(ctx.fontMetrics(lv.font).lineHeight)
+    lv.fLineValid = true
+  lv.fLineH
 
 proc itemHeight*(lv: ListView): float32 =
   ## Row height in report / list / small icon views (automatic when not set).
@@ -534,6 +547,9 @@ proc columnBorderAt*(lv: ListView, p: PointF): int =
 # ---------------------------------------------------------------- refresh
 
 proc refresh(lv: ListView) =
+  if lv.fUpdating > 0:                   # one refresh at endUpdate
+    lv.fUpdDirty = true
+    return
   let hh = lv.headerHeight
   let pad = spacing(1, 1 + hh, 1, 1)
   if lv.padding != pad: lv.padding = pad
@@ -575,6 +591,22 @@ method beforeLayout*(lv: ListView) =
 
 method doResize*(lv: ListView) =
   procCall doResize(ScrollingControl(lv))
+
+proc beginUpdate*(lv: ListView) =
+  ## Defers the relayout and repaint of item changes until the matching
+  ## `endUpdate` (nestable): adding many items stays linear.
+  inc lv.fUpdating
+
+proc endUpdate*(lv: ListView) =
+  ## Ends a `beginUpdate`; the outermost call refreshes once.
+  if lv.fUpdating == 0: return
+  dec lv.fUpdating
+  if lv.fUpdating == 0 and lv.fUpdDirty:
+    lv.fUpdDirty = false
+    lv.refresh()
+    lv.scrollBy(0, 0)
+
+func isUpdating*(lv: ListView): bool = lv.fUpdating > 0
 
 proc refreshData*(lv: ListView) =
   ## Virtual mode: the application's data changed (repaint, re-clamp).

@@ -230,6 +230,21 @@ suite "listview":
     check lv.editControl.top != lv.headerHeight + 1
     lv.endEdit(cancel = true)
 
+  test "beginUpdate / endUpdate batch the refresh and nest":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 0)
+    lv.beginUpdate()
+    lv.beginUpdate()
+    for i in 0 ..< 100: lv.items.add "Item " & $i
+    lv.endUpdate()
+    check lv.isUpdating
+    check lv.contentSize.h == 0                     # not laid out yet
+    lv.endUpdate()
+    check not lv.isUpdating
+    check lv.contentSize.h == 100 * lv.itemHeight and lv.items.count == 100
+    lv.endUpdate()                                   # unbalanced: ignored
+    check not lv.isUpdating
+
   test "vsList geometry and 2D keys":
     let f = newShown()
     let lv = mkList(f, vsList, 25, 340, 136)           # viewport height 122 (bar 12) -> 6 rows of 20
