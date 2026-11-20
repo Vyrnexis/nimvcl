@@ -49,6 +49,8 @@ type
     terminated: bool
     onIdle*: proc()                       ## after each batch of events, before blocking
     onException*: proc(e: ref Exception)  ## handler errors; default re-raises
+                                          ## exceptions, logs Defects (see `reraiseDefects`)
+    reraiseDefects*: bool                 ## default handler: re-raise Defects too (ends the loop)
     idleHooks: seq[tuple[id: string, hook: proc()]]
 
   EventObserver* = proc(f: Form, pe: PlatformEvent)
@@ -173,8 +175,15 @@ proc runOnUi*[T](data: sink T, handler: proc(data: T) {.nimcall.}) {.gcsafe.} =
            drop: dropBox[T])
 
 proc handleError(a: TApplication, e: ref Exception) =
+  ## Without `onException`, an exception is re-raised (the loop ends), but a
+  ## Defect (index error, assertion...) is logged to stderr and the loop
+  ## continues, so one bug in a handler does not close the app and lose the
+  ## user's work. Set `reraiseDefects` to get the old behaviour.
   let h = a.onException
-  if h != nil: h(e) else: raise e
+  if h != nil: h(e)
+  elif e of CatchableError or a.reraiseDefects: raise e
+  else:
+    stderr.writeLine "nimvcl: unhandled " & $e.name & ": " & e.msg & "\n" & e.getStackTrace()
 
 proc runQueued(a: TApplication) =
   ## Runs the queued jobs. A job that raises goes to `handleError` and the
@@ -193,7 +202,7 @@ proc runQueued(a: TApplication) =
         if j.run != nil: j.run(j.box, j.handler)
         elif j.plain != nil: j.plain()
         elif j.closure != nil: j.closure()
-      except CatchableError as e: a.handleError(e)
+      except Exception as e: a.handleError(e)
   finally:
     if i < batch.len:
       {.cast(gcsafe).}:
@@ -283,7 +292,7 @@ proc dispatchEvent*(a: TApplication, ev: var Event) =
   ## Translates and dispatches a raw SDL event; the same path the loop uses.
   a.dispatch(translate(ev))
 
-proc popupPaintFailed(e: ref CatchableError) =
+proc popupPaintFailed(e: ref Exception) =
   Application.handleError(e)
 
 proc paintForms*(a: TApplication) =
@@ -291,12 +300,12 @@ proc paintForms*(a: TApplication) =
   ## `onException` like an event handler error (re-raised by default).
   for f in openForms():
     try: discard f.paintIfDirty()
-    except CatchableError as e: a.handleError(e)
-  paintPopups(popupPaintFailed)
+    except Exception as e: a.handleError(e)
+  paintPopupsGuarded(popupPaintFailed)
 
 proc safeDispatch(a: TApplication, pe: PlatformEvent) =
   try: a.dispatch(pe)
-  except CatchableError as e: a.handleError(e)
+  except Exception as e: a.handleError(e)
 
 proc addIdleHook*(a: TApplication, id: string, hook: proc()) =
   ## Registers `hook` to run, like `onIdle`, after each batch of events (once per
@@ -325,11 +334,11 @@ proc pump(a: TApplication, timeoutMs: int) =
   let idle = a.onIdle           # copies: a hook may change `onIdle` or the hook list
   if idle != nil:
     try: idle()
-    except CatchableError as e: a.handleError(e)
+    except Exception as e: a.handleError(e)
   let hooks = a.idleHooks
   for h in hooks:
     try: h.hook()
-    except CatchableError as e: a.handleError(e)
+    except Exception as e: a.handleError(e)
 
 proc processMessages*(a: TApplication, timeoutMs = 0) =
   ## Handles pending events and queued procs, then paints dirty forms. Waits up
@@ -363,7 +372,7 @@ proc run*(a: TApplication, mainForm: Form = nil) =
     let hooks = a.idleHooks
     for h in hooks:                   # initial action state before the first frame
       try: h.hook()
-      except CatchableError as e: a.handleError(e)
+      except Exception as e: a.handleError(e)
     while not a.terminated and openForms().len > 0:
       a.paintForms()
       a.pump(-1)

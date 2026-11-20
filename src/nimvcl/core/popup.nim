@@ -294,18 +294,28 @@ proc handlePopupEvent*(pe: PlatformEvent): bool =
     false
   else: false
 
-proc paintPopups*(onError: proc(e: ref CatchableError) = nil) =
-  ## Paints the popups that need it (over a copy of the list: painting may open
-  ## or close popups). A popup whose paint raises goes to `onError`, when given
-  ## (the others are still painted); without it the exception propagates.
+proc paintPopupsGuarded*(onError: proc(e: ref Exception)) =
+  ## Like `paintPopups`, but `onError` also gets Defects (an index error in a
+  ## popup's paint must not leave the loop). Without `onError` the exception
+  ## propagates.
   let all = gPopups
   for p in all:
     if p.fClosed: continue
     if p.ui.win != nil and p.ui.needsPaint:
       try: paintPopup(p)
-      except CatchableError as e:
+      except Exception as e:
         if onError == nil: raise
         onError(e)
+
+proc paintPopups*(onError: proc(e: ref CatchableError) = nil) =
+  ## Paints the popups that need it (over a copy of the list: painting may open
+  ## or close popups). A popup whose paint raises goes to `onError`, when given
+  ## (the others are still painted); without it the exception propagates.
+  if onError == nil:
+    paintPopupsGuarded(nil)
+  else:
+    paintPopupsGuarded(proc(e: ref Exception) =
+      if e of CatchableError: onError((ref CatchableError)(e)) else: raise e)
 
 proc screenshotWithPopups*(f: Form, path: string): bool =
   ## Like `Form.screenshot`, with the form's open popups drawn over the form at

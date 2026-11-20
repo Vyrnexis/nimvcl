@@ -176,6 +176,28 @@ suite "queue robustness (finding 2)":
     Application.processMessages()
     check ran == @[1, 2] and errors == 1
 
+  test "a Defect in a job is logged and the loop goes on (N1)":
+    Application.onException = nil
+    var ran: seq[int]
+    queued: (ran.add 1; raise newException(IndexDefect, "defect boom"))
+    queued: ran.add 2
+    Application.processMessages()
+    check ran == @[1, 2]
+
+  test "reraiseDefects restores the old behaviour (N1)":
+    Application.onException = nil
+    Application.reraiseDefects = true
+    defer: Application.reraiseDefects = false
+    queued: raise newException(IndexDefect, "defect boom")
+    expect IndexDefect: Application.processMessages()
+
+  test "onException sees Defects (N1)":
+    var errors = 0
+    Application.onException = proc(e: ref Exception) = inc errors
+    queued: raise newException(AssertionDefect, "assert boom")
+    Application.processMessages()
+    check errors == 1
+
   test "boxed jobs left over at shutdown are freed":
     destroyed = 0
     Application.queue(Counted(live: true), proc(c: Counted) = discard)

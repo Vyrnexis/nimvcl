@@ -5,6 +5,15 @@ All notable changes to nimvcl are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0 the API can still change
 between minor versions.
 
+## Unreleased
+
+### Fixed
+
+- A Defect (index error, assertion) in an event handler, queued job, idle
+  hook or paint no longer ends the application: it goes to `onException`, or
+  without one it is logged to stderr and the loop continues. Set
+  `Application.reraiseDefects = true` for the old behaviour. (N1)
+
 ## [0.2.1] - 2026-11-20
 
 ### Fixed
