@@ -36,6 +36,7 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 | `tabs` | `seq[string]` | TabControl captions; `addTab(caption)` appends |
 | `showTabs` | bool | `false` hides the tab strip; pages are then switched by code only. Default `true` |
 | `tabPosition` | `TabPosition` | `tpTop` (default) or `tpBottom`: the strip under the body with the tabs hanging down, joined to the page above, like the message view of an IDE |
+| `closeButtons` | bool | A close cross on every tab (hover state; a middle click closes too). Default `false` |
 | `TabSheet.caption` | string | Tab text; `&` makes a mnemonic |
 | `TabSheet.tabVisible` | bool | `false` hides the tab (like Delphi's `TabVisible`); default `true` |
 | `color` | Color | Own background: the page body and the selected tab (`TabControl` too: its body is not filled otherwise); other tabs are a shade of it. Set it and `parentColor` turns off |
@@ -47,6 +48,7 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 |---|---|
 | `onChange` | The selected tab changed |
 | `onChanging(sender, allowChange: var bool)` | Before it changes; set `allowChange = false` to veto |
+| `onTabClose(sender, index, allow: var bool)` | A close cross or a middle click asked to close a tab (`closeButtons`). With `allow` left true the sheet is freed (`TabControl`: the tab dropped); set `allow = false` to keep it, or to remove it yourself after asking |
 
 ## Methods
 
@@ -55,6 +57,7 @@ tabs.onChange = proc(sender: Control) = echo TabControl(sender).tabIndex
 | `newTabSheet(pc, caption)` | Add a page |
 | `cycle(dir)` | Select the next (`1`) or previous (`-1`) tab |
 | `tabAt(x, y)` | Tab under a point |
+| `closeTab(i)` | Ask `onTabClose`, then remove the tab unless vetoed |
 
 ## Tips
 

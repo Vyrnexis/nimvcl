@@ -24,6 +24,15 @@
 ## Mnemonics: `&` in a sheet caption is underlined while Alt is held;
 ## Alt+letter selects that page (when the sheet is enabled).
 ##
+## Closable tabs: `closeButtons = true` draws a small cross at the right end of
+## every tab (highlighted under the pointer) and makes a middle click on a tab
+## close it too. A click on the cross (or the middle click) calls
+## `onTabClose(sender, index, allow)`; with `allow` left true the tab is then
+## removed (a PageControl frees the sheet, a TabControl drops the tab), with
+## `allow = false` nothing happens (or the handler removes the tab itself, for
+## instance after asking to save). The tab is wider by the button, so a
+## `sheetTabText` override needs no padding. `closeTab(i)` does the same from code.
+##
 ## Overflow: when the tabs do not fit, two small arrow buttons appear at the
 ## right end of the strip and scroll it (selecting does not need them: the
 ## selected tab is always scrolled into view).
@@ -49,6 +58,7 @@ type
     tpTop, tpBottom          ## where the tab strip sits
 
   TabChangingEvent* = proc(sender: Control, allowChange: var bool)
+  TabCloseEvent* = proc(sender: Control, index: int, allow: var bool)
 
   StripMetrics = object
     ## Widths of the tab strip, kept until the captions, visibility, font or
@@ -58,6 +68,7 @@ type
     xs: seq[float32]            # xs[i]: left edge of tab i from StripLeft; xs[n]: end
     font: FontSpec
     measured: bool
+    close: bool                 # the tabs were measured with a close button
     valid: bool
 
   TabBase* = ref object of Container
@@ -66,12 +77,15 @@ type
     fIndex: int
     fFirst: int                 # first tab shown (strip scroll position)
     fHotTab: int                # -1 none, tab index, or -2/-3 scroll arrows
+    fHotClose: int              # tab whose close button is under the pointer, -1 none
+    fCloseBtn: bool
     fFillBody: bool
     fHideTabs: bool             # no strip: pages are switched by code only
     fPos: TabPosition
     fEnsure: bool               # scroll the selected tab into view on next paint
     onChange*: NotifyEvent
     onChanging*: TabChangingEvent
+    onTabClose*: TabCloseEvent   ## a close button or a middle click asked to close tab `index`
 
   TabControl* = ref object of TabBase
     fTabs: seq[string]
@@ -88,6 +102,7 @@ const
   MinTabW = 44'f32
   ArrowW = 20'f32
   StripLeft = 2'f32
+  CloseBox = 16'f32           # width of the close button area of a tab
 
 # --------------------------------------------------------------- base API
 
@@ -95,6 +110,9 @@ method tabCount*(t: TabBase): int {.base.} = 0
 method tabText*(t: TabBase, i: int): string {.base.} = ""
 method tabChanged*(t: TabBase, oldIndex, newIndex: int) {.base.} =
   ## Called after the index changed (before `onChange`).
+  discard
+method removeTab*(t: TabBase, i: int) {.base.} =
+  ## Removes tab `i` once `onTabClose` allowed it (`closeTab`).
   discard
 method tabEnabled*(t: TabBase, i: int): bool {.base.} = true
 method tabVisible*(t: TabBase, i: int): bool {.base.} = true
@@ -120,6 +138,24 @@ proc `showTabs=`*(t: TabBase, v: bool) =
   t.needsLayout = true      # the padding (strip height) changed
   t.requestLayout()
   t.invalidate()
+
+func closeButtons*(t: TabBase): bool = t.fCloseBtn
+proc `closeButtons=`*(t: TabBase, v: bool) =
+  ## Draws a close cross on every tab and lets a middle click close a tab
+  ## (see the unit comment). Default `false`.
+  if v == t.fCloseBtn: return
+  t.fCloseBtn = v
+  t.fMetricsDirty = true
+  t.fHotClose = -1
+  t.invalidate()
+
+proc closeTab*(t: TabBase, i: int) =
+  ## Asks `onTabClose(t, i, allow)` and removes the tab unless `allow` was set
+  ## to false. Works with or without `closeButtons`.
+  if i < 0 or i >= t.tabCount: return
+  var allow = true
+  if t.onTabClose != nil: t.onTabClose(t, i, allow)
+  if allow and i < t.tabCount: t.removeTab(i)
 
 func tabPosition*(t: TabBase): TabPosition = t.fPos
 proc `tabPosition=`*(t: TabBase, v: TabPosition) =
@@ -151,24 +187,27 @@ proc refreshMetrics(t: TabBase, force = false) =
   let f = t.font
   let measured = t.canMeasure
   let m = addr t.fMetrics
+  let close = t.fCloseBtn
   if not force and not t.fMetricsDirty and m.valid and m.measured == measured and
-     m.font == f: return
+     m.font == f and m.close == close: return
   var texts: seq[string]
   var shown: seq[bool]
   t.collectTabs(texts, shown)
   t.fMetricsDirty = false
   if m.valid and m.measured == measured and m.font == f and m.texts == texts and
-     m.shown == shown: return
+     m.shown == shown and m.close == close: return
   m.xs.setLen(texts.len + 1)
   m.xs[0] = 0
   for i in 0 ..< texts.len:
-    let w = if shown[i]: max(t.textWidth(displayText(texts[i]), f) + 2 * TabPad, MinTabW)
+    let w = if shown[i]: max(t.textWidth(displayText(texts[i]), f) + 2 * TabPad +
+                             (if close: CloseBox else: 0'f32), MinTabW)
             else: 0'f32
     m.xs[i + 1] = m.xs[i] + w
   m.texts = texts
   m.shown = shown
   m.font = f
   m.measured = measured
+  m.close = close
   m.valid = true
 
 func tabWidth(t: TabBase, i: int): float32 =
@@ -217,6 +256,14 @@ proc arrowRect(t: TabBase, left: bool): RectF =
   let x = t.width - 2 * ArrowW - 2 + (if left: 0'f32 else: ArrowW)
   rectF(x, 3, ArrowW, h - 5)
 
+proc closeRect(t: TabBase, i: int): RectF =
+  ## The close button of tab `i` in client coordinates (empty without
+  ## `closeButtons` or when the tab is not shown).
+  let r = t.rectOf(i)
+  if not t.fCloseBtn or r.w <= 0: return rectF(0, 0, 0, 0)
+  let side = CloseBox - 2
+  t.place(rectF(r.x + r.w - CloseBox - 3, r.y + (r.h - side) / 2 + 1, side, side))
+
 proc tabAt*(t: TabBase, x, y: float32): int =
   ## Tab under the point, -1 none, -2 / -3 the left / right scroll arrow.
   let y = if t.fPos == tpTop: y else: t.height - y    # strip-local, from its outer edge
@@ -236,6 +283,10 @@ proc tabAt*(t: TabBase, x, y: float32): int =
     let mid = (lo + hi) div 2
     if xs[mid + 1] > target: hi = mid else: lo = mid + 1
   if lo < t.stripTabs and x >= StripLeft and t.tabWidth(lo) > 0: lo else: -1
+
+proc closeAt(t: TabBase, i: int, x, y: float32): bool =
+  ## The point is on the close button of tab `i`.
+  i >= 0 and t.fCloseBtn and x < t.stripRight and t.closeRect(i).contains(pointF(x, y))
 
 proc ensureVisible(t: TabBase, i: int) =
   t.refreshMetrics()
@@ -293,8 +344,18 @@ method canFocus*(t: TabBase): bool = t.isVisible and t.isEnabled and not t.fHide
 
 method doMouseDown*(t: TabBase, button: MouseButton, shift: ShiftState,
                     x, y: float32) =
+  if button == mbMiddle and t.fCloseBtn:
+    let i = t.tabAt(x, y)
+    if i >= 0:
+      procCall doMouseDown(Control(t), button, shift, x, y)
+      t.closeTab(i)
+      return
   if button == mbLeft:
     let i = t.tabAt(x, y)
+    if t.closeAt(i, x, y):
+      procCall doMouseDown(Control(t), button, shift, x, y)
+      t.closeTab(i)
+      return
     if i >= 0:
       if t.selectable(i): t.tabIndex = i
     elif i == -2 and t.fFirst > 0:
@@ -307,13 +368,16 @@ method doMouseDown*(t: TabBase, button: MouseButton, shift: ShiftState,
 
 method doMouseMove*(t: TabBase, shift: ShiftState, x, y: float32) =
   let h = t.tabAt(x, y)
-  if h != t.fHotTab:
+  let hc = if t.closeAt(h, x, y): h else: -1
+  if h != t.fHotTab or hc != t.fHotClose:
     t.fHotTab = h
+    t.fHotClose = hc
     t.invalidate()
   procCall doMouseMove(Control(t), shift, x, y)
 
 method doMouseLeave*(t: TabBase) =
   t.fHotTab = -1
+  t.fHotClose = -1
   t.invalidate()
   procCall doMouseLeave(Control(t))
 
@@ -372,6 +436,18 @@ method doMouseWheel*(t: TabBase, shift: ShiftState, dx, dy: float32,
 method inheritedColor*(t: TabBase): Color =
   if t.fFillBody: t.theme.surface else: procCall inheritedColor(Control(t))
 
+proc drawTabClose(t: TabBase, c: Canvas, i: int, bg, ink: Color) =
+  let r = t.closeRect(i)
+  if r.w <= 0: return
+  let th = t.theme
+  if t.fHotClose == i and t.isEnabled:
+    c.fillRoundRect(r, th.radius, t.rowHover(th, bg))
+  let cx = r.x + r.w / 2
+  let cy = r.y + r.h / 2
+  let col = if t.isEnabled: ink else: th.textDisabled
+  c.line(cx - 3, cy - 3, cx + 3, cy + 3, col, 1.3)
+  c.line(cx - 3, cy + 3, cx + 3, cy - 3, col, 1.3)
+
 method paint*(t: TabBase, c: Canvas) =
   let th = t.theme
   let en = t.isEnabled
@@ -408,10 +484,14 @@ method paint*(t: TabBase, c: Canvas) =
     c.fillRoundRect(t.place(rectF(r.x, r.y, r.w, r.h + 6)), th.radius, fill)
     c.strokeRoundRect(t.place(rectF(r.x, r.y, r.w, r.h + 6)), th.radius, th.border, 1)
     c.popClip()
-    c.drawMnemonic(t.fMetrics.texts[i], t.font, t.place(rectF(r.x + 4, r.y, r.w - 8, r.h - 1)),
-                   (if t.hasFontColor: t.ink(th, fill, en)
-                    elif en: legible(th.textMuted, fill) else: th.textDisabled),
-                   t.altHeld, taCenter, vaCenter)
+    let ink = if t.hasFontColor: t.ink(th, fill, en)
+              elif en: legible(th.textMuted, fill) else: th.textDisabled
+    let tw = if t.fCloseBtn: CloseBox else: 0'f32
+    c.drawMnemonic(t.fMetrics.texts[i], t.font, t.place(rectF(r.x + 4, r.y, r.w - 8 - tw, r.h - 1)),
+                   ink, t.altHeld, taCenter, vaCenter)
+    c.pushClip(t.place(rectF(r.x - 1, 0, r.w + 2, h)))
+    t.drawTabClose(c, i, fill, ink)
+    c.popClip()
   if selR.w > 0:
     c.pushClip(t.place(rectF(selR.x - 1, 0, selR.w + 2, h)))
     let full = t.place(rectF(selR.x, selR.y, selR.w, selR.h + 6))
@@ -419,8 +499,10 @@ method paint*(t: TabBase, c: Canvas) =
     c.strokeRoundRect(full, th.radius, th.borderStrong, 1)
     c.popClip()
     c.drawMnemonic(t.fMetrics.texts[t.fIndex], t.font,
-                   t.place(rectF(selR.x + 4, selR.y, selR.w - 8, selR.h)),
+                   t.place(rectF(selR.x + 4, selR.y, selR.w - 8 -
+                                 (if t.fCloseBtn: CloseBox else: 0'f32), selR.h)),
                    t.ink(th, bodyBg, en), t.altHeld, taCenter, vaCenter)
+    t.drawTabClose(c, t.fIndex, bodyBg, t.ink(th, bodyBg, en))
     if t.focused:
       drawFocusRing(c, t.place(rectF(selR.x, selR.y, selR.w, selR.h)), th)
   c.popClip()
@@ -446,6 +528,7 @@ proc initTabBase(t: TabBase, owner: Component) =
   t.initContainer(owner)
   t.fIndex = -1
   t.fHotTab = -1
+  t.fHotClose = -1
   t.tabStop = true
   t.setBounds(0, 0, 289, 193)
 
@@ -462,6 +545,17 @@ proc `tabs=`*(t: TabControl, v: seq[string]) =
   if t.fIndex < 0 and v.len > 0: t.fIndex = 0
   t.fFirst = 0
   t.invalidate()
+
+method removeTab*(t: TabControl, i: int) =
+  if i < 0 or i >= t.fTabs.len: return
+  t.fTabs.delete i
+  t.fMetricsDirty = true
+  let old = t.fIndex
+  if i < t.fIndex: dec t.fIndex
+  if t.fIndex >= t.fTabs.len: t.fIndex = t.fTabs.high
+  t.fFirst = min(t.fFirst, max(t.fTabs.high, 0))
+  t.invalidate()
+  if i == old and t.fIndex >= 0 and t.onChange != nil: t.onChange(t)
 
 proc addTab*(t: TabControl, caption: string): int {.discardable.} =
   t.fTabs.add caption
@@ -545,6 +639,10 @@ method sheetTabText*(p: PageControl, s: TabSheet): string {.base.} =
 method tabText*(p: PageControl, i: int): string =
   let s = p.sheetAt(i)
   if s == nil: "" else: p.sheetTabText(s)
+
+method removeTab*(p: PageControl, i: int) =
+  let s = p.sheetAt(i)
+  if s != nil: s.free()
 
 method tabEnabled*(p: PageControl, i: int): bool =
   let s = p.sheetAt(i)

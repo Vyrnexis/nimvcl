@@ -677,6 +677,66 @@ suite "standard controls":
     pc.removeControl d
     check pc.activePage == nil and pc.activePageIndex == -1
 
+  test "pagecontrol: closeButtons widen the tabs, close by cross or middle click, onTabClose can veto":
+    let f = newShown()
+    let pc = newPageControl(f, 0, 0, 500, 200)
+    let a = newTabSheet(pc, "A")
+    let b = newTabSheet(pc, "Beta")
+    let c = newTabSheet(pc, "C")
+    lay f
+    let plain = pc.tabRect(1).w
+    pc.closeButtons = true
+    check pc.tabRect(1).w > plain
+    var asked: seq[int]
+    var allow = false
+    pc.onTabClose = proc(s: Control, i: int, ok: var bool) =
+      asked.add i
+      ok = allow
+    proc crossOf(i: int): (float32, float32) =
+      let r = pc.tabRect(i)
+      (pc.fx(r.x + r.w - 12), pc.fy(r.y + r.h / 2))
+    # hover on the cross is tracked, a click on it vetoed: the page stays
+    let (x1, y1) = crossOf(1)
+    f.moveTo(x1, y1)
+    f.click(x1, y1)
+    check asked == @[1] and pc.pageCount == 3
+    # a click on the tab text selects, it does not close
+    let r2 = pc.tabRect(2)
+    f.click(pc.fx(r2.x + 6), pc.fy(r2.y + r2.h / 2))
+    check asked == @[1] and pc.activePage == c
+    # allowed: the sheet is freed
+    allow = true
+    lay f
+    let (x0, y0) = crossOf(0)
+    f.moveTo(x0, y0)
+    f.click(x0, y0)
+    check asked == @[1, 0] and pc.pageCount == 2
+    check pc.sheets == @[b, c]
+    # middle click closes too
+    lay f
+    let r = pc.tabRect(0)
+    for k in [ekMouseDown, ekMouseUp]:
+      Application.dispatch(PlatformEvent(kind: k, windowId: f.win.id,
+        x: pc.fx(r.x + 8), y: pc.fy(r.y + r.h / 2), button: mbMiddle, clicks: 1))
+    check asked == @[1, 0, 0] and pc.pageCount == 1
+    # without the buttons a middle click does nothing
+    pc.closeButtons = false
+    check pc.tabRect(0).w <= plain + 1
+    pc.closeTab(0)                      # code can still close
+    check asked.len == 4 and pc.pageCount == 0
+    f.freeWindow()
+
+  test "tabcontrol: closeTab removes the tab and keeps the selection sensible":
+    let f = newShown()
+    let t = newTabControl(f, @["a", "b", "c"], 0, 0, 300, 100)
+    t.tabIndex = 2
+    t.closeTab(0)
+    check t.tabs == @["b", "c"] and t.tabIndex == 1
+    t.onTabClose = proc(s: Control, i: int, ok: var bool) = ok = false
+    t.closeTab(0)
+    check t.tabs.len == 2
+    f.freeWindow()
+
   test "pagecontrol: disabled and tab-hidden sheets are not selectable (review 24)":
     let f = newShown()
     let pc = newPageControl(f, 0, 0, 400, 200)

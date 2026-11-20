@@ -348,11 +348,13 @@ registerClass(TabBase, parent = Container, abstract = true):
   category Appearance:
     showTabs: bool
     tabPosition: TabPosition
+    closeButtons: bool
   category Behaviour:
     tabIndex: int
   category Events:
     onChange: NotifyEvent
     onChanging: TabChangingEvent
+    onTabClose: TabCloseEvent
 
 registerClass(TabControl, parent = TabBase):
   category Data:
