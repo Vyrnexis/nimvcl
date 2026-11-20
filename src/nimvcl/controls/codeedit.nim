@@ -77,7 +77,9 @@
 ## right click first moves the caret unless it lands in the selection.
 ##
 ## Events: `onChange` (text), `onCaretMove(line, col)`, `onModifiedChanged`,
-## `onOverwriteChange`, `onGutterClick`.
+## `onOverwriteChange`, `onGutterClick`, `onLinesMove` (Alt+Up/Down, just
+## before the lines swap: lets a holder of line numbers, such as numbered
+## bookmarks, move them with the lines).
 ##
 ## IME: the composition is drawn inline at the caret and underlined; the commit
 ## arrives as text input. The clipboard hooks are those of `Edit`.
@@ -193,6 +195,9 @@ type
     onOverwriteChange*: NotifyEvent
     onCaretMove*: CaretMoveEvent
     onGutterClick*: GutterClickEvent
+    onLinesMove*: proc(e: CodeEdit, first, last, nbFirst, nbLast: int, up: bool) {.closure.}
+      ## The lines `first .. last` swap places with the neighbouring block
+      ## `nbFirst .. nbLast` (above them when `up`); called before the text changes.
     gotoLineDialog*: proc(e: CodeEdit)
       ## Ctrl+G; the default asks with `inputQuery`. Replace it to use your own UI.
 
@@ -1235,6 +1240,7 @@ proc moveLines(e: CodeEdit, up: bool) =
     if nf >= m.lineCount: return
     nl = if e.isCollapsed(nf): e.fFold.foldEnd(nf) else: nf
   e.fMove = (true, f, l, nf, nl, up)       # the markers go with their lines
+  if e.onLinesMove != nil and not m.readOnly: e.onLinesMove(e, f, l, nf, nl, up)
   let moved = try: moveLines(m, f, l, up, nf, nl)
               finally: e.fMove.active = false
   if moved:

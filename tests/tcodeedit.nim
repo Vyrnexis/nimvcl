@@ -758,6 +758,22 @@ suite "codeedit":
     e.foldAll()                                     # no-op
     check e.isLineVisible(1)
 
+  test "Alt+Up/Down: markers swap with their lines, onLinesMove reports the swap":
+    let f = newShown()
+    let e = f.mk("a\nb\nc\nd")
+    e.addMarker(1, mkBookmark)
+    e.addMarker(2, mkBreakpoint)
+    var got: seq[(int, int, int, int, bool)]
+    e.onLinesMove = proc(c: CodeEdit, a, b, na, nb: int, up: bool) = got.add (a, b, na, nb, up)
+    e.caretPos = (2, 0)
+    f.key(keyUp, {ssAlt})                           # "c" above "b"
+    check e.lines == @["a", "c", "b", "d"]
+    check e.markerLines(mkBookmark) == @[2] and e.markerLines(mkBreakpoint) == @[1]
+    check got == @[(2, 2, 1, 1, true)]
+    f.key(keyDown, {ssAlt})
+    check e.markerLines(mkBookmark) == @[1] and e.markerLines(mkBreakpoint) == @[2]
+    check got[1] == (1, 1, 2, 2, false)
+
   test "markers follow their lines":
     let f = newShown()
     let e = f.mk("a\nb\nc\nd\ne")
