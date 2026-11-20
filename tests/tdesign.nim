@@ -934,3 +934,14 @@ suite "form designer drags and history":
     check nb.parent == Container(np)
     check np.children.find(nb) >= 0
     x.done
+
+suite "unique names (N6)":
+  test "components owned by components and underscore variants count":
+    let x = build()
+    check x.d.uniqueName("Button") == "Button1"
+    let inner = newComponent(x.p)            # owned by the panel, not by the form
+    inner.name = "Timer1"
+    check x.d.uniqueName("Timer") == "Timer2"
+    x.a.name = "Button_1"                    # the same Nim identifier as Button1
+    check x.d.uniqueName("Button") == "Button2"
+    x.done

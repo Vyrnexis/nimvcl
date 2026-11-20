@@ -420,16 +420,22 @@ proc identOnly(s: string): string =
     if ch in IdentChars: result.add ch
 
 proc nameUsed(d: FormDesigner, name: string): bool =
-  let low = name.toLowerAscii
-  proc walk(c: Control, low: string): bool =
-    if c.name.toLowerAscii == low: return true
+  ## True when a control or component under the design root (also one owned by
+  ## another component: a menu item, a timer in a panel) has this name. Compared
+  ## like Nim identifiers (case and underscores do not count), since the form
+  ## file turns each name into a field.
+  var seen: seq[Component]
+  proc walk(c: Component, name: string): bool =
+    if c == nil or c in seen: return false
+    seen.add c
+    if c.name.len > 0 and cmpIgnoreStyle(c.name, name) == 0: return true
+    for x in c.components:
+      if walk(x, name): return true
     if c of Container:
       for k in Container(c).children:
-        if walk(k, low): return true
-  if walk(d.scope, low): return true
-  let o = if d.componentOwner != nil: d.componentOwner else: Component(d.scope)
-  for x in o.components:
-    if x.name.toLowerAscii == low: return true
+        if walk(k, name): return true
+  if walk(d.scope, name): return true
+  walk(if d.componentOwner != nil: d.componentOwner else: Component(d.scope), name)
 
 proc uniqueName*(d: FormDesigner, className: string): string =
   ## `className` plus the smallest number that no control or component under

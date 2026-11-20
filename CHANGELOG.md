@@ -25,6 +25,9 @@ between minor versions.
   `CodeModel.saveCopy` write a copy without renaming or marking saved. (N3)
 - `CodeEdit.loadFromFile` reads the file before it changes the name or the
   highlighter, so an unreadable file leaves the editor as it was. (N4)
+- The designer's `uniqueName` also looks at components owned by other
+  components (menu items, a timer in a panel) and compares names like Nim
+  identifiers (`Button_1` is `Button1`), so new names cannot collide. (N6)
 
 ## [0.2.1] - 2026-11-20
 
