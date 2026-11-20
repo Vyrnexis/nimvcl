@@ -276,8 +276,12 @@ proc applyProps(b: Built, file: string, opt: NfmOptions,
                         "` (" & info.typeName & ")")
       else:
         info.set(b.obj, convertValue(info, p.value, file, byName, opt, baseDir))
+    except NfmError as e:
+      # a value of the wrong type: skipped with a warning unless strict
+      if opt.strict: raise
+      opt.warnings.add e.msg
     except PropError as e:
-      raise nfmError(file, p.line, p.col, "property `" & p.name & "`: " & e.msg)
+      opt.problem(file, p.line, p.col, "property `" & p.name & "`: " & e.msg)
 
 proc markInherited(o: Obj, seen: var HashSet[Obj]) =
   if seen.containsOrIncl(o): return
@@ -403,6 +407,8 @@ proc loadNfm*(text: string, owner: Component = nil, options: NfmOptions = nil,
   legacyNames(root)
   let o = buildNfm(root, owner, options, fileName)
   if o == nil or not (o of Form):
+    # leave nothing of the wrong root in the owner
+    if o != nil and owner != nil and o of Component: owner.removeComponent(Component(o))
     raise nfmError(fileName, root.line, root.col,
                    "the root object `" & root.className & "` is not a Form")
   Form(o).notifyCreated()

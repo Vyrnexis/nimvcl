@@ -414,6 +414,20 @@ suite "non-visual components":
     check f.alClient.align == alClient
     check f.alClient.parent == Container(f)
 
+  test "non-strict load skips a value of the wrong type; a BOM is skipped; a non-Form root is detached (N27)":
+    let opt = newNfmOptions(strict = false)
+    let f = loadNfm("object A: Form\n  object b: Button\n    width = 'wide'\n    caption = 'ok'\n  end\nend",
+                    nil, opt, "t.nfm")
+    check Button(f.findComponent("b")).caption == "ok"
+    check opt.warnings.len == 1 and "`width` expects a number" in opt.warnings[0]
+    let g = loadNfm("\xEF\xBB\xBFobject A: Form\nend")
+    check g.name == "A"
+    let owner = newForm(nil, 10, 10)
+    let before = owner.components.len
+    expect NfmError:
+      discard loadNfm("object P: Panel\nend", owner)
+    check owner.components.len == before
+
   test "a control's own helper timers are not written":
     let f = newForm(nil, 200, 100)
     f.name = "F"

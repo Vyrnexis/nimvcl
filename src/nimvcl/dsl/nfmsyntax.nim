@@ -407,6 +407,8 @@ proc parseNfm*(text: string, fileName = ""): NfmNode =
   ## Parses a form file into its root object. Raises `NfmError` with the
   ## position of the problem (`file:line:col: message`).
   var lx = Lexer(src: text, line: 1, col: 1, fileName: fileName)
+  if text.len >= 3 and text[0] == '\xEF' and text[1] == '\xBB' and text[2] == '\xBF':
+    lx.pos = 3                      # a UTF-8 byte order mark
   lx.next()
   if not lx.tok.isKeyword("object") and not lx.tok.isKeyword("inherited"):
     lx.fail(lx.tok.line, lx.tok.col,
