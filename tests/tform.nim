@@ -584,9 +584,17 @@ suite "application":
     t.free()
 
   test "idle blocks: no events means the wait times out":
-    let t0 = getMonoTime()
-    Application.processMessages(120)
-    check (getMonoTime() - t0).inMilliseconds >= 100
+    # A stray event left by earlier tests (window expose, timer wake) ends a
+    # wait early, which is correct; one quiet wait of the full length proves
+    # the loop blocks.
+    var waited = 0'i64
+    for attempt in 0 ..< 5:
+      for _ in 0 ..< 10: Application.processMessages(0)
+      let t0 = getMonoTime()
+      Application.processMessages(120)
+      waited = (getMonoTime() - t0).inMilliseconds
+      if waited >= 100: break
+    check waited >= 100
 
   test "clipboard round trip":
     Application.clipboard = "nimvcl"
