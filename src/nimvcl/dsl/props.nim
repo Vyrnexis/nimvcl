@@ -147,6 +147,7 @@ type
     parent*: ClassInfo
     props*: seq[PropInfo]                ## own properties, in registration order
     abstract*: bool
+    defaultEvent*: string                ## the event a double click on the object in a designer creates a handler for (`"onClick"`); "" inherits the parent's
     matches*: proc(o: Obj): bool {.closure.}
     create*: proc(owner: Component, parent: Obj): Obj {.closure.}
     attach*: proc(parent, child: Obj) {.closure.}
@@ -675,6 +676,26 @@ proc findProp*(ci: ClassInfo, name: string): PropInfo =
   ci.propIndex[name] = result
 
 # ------------------------------------------------------------ object access
+
+proc defaultEventOf*(o: Obj): string =
+  ## The event a double click on `o` in a designer creates a handler for
+  ## (Delphi's default event): the `defaultEvent` of its class or of the
+  ## nearest ancestor class that names an event the object has; failing that
+  ## `onClick`, `onChange`, `onTimer`, `onExecute` or the first event, "" when
+  ## it has none.
+  let ci = classOf(o)
+  if ci == nil: return ""
+  var c = ci
+  while c != nil:
+    if c.defaultEvent.len > 0:
+      let p = ci.findProp(c.defaultEvent)
+      if p != nil and p.kind == pkEvent: return c.defaultEvent
+    c = c.parent
+  for ev in ["onClick", "onChange", "onTimer", "onExecute"]:
+    let p = ci.findProp(ev)
+    if p != nil and p.kind == pkEvent: return ev
+  for p in ci.propsOf:
+    if p.kind == pkEvent: return p.name
 
 proc requireProp(o: Obj, name: string): PropInfo =
   let ci = classOf(o)

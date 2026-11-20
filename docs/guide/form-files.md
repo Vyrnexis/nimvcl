@@ -551,6 +551,7 @@ so an IDE can build a handler stub from `params` without its own table. Every
 |---|---|
 | `classByName(name)`, `allClasses()`, `classOf(obj)` | lookup; `classOf` answers the nearest registered class of a user subclass |
 | `propsOf(ci)`, `findProp(ci, name)` | the properties (inherited first); `findProp` accepts `font.size`, `anchors.akLeft` |
+| `ci.defaultEvent`, `defaultEventOf(obj)` | the event a double click on the object in a designer creates a handler for (`onClick` for controls, `onChange` for Edit, Memo, ComboBox, ListBox, CheckBox, RadioButton, TrackBar, ScrollBar and SpinEdit, `onTimer` for Timer, `onCreate` for Form); a class that sets none inherits its parent's |
 | `getProp(obj, name)`, `setProp(obj, name, value)` | `PropValue` access; `PropError` for an unknown name or a value of the wrong kind |
 | `isDefault(obj, name)`, `defaultOf(ci, prop)` | defaults are measured on a fresh instance of the object's class |
 | `kidsOf(obj)`, `createObject(ci, owner, parent)` | the owned children (controls, menu items, columns, panels) and creation |

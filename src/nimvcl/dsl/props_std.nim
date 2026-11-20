@@ -771,3 +771,19 @@ addColl "MenuItem", "items", "MenuItem", menuOps()
 addColl "PageControl", "pages", "TabSheet", controlOps[TabSheet]("TabSheet")
 addColl "ActionList", "actions", "Action", actionOps()
 addColl "ToolBar", "buttons", "ToolButton", controlOps[ToolButton]("ToolButton")
+
+# ------------------------------------------------------------ default events
+
+block:
+  ## What a double click on an object in a designer creates a handler for.
+  proc setDefaultEvent(cls, event: string) =
+    classByName(cls).defaultEvent = event
+  setDefaultEvent "Control", "onClick"
+  setDefaultEvent "Form", "onCreate"
+  for cls in ["Edit", "Memo", "ComboBox", "ListBox", "CheckBox", "RadioButton",
+              "TrackBar", "ScrollBar", "SpinEdit"]:
+    setDefaultEvent cls, "onChange"
+  setDefaultEvent "Timer", "onTimer"
+  setDefaultEvent "MenuItem", "onClick"
+  setDefaultEvent "Action", "onExecute"
+  setDefaultEvent "ActionList", "onExecute"

@@ -9,6 +9,7 @@ between minor versions.
 
 ### Added
 
+- `ClassInfo.defaultEvent` and `defaultEventOf(obj)` (Delphi's default event: `onClick`, `onChange` for the edit-like controls, `onTimer`, `onCreate` for a form), registered in `props_std`.
 - `FormDesigner.setProps` / `setProp` (undoable property changes with old and new values, `onPropertyChanged`), `beginGroup` / `endGroup`, `sizeSelection(width, height)` and `setTabOrder(controls)` (one undo step each); `ObjectInspector.designer` routes inspector edits through the designer, and `onPropertyChangedEx` reports the old value.
 - `DockSite.onPanelStateChanged(site, panel)`: a panel became hidden, docked or floating, once per action (a move is no change; `loadLayout` fires it once per changed panel at the end); `loadLayoutEx(text)` returns `(ok, reason)` (`loadLayout` is its wrapper); `removePanel(panel)` frees a panel and its name.
 - `PageControl` / `TabControl` closable tabs: `closeButtons` draws a close cross on every tab (hover state, tab width includes it, so `sheetTabText` overrides need no padding), a middle click closes too; `onTabClose(sender, index, allow: var bool)` can veto, otherwise the sheet is freed (the tab dropped); `closeTab(i)` from code.

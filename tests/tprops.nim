@@ -345,3 +345,21 @@ suite "design-time properties registered":
     check f.menu == mm
     setProp(Obj(f), "icon", PropValue(kind: pkImage, image: newImage(2, 2)))
     check f.icon != nil
+
+  test "defaultEvent: set per class, inherited, every named event exists":
+    let f = newForm(nil, 100, 100)
+    check defaultEventOf(Obj(f)) == "onCreate"
+    check defaultEventOf(Obj(newButton(f, "b"))) == "onClick"
+    check defaultEventOf(Obj(newEdit(f, "e"))) == "onChange"
+    check defaultEventOf(Obj(newMemo(f, "m"))) == "onChange"
+    check defaultEventOf(Obj(newCheckBox(f, "c"))) == "onChange"
+    check defaultEventOf(Obj(newTrackBar(f))) == "onChange"
+    check defaultEventOf(Obj(newLabel(f, "l"))) == "onClick"          # from Control
+    check defaultEventOf(Obj(newPanel(f))) == "onClick"
+    check defaultEventOf(Obj(newTimer(f))) == "onTimer"
+    check defaultEventOf(Obj(newImageList())) == ""                    # no event at all
+    for ci in allClasses():
+      if ci.defaultEvent.len > 0:
+        let p = ci.findProp(ci.defaultEvent)
+        check p != nil and p.kind == pkEvent
+    f.freeWindow()
