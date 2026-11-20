@@ -91,6 +91,7 @@ between minor versions.
   (64 MB, `maxUndoBytes=`) and drops its oldest steps without moving the whole
   history on every edit. (Q8)
 - A font or colour set explicitly to the class default is saved when the parent's value differs (the reload inherited the parent's instead). (N24)
+- `loadForm`: an enum value written like a component name (`align = alClient` with a component called `alClient`) stays the enum value; an identifier becomes a component reference only where the property takes an object. (N26)
 
 ## [0.2.1] - 2026-11-20
 

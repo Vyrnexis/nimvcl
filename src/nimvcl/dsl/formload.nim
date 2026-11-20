@@ -336,7 +336,7 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
         let dot = p.name.find('.')
         let base = p.name[0 ..< dot]
         let sub = p.name[dot + 1 .. ^1]
-        let (_, e) = nimExpr(n.className, sub, p.value, names)
+        let (_, e) = nimExpr(n.className, sub, p.value, initHashSet[string]())
         let call = "nfmSetSub(" & target & ", " & base & ", " & sub & ", " & e & ")"
         assigns.add "when compiles(" & call & "):\n  " & call & "\nelse:\n  " &
           errStmt(pos & ": `" & n.className & "` has no property `" & p.name &
@@ -356,10 +356,16 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
           for it in p.value.items: parts.add embed(it)
           imgBranch = "  when nfmIsImages(typeof(" & access & ")):\n    " & access &
                       " = @[" & parts.join(", ") & "]\n  el"
+        # an identifier equal to a component name is that component only when
+        # the property takes an object (`align = center` stays the enum value)
+        var plainBranch = ""
+        if p.value.kind == nvIdent and p.value.text in names:
+          plainBranch = "\n  elif compiles((" & access & " = " & p.value.text &
+                        ")):\n    " & access & " = " & p.value.text
         assigns.add "when compiles(" & access & "):\n" &
           (if imgBranch.len > 0: imgBranch & "if" else: "  when") &
           " compiles((" & access & " = " & e &
-          ")):\n    " & access & " = " & e & "\n  else:\n    " &
+          ")):\n    " & access & " = " & e & plainBranch & "\n  else:\n    " &
           errStmt(pos & ": the value of `" & p.name & "` does not fit its type in `" &
                   n.className & "`") & "\nelse:\n  " &
           errStmt(pos & ": `" & n.className & "` has no property `" & p.name & "`")

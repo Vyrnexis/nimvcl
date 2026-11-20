@@ -12,6 +12,7 @@ const
 
 loadForm Sample, "nfm/sample.nfm"
 loadForm NonVis, "nfm/nonvisual.nfm"
+loadForm EnumName, "nfm/enumname.nfm"
 
 var clicks, exits: int
 proc okClick(self: Sample, sender: Control) = inc clicks
@@ -407,6 +408,11 @@ suite "non-visual components":
     check f.pop.images == f.imgs
     check f.acts.components.len == 1
     check formToNfm(f) == nv
+
+  test "loadForm: an enum value named like a component stays the enum value (N26)":
+    let f = newEnumName()
+    check f.alClient.align == alClient
+    check f.alClient.parent == Container(f)
 
   test "a control's own helper timers are not written":
     let f = newForm(nil, 200, 100)

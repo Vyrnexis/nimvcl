@@ -1,0 +1,11 @@
+object EnumName: Form
+  width = 300
+  height = 200
+  object alClient: Panel
+    align = alClient
+  end
+  object lbl: Label
+    caption = 'x'
+    focusControl = alClient
+  end
+end
