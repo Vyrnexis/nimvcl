@@ -12,6 +12,9 @@
 ## `ok` is false when the user cancelled or SDL reported an error (`files`
 ## then empty). Paths are UTF-8, one entry per selection.
 
+when not (defined(gcOrc) or defined(gcArc) or defined(gcAtomicArc)):
+  {.error: "nimvcl: runOnUi and the file dialog callbacks hand values to the UI thread by moving them; they are only safe with --mm:orc, --mm:arc or --mm:atomicArc.".}
+
 import sdl3
 import ./window
 

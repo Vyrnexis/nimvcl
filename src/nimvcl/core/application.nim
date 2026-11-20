@@ -40,6 +40,9 @@
 ## ```
 
 import std/[locks, isolation]
+
+when not (defined(gcOrc) or defined(gcArc) or defined(gcAtomicArc)):
+  {.error: "nimvcl: runOnUi and the file dialog callbacks hand values to the UI thread by moving them; they are only safe with --mm:orc, --mm:arc or --mm:atomicArc.".}
 import ../platform/[events, cursors, sdlutil]
 import ./theme, ./control, ./form, ./timer, ./input, ./popup
 export popup

@@ -11,6 +11,7 @@ between minor versions.
 
 - The numpad Enter key arrives as Enter (default buttons, Edit, CodeEdit, grids
   handled only the main Enter key). (N19)
+- Compiling with `--mm:refc` or `--mm:markAndSweep` is now a compile-time error where `runOnUi` / the file dialog callbacks are used (they are only safe under ORC/ARC). (N44)
 - A Defect (index error, assertion) in an event handler, queued job, idle
   hook or paint no longer ends the application: it goes to `onException`, or
   without one it is logged to stderr and the loop continues. Set
