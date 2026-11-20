@@ -441,6 +441,47 @@ suite "docking":
     ide.inspector.show()
     check ide.inspector.state == dpDocked
 
+  test "load validates first: bad parts are refused and nothing changes (N9)":
+    let ide = buildIde()
+    let site = ide.site
+    let s1 = site.saveLayout()
+    var j = parseJson(s1)
+    var v2 = j.copy
+    v2["version"] = %2
+    check not site.loadLayout($v2)
+    var bad = j.copy
+    bad["root"] = %*"junk"
+    check not site.loadLayout($bad)
+    bad = j.copy
+    bad["root"] = %*{"split": "h", "children": 5}
+    check not site.loadLayout($bad)
+    bad = j.copy
+    bad["root"] = %*{"tabs": ["ghost", "phantom"]}
+    bad["floats"] = %*[]
+    bad["hidden"] = %*[]
+    check not site.loadLayout($bad)             # none of its panels is here
+    bad = j.copy
+    bad["floats"] = %*[{"x": "left", "root": {"tabs": ["ed1"]}}]
+    check not site.loadLayout($bad)
+    check site.saveLayout() == s1
+
+  test "loadLayout cancels a drag in progress (N9)":
+    let ide = buildIde()
+    let site = ide.site
+    let f = ide.f
+    let s1 = site.saveLayout()
+    let a = ide.palette.tabPoint
+    f.down(a)
+    f.moveTo(pointF(a.x + 20, a.y + 40))
+    f.moveTo(guidePoint(site, ide.ed1.group, dsRight))
+    check dragging()
+    check site.loadLayout(s1)
+    check not dragging()
+    check not site.guidesVisible
+    f.up(guidePoint(site, ide.ed1.group, dsRight))
+    settle()
+    check site.saveLayout() == s1
+
   test "load ignores unknown names, keeps unmentioned panels, rejects junk":
     let ide = buildIde()
     let site = ide.site

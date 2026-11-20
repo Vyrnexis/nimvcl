@@ -33,6 +33,9 @@ between minor versions.
 - The inspector refuses a component name or a handler name the form file cannot
   hold (`end`, `object`, `inherited`, `true`, `false`, spaces, a leading digit;
   an empty component name). New `validNfmName` in `nimvcl/dsl/nfmsyntax`. (N7)
+- `DockSite.loadLayout` checks the whole text first (version, shape, at least
+  one known panel) and cancels a tab drag in progress; if the rebuild still
+  fails half way, the previous layout is put back and it returns false. (N9)
 
 ## [0.2.1] - 2026-11-20
 

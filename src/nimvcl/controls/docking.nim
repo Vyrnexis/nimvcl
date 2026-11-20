@@ -1062,71 +1062,141 @@ proc buildNode(ps: DockSite, j: JsonNode, placed: var seq[DockPanel]): Control =
     return s
   nil
 
+proc cancelDrag()
+
+proc nodeShapeOk(j: JsonNode, names: var seq[string]): bool =
+  ## Whether `j` is a tree of `tabs` / `split` objects of the right types;
+  ## collects the panel names it mentions.
+  if j == nil or j.kind == JNull: return true
+  if j.kind != JObject: return false
+  if j.hasKey("tabs"):
+    if j["tabs"].kind != JArray: return false
+    for e in j["tabs"]:
+      if e.kind != JString: return false
+      names.add e.getStr
+    return j{"active"} == nil or j["active"].kind == JString
+  if j.hasKey("split"):
+    if j["split"].kind != JString or j{"children"} == nil or
+       j["children"].kind != JArray: return false
+    if j{"weights"} != nil:
+      if j["weights"].kind != JArray: return false
+      for w in j["weights"]:
+        if w.kind notin {JInt, JFloat}: return false
+    for c in j["children"]:
+      if not nodeShapeOk(c, names): return false
+    return true
+  false
+
+proc layoutOk(ps: DockSite, j: JsonNode): bool =
+  ## Checks a parsed layout before anything is touched: the version, the shape
+  ## of every part, and that it names at least one panel this site has (a
+  ## layout of other panels would only empty the site).
+  if j.kind != JObject or not j.hasKey("root") or not j.hasKey("version"): return false
+  if j["version"].kind != JInt or j["version"].getInt != 1: return false
+  var names: seq[string]
+  if not nodeShapeOk(j["root"], names): return false
+  if j.hasKey("floats"):
+    if j["floats"].kind != JArray: return false
+    for f in j["floats"]:
+      if f.kind != JObject or not nodeShapeOk(f{"root"}, names): return false
+      for k in ["x", "y", "w", "h"]:
+        if f.hasKey(k) and f[k].kind notin {JInt, JFloat}: return false
+  if j.hasKey("hidden"):
+    if j["hidden"].kind != JArray: return false
+    for h in j["hidden"]:
+      if h.kind != JObject or h{"name"} == nil or h["name"].kind != JString: return false
+      names.add h["name"].getStr
+      for k in ["x", "y", "w", "h"]:
+        if h.hasKey(k) and h[k].kind notin {JInt, JFloat}: return false
+  if j.hasKey("active") and j["active"].kind != JString: return false
+  if ps.fPanels.len > 0:
+    var known = false
+    for n in names:
+      if ps.findPanel(n) != nil:
+        known = true
+        break
+    if not known: return false
+  true
+
+proc applyLayout(ps: DockSite, j: JsonNode) =
+  ## Replaces the arrangement by `j` (already checked by `layoutOk`).
+  let oldFloats = ps.fFloats
+  for f in oldFloats: f.fRoot = nil          # keep the dispose below simple
+  for p in ps.fPanels:
+    let g = p.group
+    if g != nil:
+      g.removeControl p
+      p.visible = true
+  for f in oldFloats: f.disposeFloat()
+  ps.fFloats.setLen 0
+  ps.setRoot(nil)
+  ps.fActive = nil
+  var placed: seq[DockPanel]
+  ps.setRoot(buildNode(ps, j["root"], placed))
+  for fj in j{"floats"}.getElems():
+    let r = rectF(float32(fj{"x"}.getInt(60)), float32(fj{"y"}.getInt(60)),
+                  float32(max(fj{"w"}.getInt(320), 160)),
+                  float32(max(fj{"h"}.getInt(260), 120)))
+    let node = buildNode(ps, fj{"root"}, placed)
+    if node == nil: continue
+    let fs = newFloatSite(ps, r, "")
+    fs.setRoot(node)
+    fs.updateFloatCaption()
+    fs.fForm.show()
+    fs.fForm.relayoutAll()
+  for hj in j{"hidden"}.getElems():
+    let p = ps.findPanel(hj{"name"}.getStr)
+    if p == nil or p in placed: continue
+    p.fWasFloating = hj{"float"}.getBool(false)
+    p.fFloatRect = rectF(float32(hj{"x"}.getInt(0)), float32(hj{"y"}.getInt(0)),
+                         float32(hj{"w"}.getInt(0)), float32(hj{"h"}.getInt(0)))
+    p.fDockPlace = placeFromJson(hj{"place"})
+    placed.add p
+  # panels the layout does not mention: tabs of the first group
+  for p in ps.fPanels:
+    if p in placed: continue
+    var g = ps.firstGroup
+    if g == nil:
+      g = newDockTabs()
+      ps.setRoot(g)
+    g.insertControl p
+    p.align = alClient
+    if g.fActive == nil: g.fActive = p
+    g.showActive()
+  let an = j{"active"}.getStr
+  if an.len > 0:
+    let ap = ps.findPanel(an)
+    if ap != nil and ap.group != nil: ap.activate()
+
 proc loadLayout*(site: DockSite, text: string): bool =
   ## Restores a layout made by `saveLayout`. False (and nothing changed) when
-  ## `text` is not a layout. Events: panels that were docked or floating and
-  ## end up hidden get `onUndock`, hidden ones that appear get `onDock`.
+  ## `text` is not a layout: bad JSON, an unknown version, a part of the wrong
+  ## shape, or no panel of this site in it. The text is checked before anything
+  ## is touched; should the rebuild still fail half way, the previous layout is
+  ## put back and the result is false. A tab drag in progress is cancelled.
+  ## Events: panels that were docked or floating and end up hidden get
+  ## `onUndock`, hidden ones that appear get `onDock`.
   let ps = site.primary
   var j: JsonNode
   try: j = parseJson(text)
   except CatchableError: return false
-  if j.kind != JObject or not j.hasKey("root") or not j.hasKey("version"): return false
+  if not ps.layoutOk(j): return false
+  cancelDrag()
+  let previous = parseJson(site.saveLayout())
   var before: seq[DockState]
   for p in ps.fPanels: before.add p.state
   ps.fLoading = true
   try:
-    # tear down
-    let oldFloats = ps.fFloats
-    for f in oldFloats: f.fRoot = nil          # keep the dispose below simple
-    for p in ps.fPanels:
-      let g = p.group
-      if g != nil:
-        g.removeControl p
-        p.visible = true
-    for f in oldFloats: f.disposeFloat()
-    ps.fFloats.setLen 0
-    ps.setRoot(nil)
-    ps.fActive = nil
-    var placed: seq[DockPanel]
-    ps.setRoot(buildNode(ps, j["root"], placed))
-    for fj in j{"floats"}.getElems():
-      let r = rectF(float32(fj{"x"}.getInt(60)), float32(fj{"y"}.getInt(60)),
-                    float32(max(fj{"w"}.getInt(320), 160)),
-                    float32(max(fj{"h"}.getInt(260), 120)))
-      let node = buildNode(ps, fj{"root"}, placed)
-      if node == nil: continue
-      let fs = newFloatSite(ps, r, "")
-      fs.setRoot(node)
-      fs.updateFloatCaption()
-      fs.fForm.show()
-      fs.fForm.relayoutAll()
-    for hj in j{"hidden"}.getElems():
-      let p = ps.findPanel(hj{"name"}.getStr)
-      if p == nil or p in placed: continue
-      p.fWasFloating = hj{"float"}.getBool(false)
-      p.fFloatRect = rectF(float32(hj{"x"}.getInt(0)), float32(hj{"y"}.getInt(0)),
-                           float32(hj{"w"}.getInt(0)), float32(hj{"h"}.getInt(0)))
-      p.fDockPlace = placeFromJson(hj{"place"})
-      placed.add p
-    # panels the layout does not mention: tabs of the first group
-    for p in ps.fPanels:
-      if p in placed: continue
-      var g = ps.firstGroup
-      if g == nil:
-        g = newDockTabs()
-        ps.setRoot(g)
-      g.insertControl p
-      p.align = alClient
-      if g.fActive == nil: g.fActive = p
-      g.showActive()
-    let an = j{"active"}.getStr
-    if an.len > 0:
-      let ap = ps.findPanel(an)
-      if ap != nil and ap.group != nil: ap.activate()
+    try:
+      ps.applyLayout(j)
+    except Exception:
+      try: ps.applyLayout(previous)
+      except Exception: discard
+      return false
   finally:
     ps.fLoading = false
-  ps.relayout()
-  ps.invalidate()
+    ps.relayout()
+    ps.invalidate()
   var i = 0
   for p in ps.fPanels:
     let now = p.state
