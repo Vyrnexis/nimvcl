@@ -20,7 +20,7 @@
 
 import ../graphics/[context, image]
 import ../platform/[window, events]
-import ./component, ./control, ./input
+import ./component, ./control, ./input, ./timer
 export input
 
 type
@@ -240,10 +240,19 @@ proc ensureWindow(f: Form) =
   gForms.add f
   f.fUi.dirty = true
 
+proc stopTimers(c: Component) =
+  ## Stops the timers owned by `c` and everything below it.
+  if c of Timer: Timer(c).free()
+  for x in c.components: stopTimers(x)
+  if c of Container:
+    for k in Container(c).children: stopTimers(k)
+
 proc releaseWindow(f: Form) =
-  ## Frees renderer-bound resources, then the renderer and window.
+  ## Frees renderer-bound resources, then the renderer and window. The timers
+  ## the form owns are stopped (a closed form must not keep ticking).
   let ui = f.fUi
   if ui.win == nil: return
+  stopTimers(f)
   if closePopupsProc != nil: closePopupsProc(f)
   ui.cancelInteraction()
   ui.focusControl(nil)

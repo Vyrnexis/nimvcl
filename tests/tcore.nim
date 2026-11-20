@@ -775,3 +775,19 @@ suite "numpad keys":
     check mapKey(0x40000058'u32) == keyEnter
     check mapKey(0x0d'u32) == keyEnter
     check mapKey(uint32(keyLeft)) == keyLeft
+
+suite "form close stops timers":
+  test "caFree releases the window and stops the form's timers":
+    startTimerImpl = proc(ms: uint32, tag: int): uint32 = 7
+    defer: startTimerImpl = startPlatformTimer
+    let f = newForm(nil, 300, 200)
+    let p = newPanel(f, "", 0, 0, 100, 100)
+    let t1 = newTimer(f, 10)
+    let t2 = newTimer(p, 10)
+    t1.enabled = true
+    t2.enabled = true
+    f.onClose = proc(s: Form, a: var CloseAction) = a = caFree
+    f.show()
+    f.close()
+    check not f.hasWindow
+    check not t1.enabled and not t2.enabled
