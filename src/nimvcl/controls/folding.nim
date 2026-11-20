@@ -27,6 +27,12 @@
 import std/[algorithm, strutils]
 import ./[codemodel, highlight, textutil]
 
+const
+  IndentLexMaxLines* = 50_000
+    ## Indent folds look at the highlighter's tokens (to skip comment lines and
+    ## the inside of strings) only up to this many lines; a bigger document
+    ## would be lexed in full when it is opened.
+
 type
   FoldRegion* = object
     startLine*, endLine*: int
@@ -69,6 +75,21 @@ proc computeLine(f: FoldMap, i: int): bool =
   let line = f.model.line(i)
   let (oldInd, oldMark, oldBrk, oldValid) = (f.ind[i], f.mark[i], f.brk[i], f.valid[i])
   f.ind[i] = int32(indentWidth(line, f.model.tabWidth))
+  if f.hl != nil and (fkBrackets in f.fKinds or
+                      (fkIndent in f.fKinds and f.model.lineCount <= IndentLexMaxLines)):
+    f.brkState[i] = int32(f.hl.stateAtLineStart(i))
+  if fkIndent in f.fKinds and f.hl != nil and f.ind[i] >= 0 and
+     f.model.lineCount <= IndentLexMaxLines:
+    # a line inside a multi-line string or comment, and a comment-only line,
+    # say nothing about the structure: treated like a blank line
+    var codeLine = f.brkState[i] == 0
+    if codeLine:
+      codeLine = false
+      for t in f.hl.tokens(i):
+        if t.kind notin {tkText, tkComment, tkDocComment}:
+          codeLine = true
+          break
+    if not codeLine: f.ind[i] = -1
   f.mark[i] = 0
   if fkMarkers in f.fKinds:
     let t = line[firstNonSpace(line) .. ^1]
@@ -84,7 +105,6 @@ proc computeLine(f: FoldMap, i: int): bool =
   f.brk[i] = ""
   if fkBrackets in f.fKinds:
     if f.hl != nil:
-      f.brkState[i] = int32(f.hl.stateAtLineStart(i))
       for t in f.hl.tokens(i):
         if t.kind in {tkString, tkChar, tkComment, tkDocComment}: continue
         for j in t.start ..< t.stop:
@@ -141,7 +161,8 @@ proc refreshFacts(f: FoldMap): bool =
   ## line structure) differs from what the region list was built from.
   result = f.structural or f.hook != nil
   let n = f.model.lineCount
-  let byState = fkBrackets in f.fKinds and f.hl != nil
+  let byState = (fkBrackets in f.fKinds or
+                 (fkIndent in f.fKinds and n <= IndentLexMaxLines)) and f.hl != nil
   var i = max(f.dirtyLo, 0)
   while i < n:
     if not f.valid[i] or (byState and f.brkState[i] != int32(f.hl.stateAtLineStart(i))):

@@ -54,6 +54,9 @@ between minor versions.
   markers and collapsed folds of the lines between the matches survive (and
   undo no longer keeps one huge span). Very large replacements still use one
   edit. (N14)
+- Indent folds (Nim, Python...) ignore comment-only lines and the lines inside
+  multi-line strings and comments when a highlighter is attached, so a
+  column-0 comment no longer ends the open regions. (N15)
 
 ## [0.2.1] - 2026-11-20
 

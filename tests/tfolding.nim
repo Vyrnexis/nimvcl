@@ -22,6 +22,18 @@ proc b() =
     check f.regs == @[(0, 5), (2, 3), (6, 7)]
     check f.canFold(0) and not f.canFold(1) and f.foldEnd(2) == 3 and f.foldEnd(1) == -1
 
+  test "comment-only lines and multi-line strings do not close regions (with a highlighter)":
+    let m = newCodeModel("proc a() =\n  echo 1\n# note\n  echo 2\n  let s = \"\"\"\nx\n\"\"\"\n#[\nblock\n]#\n  echo 3\nproc b() =\n  discard")
+    let plain = newFoldMap(m).regs
+    check (0, 10) notin plain
+    let h = newNimHighlighter(m)
+    let f = newFoldMap(m, h)
+    check f.regs == @[(0, 10), (11, 12)]
+    m.setText("a:\n  b\n  # c\n  d")        # an edit that makes the comment code again
+    check f.regs == @[(0, 3)]
+    check m.replace((2, 2), (2, 4), "c")
+    check f.regs == @[(0, 3)]
+
   test "blank lines, tabs and a final dedent":
     let m = newCodeModel("a:\n\tb\n\n\n\tc\nd\n  e\n    f")
     let f = newFoldMap(m)
