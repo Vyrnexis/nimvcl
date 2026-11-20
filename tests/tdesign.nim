@@ -465,6 +465,53 @@ suite "form designer":
     check nb.left == 20
     x.done
 
+  test "rubber band keeps controls and tiles apart (N28)":
+    let x = build()
+    let t = x.d.addNonVisual(newComponent(x.f), 20, 300, "Timer")
+    x.f.drag(5, 5, 130, 340)                       # A, C and the tile
+    check Control(t) notin x.d.selection
+    check Control(x.a) in x.d.selection and Control(x.c) in x.d.selection
+    x.f.drag(5, 290, 130, 340)                     # the tile only
+    check x.d.selection == @[Control(t)]
+    x.done
+
+  test "the tile of an inherited component does not move (N28)":
+    let x = build()
+    let tm = newComponent(x.f)
+    tm.name = "Timer1"
+    tm.inherited = true
+    let t = x.d.addNonVisual(tm, 20, 300, "Timer")
+    x.d.snapToGrid = false
+    x.f.drag(30, 310, 90, 350)
+    check t.left == 20 and t.top == 300
+    x.done
+
+  test "onDeleted sees the controls before they are released (N28)":
+    let x = build()
+    let act = newAction(Component(x.f), "act")
+    x.a.action = act
+    x.d.snapshot = proc(c: Control): string = c.name & "|" & c.caption
+    x.d.restore = proc(s: string, parent: Container, index: int): Control = nil
+    var linked = false
+    x.d.onDeleted = proc(d: FormDesigner, cs: seq[Control]) =
+      linked = cs.len == 1 and Button(cs[0]).action == act
+    x.f.click(x.a.fcx, x.a.fcy)
+    check x.d.deleteSelection()
+    check linked
+    check x.a.action == nil                       # released afterwards
+    x.done
+
+  test "undo does not overwrite a later inspector edit of the bounds (N28)":
+    let x = build()
+    x.d.snapToGrid = false
+    x.f.drag(x.a.fcx, x.a.fcy, x.a.fcx + 40, x.a.fcy + 40)
+    x.a.setBounds(300, 300, 80, 24)                # the inspector
+    check x.d.undo()
+    check x.a.left == 300 and x.a.top == 300
+    check x.d.redo()
+    check x.a.left == 300
+    x.done
+
   test "aligned controls: free-edge handle, no move":
     let x = build()
     let top = newPanel(x.f, "top", 0, 0, 500, 40)

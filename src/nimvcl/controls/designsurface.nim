@@ -146,6 +146,7 @@ type
     fResHandle: DesignHandle
     fResSet: seq[Control]
     fResOrig: seq[OpItem]
+    fFreeLater: seq[Control]      ## deleted controls released after `onDeleted` has seen them
     fSelBeforeBand: seq[Control]  ## the selection a rubber band replaced, back on Esc
     fBandParent: Container
     fBand: RectF
@@ -483,8 +484,10 @@ proc subtreeOf(c: Control): seq[Control] =
   if c of Container:
     for k in Container(c).children: result.add subtreeOf(k)
 
-proc detachItem(d: FormDesigner, op: DesignOp, i: int) =
-  ## Takes the control out of the design (delete, undo of create).
+proc detachItem(d: FormDesigner, op: DesignOp, i: int, later = false) =
+  ## Takes the control out of the design (delete, undo of create). With `later`
+  ## a rebuilt-on-undo control is only taken out of its parent and owner; the
+  ## caller frees it from `fFreeLater`.
   let c = op.items[i].c
   if c.isTile:
     let k = d.fTiles.find(NonVisualTile(c))
@@ -496,7 +499,11 @@ proc detachItem(d: FormDesigner, op: DesignOp, i: int) =
   if d.snapshot != nil and d.restore != nil:
     op.items[i].snap = d.snapshot(c)
     op.items[i].tree = subtreeOf(c)
-    c.free()
+    if later:
+      if c.parent != nil: c.parent.removeControl(c)
+      if c.owner != nil: c.owner.removeComponent(c)
+      d.fFreeLater.add c
+    else: c.free()
   else:
     if c.parent != nil: c.parent.removeControl(c)
     if c.owner != nil: c.owner.removeComponent(c)
@@ -559,6 +566,13 @@ proc afterHistory(d: FormDesigner, op: DesignOp, undone: bool) =
   d.refresh()
   d.modified()
 
+proc moved(c: Control, expect: Placement): bool =
+  ## A free control whose bounds are no longer those of the recorded step: it was
+  ## changed since, outside the designer (the inspector), and the step must not
+  ## overwrite that.
+  (c.isTile or (c.align == alNone and c.anchors == {akLeft, akTop})) and
+    not sameRect(rectF(c.left, c.top, c.width, c.height), expect.bounds)
+
 proc undo*(d: FormDesigner): bool =
   ## Reverts the last operation. False when there is nothing to undo.
   if d.fUndo.len == 0: return false
@@ -566,8 +580,8 @@ proc undo*(d: FormDesigner): bool =
   for i in countdown(op.items.high, 0):
     let it = op.items[i]
     if it.hasBefore:
-      if it.hasAfter: d.applyPlacement(it.c, it.before)
-      else: d.attachItem(op, i, it.before)
+      if not it.hasAfter: d.attachItem(op, i, it.before)
+      elif not it.c.moved(it.after): d.applyPlacement(it.c, it.before)
     else:
       d.detachItem(op, i)
   d.fRedo.add op
@@ -580,8 +594,8 @@ proc redo*(d: FormDesigner): bool =
   for i in 0 .. op.items.high:
     let it = op.items[i]
     if it.hasAfter:
-      if it.hasBefore: d.applyPlacement(it.c, it.after)
-      else: d.attachItem(op, i, it.after)
+      if not it.hasBefore: d.attachItem(op, i, it.after)
+      elif not it.c.moved(it.before): d.applyPlacement(it.c, it.after)
     else:
       d.detachItem(op, i)
   d.fUndo.add op
@@ -630,7 +644,12 @@ proc removeNonVisual*(d: FormDesigner, comp: Component) =
 # ------------------------------------------------------------- operations
 
 proc movable(d: FormDesigner, c: Control): bool =
-  c != Control(d.scope) and (c.isTile or c.align == alNone)
+  if c == Control(d.scope): return false
+  if c.isTile:
+    # the tile of a component from the ancestor form stays where the ancestor put it
+    let comp = NonVisualTile(c).component
+    return comp == nil or not comp.inherited
+  c.align == alNone
 
 proc sizeOk(d: FormDesigner, c: Control, w, h: float32): tuple[w, h: float32] =
   let k = c.constraints
@@ -774,12 +793,15 @@ proc deleteSelection*(d: FormDesigner): bool =
     var it = d.item(c)
     it.hasAfter = false
     op.items.add it
-    d.detachItem(op, op.items.high)
+    d.detachItem(op, op.items.high, later = true)
   d.fSel = @[]
   d.select(if parent != nil: Control(parent) else: Control(d.scope))
   d.refresh()
   d.record op
+  # the handler sees the controls before they are released
   if d.onDeleted != nil: d.onDeleted(d, sel)
+  for c in d.fFreeLater: c.free()
+  d.fFreeLater.setLen 0
   true
 
 proc insertNew*(d: FormDesigner, parent: Container, c: Control,
@@ -1044,6 +1066,8 @@ proc updateBand(d: FormDesigner, p: PointF, shift: ShiftState) =
   if par == d.scope:
     for t in d.fTiles:
       if d.boundsOf(t).intersects(d.fBand) and Control(t) notin hits: hits.add t
+  # like `toggle`: a selection is controls or tiles, not both
+  if hits.anyIt(not it.isTile): hits = hits.filterIt(not it.isTile)
   if hits.len == 0: hits = @[Control(par)]
   d.setSelection(hits)
   d.refresh()
