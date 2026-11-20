@@ -36,6 +36,10 @@ between minor versions.
 - `DockSite.loadLayout` checks the whole text first (version, shape, at least
   one known panel) and cancels a tab drag in progress; if the rebuild still
   fails half way, the previous layout is put back and it returns false. (N9)
+- Floating dock windows are moved onto a display when restored (a saved place
+  may be off every display after a monitor change), and `saveLayout` leaves
+  out window positions where the origin is unknown (Wayland). New
+  `PlatformWindow.clampToDisplay`. (N10)
 
 ## [0.2.1] - 2026-11-20
 

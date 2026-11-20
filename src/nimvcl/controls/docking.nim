@@ -812,7 +812,12 @@ proc restoreImpl(p: DockPanel, forceDock: bool) =
         return
   dockImpl(p, site, site.firstGroup, dsCenter, 0, -1)
 
-proc newFloatSite(primary: DockSite, rect: RectF, caption: string): DockSite =
+proc newFloatSite(primary: DockSite, rect0: RectF, caption: string): DockSite =
+  var rect = rect0
+  if dockScreenOrigin == nil:         # a saved place may be off every display now
+    let mf = Control(primary).root
+    if mf != nil and mf of Form and Form(mf).hasWindow:
+      rect = Form(mf).win.clampToDisplay(rect)
   let f = newForm(nil, rect.w, rect.h)
   f.position = poDesigned
   f.left = rect.x
@@ -1001,6 +1006,11 @@ proc nodeToJson(n: Control): JsonNode =
     result = %*{"split": (if s.fOrient == orHorizontal: "h" else: "v"),
                 "weights": ws, "children": cs}
 
+proc originKnown(): bool =
+  ## False where a client cannot learn its windows' places (Wayland): the
+  ## positions would all read 0,0, so they are not saved.
+  dockScreenOrigin != nil or not isWaylandDriver()
+
 proc saveLayout*(site: DockSite): string =
   ## The arrangement as JSON text (see the module comment).
   let ps = site.primary
@@ -1010,16 +1020,21 @@ proc saveLayout*(site: DockSite): string =
   for f in ps.fFloats:
     if f.fRoot == nil: continue
     let r = f.floatRectOf
-    fl.add %*{"x": int(round(r.x)), "y": int(round(r.y)),
-              "w": int(round(r.w)), "h": int(round(r.h)),
-              "root": nodeToJson(f.fRoot)}
+    var e = %*{"w": int(round(r.w)), "h": int(round(r.h)),
+               "root": nodeToJson(f.fRoot)}
+    if originKnown():
+      e["x"] = %int(round(r.x))
+      e["y"] = %int(round(r.y))
+    fl.add e
   j["floats"] = fl
   var hid = newJArray()
   for p in ps.fPanels:
     if p.state != dpHidden: continue
     var e = %*{"name": p.name, "float": p.fWasFloating,
-               "x": int(round(p.fFloatRect.x)), "y": int(round(p.fFloatRect.y)),
                "w": int(round(p.fFloatRect.w)), "h": int(round(p.fFloatRect.h))}
+    if originKnown():
+      e["x"] = %int(round(p.fFloatRect.x))
+      e["y"] = %int(round(p.fFloatRect.y))
     e["place"] = if p.fDockPlace.valid: placeToJson(p.fDockPlace) else: newJNull()
     hid.add e
   j["hidden"] = hid

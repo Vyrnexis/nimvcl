@@ -278,6 +278,30 @@ proc keyboardFocusId*(): uint32 =
 
 proc isWaylandDriver*(): bool = $getCurrentVideoDriver() == "wayland"
 
+proc clampToDisplay*(w: PlatformWindow, r: RectF): RectF =
+  ## Moves (and, if needed, shrinks) the screen rect `r` (logical px, the
+  ## coordinates `position` reports) so that it lies inside the usable area of
+  ## the display that holds most of it, or the nearest one. `r` is returned as
+  ## it is when SDL knows no display (and on Wayland, where positions mean
+  ## nothing to a client).
+  result = r
+  if isWaylandDriver() or w.window == nil: return
+  let s = w.coordScale
+  var pr = Rect(x: cint(r.x * s), y: cint(r.y * s), w: cint(max(r.w * s, 1)),
+                h: cint(max(r.h * s, 1)))
+  let id = getDisplayForRect(addr pr)
+  var b: Rect
+  if id == 0 or not getDisplayUsableBounds(id, b): return
+  let bx = float32(b.x) / s
+  let by = float32(b.y) / s
+  let bw = float32(b.w) / s
+  let bh = float32(b.h) / s
+  if bw <= 0 or bh <= 0: return
+  result.w = min(r.w, bw)
+  result.h = min(r.h, bh)
+  result.x = clamp(r.x, bx, bx + bw - result.w)
+  result.y = clamp(r.y, by, by + bh - result.h)
+
 proc displayUsableBounds*(w: PlatformWindow): tuple[ok: bool, x, y, w, h: float32] =
   ## Usable area of the display `w` is on, in global window points.
   var r: Rect

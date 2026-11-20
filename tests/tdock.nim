@@ -482,6 +482,19 @@ suite "docking":
     settle()
     check site.saveLayout() == s1
 
+  test "positions are saved while the origin is known (N10)":
+    let ide = buildIde()
+    ide.structure.makeFloating(rectF(1000, 80, 300, 220))
+    let fl = parseJson(ide.site.saveLayout())["floats"]
+    check fl.len == 1 and fl[0].hasKey("x") and fl[0].hasKey("y")
+
+  test "a floating rect off every display is moved onto one (N10)":
+    let ide = buildIde()
+    let r = ide.f.win.clampToDisplay(rectF(90000, 90000, 300, 200))
+    check r.x < 90000 and r.y < 90000 and r.w == 300 and r.h == 200
+    let inside = ide.f.win.clampToDisplay(rectF(10, 10, 300, 200))
+    check inside == rectF(10, 10, 300, 200)
+
   test "load ignores unknown names, keeps unmentioned panels, rejects junk":
     let ide = buildIde()
     let site = ide.site
