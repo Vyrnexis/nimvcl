@@ -100,6 +100,8 @@ type
     listeners: seq[tuple[id: int, cb: ChangeHandler]]
     nextListenerId: int
     undoStack, redoStack: seq[UndoStep]
+    undoStart: int            ## steps before this index were dropped (trimmed lazily)
+    undoBytes: int            ## stored text of the live undo steps
     groupDepth: int
     newStepPending: bool
     lastKind: EditKind
@@ -107,9 +109,10 @@ type
     lastPos: CodePos
     pend: tuple[first, oldN, newN: int]   # changes recorded by spliceRaw
     hasPend: bool
-    savedStep: int            ## undoStack.len at the last save; -1 = unreachable
+    savedStep: int            ## undoStack.len at the last save (counted from the seq start); -1 = unreachable
     fModified: bool
     maxUndo: int
+    maxUndoBytes: int
     onSelection*: proc()
     onSplice*: proc(a, b: CodePos, repl: string)
       ## Called before every raw replacement of [a, b) by `repl` (edits, undo
@@ -202,7 +205,7 @@ proc `hasBom=`*(m: CodeModel, v: bool) = m.fBom = v
 func version*(m: CodeModel): int = m.fVersion
   ## Bumped by every change of the text.
 func modified*(m: CodeModel): bool = m.fModified
-func canUndo*(m: CodeModel): bool = m.undoStack.len > 0
+func canUndo*(m: CodeModel): bool = m.undoStack.len > m.undoStart
 func canRedo*(m: CodeModel): bool = m.redoStack.len > 0
 func selections*(m: CodeModel): seq[Selection] = m.sels
 func selection*(m: CodeModel): Selection = m.sels[0]
@@ -212,6 +215,9 @@ func hasSelection*(m: CodeModel): bool = not m.sels[0].isEmpty
 func trailingNewline*(m: CodeModel): bool = m.lines.len > 1 and m.lines[^1].len == 0
 proc `readOnly=`*(m: CodeModel, v: bool) = m.fReadOnly = v
 proc `maxUndoSteps=`*(m: CodeModel, v: int) = m.maxUndo = max(v, 1)
+proc `maxUndoBytes=`*(m: CodeModel, v: int) =
+  ## Cap on the text kept in the undo history (default 64 MB); the oldest steps go first.
+  m.maxUndoBytes = max(v, 1)
 proc `tabWidth=`*(m: CodeModel, v: int) = m.fTabWidth = clamp(v, 1, 32)
 
 func eolString*(e: LineEnding): string = (if e == leCRLF: "\r\n" else: "\n")
@@ -333,7 +339,7 @@ proc setSelections*(m: CodeModel, s: openArray[Selection]) =
   m.breakGroup()
   if v != m.sels:
     m.sels = v
-    if m.groupDepth > 0 and m.undoStack.len > 0 and not m.newStepPending:
+    if m.groupDepth > 0 and m.undoStack.len > m.undoStart and not m.newStepPending:
       m.undoStack[^1].selAfter = v      # the group's final selection is what redo restores
     m.fireSel()
 
@@ -397,12 +403,39 @@ proc discardRedo(m: CodeModel) =
   if m.savedStep > m.undoStack.len: m.savedStep = -1
   m.redoStack.setLen 0
 
+func opBytes(op: Op): int = op.removed.len + op.inserted.len
+
+func stepBytes(st: UndoStep): int =
+  for op in st.ops: result += opBytes(op)
+
+proc trimUndo(m: CodeModel) =
+  ## Drops the oldest steps beyond `maxUndo` steps or `maxUndoBytes`. They
+  ## are only skipped (`undoStart`); the seq is compacted once half of it is
+  ## dead, so a step costs O(1) and not a move of the whole history.
+  while m.undoStack.len - m.undoStart > 1 and
+        (m.undoStack.len - m.undoStart > m.maxUndo or m.undoBytes > m.maxUndoBytes):
+    m.undoBytes -= stepBytes(m.undoStack[m.undoStart])
+    m.undoStack[m.undoStart] = UndoStep()
+    inc m.undoStart
+  if m.savedStep >= 0 and m.savedStep < m.undoStart: m.savedStep = -1
+  if m.undoStart >= 256 and m.undoStart * 2 > m.undoStack.len:
+    let live = m.undoStack.len - m.undoStart
+    for i in 0 ..< live: m.undoStack[i] = move m.undoStack[m.undoStart + i]
+    m.undoStack.setLen live
+    if m.savedStep >= 0: m.savedStep -= m.undoStart
+    m.undoStart = 0
+
+proc resetUndo(m: CodeModel) =
+  m.undoStack.setLen 0
+  m.redoStack.setLen 0
+  m.undoStart = 0
+  m.undoBytes = 0
+
 proc pushStep(m: CodeModel, op: Op) =
   m.discardRedo()
   m.undoStack.add UndoStep(ops: @[op], selBefore: m.sels)
-  if m.undoStack.len > m.maxUndo:
-    m.undoStack.delete 0
-    if m.savedStep >= 0: dec m.savedStep
+  m.undoBytes += opBytes(op)
+  m.trimUndo()
 
 proc charClassOfText(s: string, last: bool): CharClass =
   if s.len == 0: ccOther
@@ -413,14 +446,16 @@ proc recordOp(m: CodeModel, op: Op, kind: EditKind, a: CodePos, cls: CharClass) 
   ## Adds `op` to the history, coalescing with the previous step when allowed.
   var merged = false
   if m.groupDepth > 0:
-    if m.newStepPending or m.undoStack.len == 0:
+    if m.newStepPending or m.undoStack.len <= m.undoStart:
       m.pushStep op
       m.newStepPending = false
     else:
       m.discardRedo()
       m.undoStack[^1].ops.add op
+      m.undoBytes += opBytes(op)
+      m.trimUndo()
     merged = true
-  elif kind != ekOther and m.lastKind == kind and m.undoStack.len > 0 and
+  elif kind != ekOther and m.lastKind == kind and m.undoStack.len > m.undoStart and
        m.redoStack.len == 0:
     let ok = case kind
       of ekTyping: op.removed.find('\n') < 0 and a == m.lastPos and cls == m.lastClass
@@ -430,6 +465,7 @@ proc recordOp(m: CodeModel, op: Op, kind: EditKind, a: CodePos, cls: CharClass) 
       of ekOther: false
     if ok:
       m.undoStack[^1].ops.add op
+      m.undoBytes += opBytes(op)
       merged = true
   if not merged: m.pushStep op
   if kind != ekOther and m.groupDepth == 0:
@@ -531,8 +567,9 @@ proc applyStep(m: CodeModel, st: UndoStep, undo: bool) =
       discard m.spliceRaw(op.pos, endOfInsert(op.pos, op.removed), op.inserted)
 
 proc undo*(m: CodeModel): bool =
-  if m.fReadOnly or m.undoStack.len == 0: return false
+  if m.fReadOnly or m.undoStack.len <= m.undoStart: return false
   let st = m.undoStack.pop
+  m.undoBytes -= stepBytes(st)
   m.breakGroup()
   m.applyStep(st, true)
   m.sels = st.selBefore
@@ -551,14 +588,15 @@ proc redo*(m: CodeModel): bool =
   m.sels = st.selAfter
   for i in 0 ..< m.sels.len: m.sels[i] = m.snapSel(m.sels[i])
   m.undoStack.add st
+  m.undoBytes += stepBytes(st)
+  m.trimUndo()
   m.fModified = m.savedStep != m.undoStack.len
   m.flushChanged()
   m.fireSel()
   true
 
 proc clearHistory*(m: CodeModel) =
-  m.undoStack.setLen 0
-  m.redoStack.setLen 0
+  m.resetUndo()
   m.breakGroup()
   if not m.fModified: m.savedStep = 0 else: m.savedStep = -1
 
@@ -572,7 +610,7 @@ proc markSaved*(m: CodeModel) =
 # --------------------------------------------------------------- load / save
 
 proc newCodeModel*(): CodeModel =
-  CodeModel(lines: @[""], sels: @[sel((0, 0))], fTabWidth: 4, maxUndo: DefaultMaxUndo,
+  CodeModel(lines: @[""], sels: @[sel((0, 0))], fTabWidth: 4, maxUndo: DefaultMaxUndo, maxUndoBytes: UndoByteCap,
             savedStep: 0)
 
 proc memchrNl(p: pointer, n: int): int =
@@ -611,8 +649,7 @@ proc loadLines(m: CodeModel, data: string, off, bytes, loneCr: int, bom: bool): 
   m.fLineEnding = if crlf > lf: leCRLF else: leLF
   m.fMixed = crlf > 0 and lf > 0
   m.sels = @[sel((0, 0))]
-  m.undoStack.setLen 0
-  m.redoStack.setLen 0
+  m.resetUndo()
   m.groupDepth = 0
   m.newStepPending = false
   m.breakGroup()

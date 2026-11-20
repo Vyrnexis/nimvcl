@@ -55,6 +55,9 @@ type
     fReadOnly: bool
     fDesiredCol: int
     undoStack, redoStack: seq[Op]
+    maxUndoBytes: int
+    undoStart: int                    ## ops before this index were dropped (trimmed lazily)
+    undoBytes: int                    ## stored text of the live undo ops
     lastKind: OpKind
     lastWasWord: bool
     pend: tuple[first, oldN, newN: int]   # change recorded by spliceLines
@@ -99,7 +102,10 @@ func selEndPos*(m: MemoModel): MemoPos = (if m.fAnchor < m.fCaret: m.fCaret else
 func hasSelection*(m: MemoModel): bool = m.fAnchor != m.fCaret
 func maxLength*(m: MemoModel): int = m.fMaxLength
 func readOnly*(m: MemoModel): bool = m.fReadOnly
-func canUndo*(m: MemoModel): bool = m.undoStack.len > 0
+proc `maxUndoBytes=`*(m: MemoModel, v: int) =
+  ## Cap on the text kept in the undo history (default 64 MB); the oldest ops go first.
+  m.maxUndoBytes = max(v, 1)
+func canUndo*(m: MemoModel): bool = m.undoStack.len > m.undoStart
 func canRedo*(m: MemoModel): bool = m.redoStack.len > 0
 func desiredCol*(m: MemoModel): int = m.fDesiredCol
 func runeLen*(m: MemoModel): int = m.fRunes
@@ -162,7 +168,7 @@ proc fireSel(m: MemoModel) =
   if m.onSelection != nil: m.onSelection()
 
 proc newMemoModel*(text = ""): MemoModel =
-  result = MemoModel(fDesiredCol: -1)
+  result = MemoModel(fDesiredCol: -1, maxUndoBytes: UndoByteCap)
   result.lines = splitAtNewlines(sanitize(text))
   for l in result.lines: result.fRunes += runeCount(l)
   result.fRunes += result.lines.len - 1
@@ -287,9 +293,33 @@ proc spliceLines(m: MemoModel, a, b: MemoPos, repl: string): MemoPos =
   m.pend = (a.line, oldN, parts.len)
   m.hasPend = true
 
+func opBytes(op: Op): int = op.removed.len + op.inserted.len
+
+proc trimUndo(m: MemoModel) =
+  ## Drops the oldest ops beyond `MaxUndoSteps` or `maxUndoBytes`. They
+  ## are only skipped (`undoStart`); the seq is compacted once half of it is
+  ## dead, so an edit costs O(1) and not a move of the whole history.
+  while m.undoStack.len - m.undoStart > 1 and
+        (m.undoStack.len - m.undoStart > MaxUndoSteps or m.undoBytes > m.maxUndoBytes):
+    m.undoBytes -= opBytes(m.undoStack[m.undoStart])
+    m.undoStack[m.undoStart] = Op()
+    inc m.undoStart
+  if m.undoStart >= 256 and m.undoStart * 2 > m.undoStack.len:
+    let live = m.undoStack.len - m.undoStart
+    for i in 0 ..< live: m.undoStack[i] = move m.undoStack[m.undoStart + i]
+    m.undoStack.setLen live
+    m.undoStart = 0
+
+proc resetUndo(m: MemoModel) =
+  m.undoStack.setLen 0
+  m.redoStack.setLen 0
+  m.undoStart = 0
+  m.undoBytes = 0
+
 proc pushOp(m: MemoModel, op: Op) =
   m.undoStack.add op
-  if m.undoStack.len > MaxUndoSteps: m.undoStack.delete(0)
+  m.undoBytes += opBytes(op)
+  m.trimUndo()
   m.redoStack.setLen 0
 
 proc edit(m: MemoModel, a, b: MemoPos, repl: string, kind: OpKind,
@@ -298,7 +328,7 @@ proc edit(m: MemoModel, a, b: MemoPos, repl: string, kind: OpKind,
   let before = (m.fAnchor, m.fCaret)
   let removed = m.textBetween(a, b)
   var coalesced = false
-  if kind != opNone and m.lastKind == kind and m.undoStack.len > 0 and
+  if kind != opNone and m.lastKind == kind and m.undoStack.len > m.undoStart and
      m.redoStack.len == 0:
     template last: untyped = m.undoStack[^1]
     case kind
@@ -331,6 +361,9 @@ proc edit(m: MemoModel, a, b: MemoPos, repl: string, kind: OpKind,
         m.fCaret = a
         coalesced = true
     else: discard
+    if coalesced:                    # the merged text grew the stored op
+      m.undoBytes += repl.len + removed.len
+      m.trimUndo()
   if not coalesced:
     let ep = m.spliceLines(a, b, repl)
     let c = if newCaret.line >= 0: newCaret else: ep
@@ -421,8 +454,7 @@ proc setText*(m: MemoModel, s: string): bool {.discardable.} =
   m.fAnchor = (0, 0)
   m.fCaret = (0, 0)
   m.fDesiredCol = -1
-  m.undoStack.setLen 0
-  m.redoStack.setLen 0
+  m.resetUndo()
   m.lastKind = opNone
   m.fireChanged(0, oldN, m.lines.len)
   m.fireSel()
@@ -431,8 +463,7 @@ proc clear*(m: MemoModel) = m.setText("")
 
 # programmatic line API (clears undo; `lines.add` etc. of the control)
 proc afterLineApi(m: MemoModel, first, oldN, newN: int) =
-  m.undoStack.setLen 0
-  m.redoStack.setLen 0
+  m.resetUndo()
   m.lastKind = opNone
   m.fAnchor = m.snapPos(m.fAnchor)
   m.fCaret = m.snapPos(m.fCaret)
@@ -493,8 +524,9 @@ proc restoreSel(m: MemoModel, a, c: MemoPos) =
   m.lastKind = opNone
 
 proc undo*(m: MemoModel): bool =
-  if m.fReadOnly or m.undoStack.len == 0: return false
+  if m.fReadOnly or m.undoStack.len <= m.undoStart: return false
   let op = m.undoStack.pop()
+  m.undoBytes -= opBytes(op)
   discard m.spliceLines(op.start, endOfInsert(op.start, op.inserted), op.removed)
   m.restoreSel(op.anchorBefore, op.caretBefore)
   m.redoStack.add op
@@ -508,6 +540,8 @@ proc redo*(m: MemoModel): bool =
   discard m.spliceLines(op.start, endOfInsert(op.start, op.removed), op.inserted)
   m.restoreSel(op.anchorAfter, op.caretAfter)
   m.undoStack.add op
+  m.undoBytes += opBytes(op)
+  m.trimUndo()
   m.flushChanged()
   m.fireSel()
   true

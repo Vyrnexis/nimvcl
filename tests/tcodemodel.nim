@@ -280,6 +280,31 @@ suite "codemodel undo":
     discard m.insert((0, 0), "z")
     check not m.canRedo
 
+  test "history is bounded by bytes too; trimming keeps undo and the saved state right":
+    let m = mk("")
+    m.maxUndoBytes = 1000
+    for i in 1 .. 5: discard m.insert(m.docEnd, repeat('x', 400) & "\n")
+    var n = 0
+    while m.undo(): inc n
+    check n == 2                                    # 800 bytes fit, a third step would be 1200
+    check m.text.len == 3 * 401
+    # many small steps: the oldest are dropped without disturbing the newest
+    let k = mk("")
+    k.maxUndoSteps = 300
+    for i in 1 .. 5000:
+      discard k.insert(k.docEnd, "a\n")
+      if i == 4000: k.markSaved()
+    check k.modified
+    var c = 0
+    while k.undo(): inc c
+    check c == 300 and k.modified                   # the saved state was trimmed away
+    check k.lineCount == 4701
+    let j = mk("")
+    j.maxUndoSteps = 3
+    for i in 1 .. 600: discard j.insert(j.docEnd, "b\n")
+    j.markSaved()
+    check not j.modified and j.undo() and j.modified and j.redo() and not j.modified
+
   test "multiple selections are kept as a type":
     let m = mk("abc\ndef")
     m.setSelections([sel((0, 0), (0, 1)), sel((1, 0), (1, 2))])

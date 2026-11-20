@@ -69,6 +69,9 @@ between minor versions.
   or the search change, and a mouse drag that does not change the selection no
   longer runs the whole `touched` update (find recount, IME, events) per mouse
   move. (Q4)
+- The undo history of CodeModel and MemoModel is also capped by stored text
+  (64 MB, `maxUndoBytes=`) and drops its oldest steps without moving the whole
+  history on every edit. (Q8)
 
 ## [0.2.1] - 2026-11-20
 

@@ -327,3 +327,22 @@ test "setText reports whether the text changed":
   check m.setText("a\nc")
   check m.setText("")
   check not m.setText("")
+
+suite "memomodel undo bounds":
+  test "the history is bounded by bytes and by steps":
+    let m = mk("")
+    m.maxUndoBytes = 1000
+    for i in 1 .. 5:
+      m.select((m.lineCount - 1, 0), (m.lineCount - 1, 0))
+      check m.insert(repeat('x', 400) & "\n")
+    var n = 0
+    while m.undo(): inc n
+    check n == 2
+    let k = mk("")
+    for i in 1 .. 3000:
+      check k.insert("a\n")
+      discard k.deleteBackward()                    # not coalesced with the insert
+    var c = 0
+    while k.undo(): inc c
+    check c == 1000 and k.canUndo == false
+    check k.redo() and k.canUndo

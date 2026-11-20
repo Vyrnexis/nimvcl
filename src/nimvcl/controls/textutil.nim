@@ -235,3 +235,8 @@ proc replaceRange*[T](s: var seq[T], first, oldN: int, parts: openArray[T]) =
   ## Replaces `s[first ..< first + oldN]` by `parts` (one move of the tail).
   s.spliceSeq(first, oldN, parts.len)
   for i in 0 ..< parts.len: s[first + i] = parts[i]
+
+const
+  UndoByteCap* = 64 * 1024 * 1024
+    ## An undo history drops its oldest steps beyond this many bytes of stored
+    ## text (the newest step always stays).
