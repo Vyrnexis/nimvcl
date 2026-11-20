@@ -911,6 +911,13 @@ suite "codeedit":
     f.ctrl('k', {ssShift})                          # a selection that reaches it
     check e.model.text == ""
 
+  test "Alt+Backspace deletes the word before the caret":
+    let f = newShown()
+    let e = f.mk("one two three")
+    e.caretPos = (0, 7)
+    f.key(keyBackspace, {ssAlt})
+    check e.lineAt(0) == "one  three" and e.caretPos == (0, 4)
+
   test "find: no matches never changes the selection; wraps around":
     let f = newShown()
     let e = f.mk("a1\nb\na2")

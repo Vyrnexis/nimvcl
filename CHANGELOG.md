@@ -63,6 +63,7 @@ between minor versions.
   again on save; a lone `\r` is a line break on load (`LoadReport.loneCr`),
   like other editors; Delete Line and Alt+Up/Down leave the empty line after
   the last line break alone, so the trailing newline of the file stays. (N17)
+- CodeEdit: Alt+Backspace deletes the word before the caret. (N18)
 
 ## [0.2.1] - 2026-11-20
 

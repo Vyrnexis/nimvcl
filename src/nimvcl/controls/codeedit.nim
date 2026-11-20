@@ -1769,6 +1769,7 @@ method doKeyDown*(e: CodeEdit, key: var Key, shift: ShiftState) =
     if ctrl: return
     if key == keyUp: e.moveLineUp()
     elif key == keyDown: e.moveLineDown()
+    elif key == keyBackspace and not shf: e.backspace(true)   # Option+Backspace: the word before the caret
     else: return
     key = Key(0)
     return
