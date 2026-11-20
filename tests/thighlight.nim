@@ -82,6 +82,9 @@ suite "nim lexer: single lines":
     check kinds("proc f() {.inline.} = 1")[3] == ("{.inline.}", tkPragma)
     check kinds("{.emit: \".}\".} x") == @[("{.emit: \".}\".}", tkPragma), ("x", tkIdent)]
     check lexOne("{.push a,")[1] == stPragma
+    check kinds("proc f() {.inline} = 1")[3] == ("{.inline}", tkPragma)
+    check kinds("{.pragma: p, a: {1}.} x")[^1] == ("x", tkIdent)
+    check lexOne("{.inline}")[1] == stNone
     check kinds("{1, 2}") == @[("{", tkPunct), ("1", tkNumber), (",", tkPunct),
                                ("2", tkNumber), ("}", tkPunct)]
 

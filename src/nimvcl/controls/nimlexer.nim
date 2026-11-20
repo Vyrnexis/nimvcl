@@ -87,9 +87,11 @@ func skipBlock(line: string, i: int, depth: var int, doc: bool): int =
 
 func skipPragma(line: string, i: int, closed: var bool): int =
   ## From `i` inside `{. ... .}`: the index after `.}` (closed = true) or the
-  ## end of the line. Strings inside may contain `.}`.
+  ## end of the line. Strings inside may contain `.}`. Nim also accepts a
+  ## bare `}` closing the pragma (`{.inline}`) at brace depth 0.
   result = i
   let n = line.len
+  var depth = 0
   closed = false
   while result < n:
     let c = line[result]
@@ -103,6 +105,13 @@ func skipPragma(line: string, i: int, closed: var bool): int =
       result += 2
       closed = true
       return
+    elif c == '{': inc depth; inc result
+    elif c == '}':
+      inc result
+      if depth == 0:
+        closed = true
+        return
+      dec depth
     else: inc result
   result = min(result, n)
 

@@ -43,6 +43,8 @@ between minor versions.
 - A `PopupMenu` is released with its owner: `Control.free` of the owner takes
   it out of the form's popup menus (its shortcuts no longer fire) and unlinks
   its actions. (N11)
+- The Nim highlighter closes a pragma on a bare `}` too (`{.inline}`), no longer
+  colouring the following lines as pragma. (N12)
 
 ## [0.2.1] - 2026-11-20
 
