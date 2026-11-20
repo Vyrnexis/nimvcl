@@ -184,7 +184,7 @@ method paint*(b: ToolButton, c: Canvas) =
   if b.hasIcon:
     let ir = rectF(x, floor((r.h - isz.h) / 2), isz.w, isz.h)
     if b.fGlyph != nil: b.fGlyph(c, ir, col)
-    elif b.fImage != nil: c.drawImage(b.fImage, ir)
+    elif b.fImage != nil: c.drawImage(b.fImage, ir, alpha = if en: 255'u8 else: DisabledAlpha)
     elif b.listIcon: b.barImages.draw(c, b.fImageIndex, ir.x, ir.y, en)
     x += iconW + gap
   if showText:

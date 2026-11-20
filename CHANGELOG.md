@@ -20,6 +20,7 @@ between minor versions.
 
 ### Fixed
 
+- A disabled `ToolButton` with an `image` is dimmed like one with an image list icon. (N40)
 - `Action.execute` of an `autoCheck` action (and a click on a checkable client) keeps the toggled `checked` only when a handler ran; the handler still sees the new state. Grouped actions are unchanged. (N39)
 - Menus: a popup menu taller than the display is capped to it and scrolls (mouse wheel, arrow keys reveal the hot row); press on a menu bar item, drag to a row and release there activates the row. (N38)
 - Docking: Ctrl+Tab and Ctrl+F4 act on the active panel only when the focus is inside a panel or nowhere (not while an outside control has it); tabs keep a minimum width and a strip with too many tabs scrolls (mouse wheel over it, the active tab is revealed); dragging a split that has no room no longer writes NaN weights (and a saved layout never holds non-finite weights). (N37)

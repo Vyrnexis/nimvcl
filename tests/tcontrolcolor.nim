@@ -328,3 +328,23 @@ suite "font.color":
     check l.fontColor == green and l.hasTextColor
     l.resetTextColor()
     check l.fontColor.a == 0 and not l.hasTextColor
+
+suite "toolbar image buttons":
+  test "a disabled button dims its image":
+    let f = newForm(nil, 300, 120)
+    f.show()
+    let bar = newToolBar(f)
+    let red = parseColor("#ff0000")
+    let a = newToolButton(bar, "")
+    a.image = newImage(16, 16, red)
+    let b = newToolButton(bar, "")
+    b.image = newImage(16, 16, red)
+    b.enabled = false
+    f.layoutIfNeeded()
+    let pa = a.formOrigin
+    let pb = b.formOrigin
+    let ea = f.pixel(int(pa.x + a.width / 2), int(pa.y + a.height / 2))
+    let eb = f.pixel(int(pb.x + b.width / 2), int(pb.y + b.height / 2))
+    check ea.near(red) and not eb.near(red)
+    check eb.g > ea.g                      # blended towards the light bar
+    f.close()
