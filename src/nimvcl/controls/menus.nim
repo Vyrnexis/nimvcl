@@ -629,9 +629,9 @@ proc close*(m: PopupMenu) =
     m.fShown = nil
     if p.isOpen: closePopup(p)
 
-proc free*(m: PopupMenu) =
-  ## Frees the menu for good: closes it, unlinks the actions of its items,
-  ## drops its image list subscription and detaches it from its owner.
+proc unlink(m: PopupMenu) =
+  ## Closes the menu, unlinks the actions of its items, drops its image list
+  ## subscription and takes it out of the controls and forms it was attached to.
   m.close()
   m.images = nil
   m.fRoot.clear()                   # releases the action links; no shortcut fires
@@ -642,6 +642,21 @@ proc free*(m: PopupMenu) =
       let i = f.popupMenus.find(RootRef(m))
       if i >= 0: f.popupMenus.delete(i)
   m.fTargets.setLen(0)
+  # the target may already be out of its form (a freed owner is removed from
+  # its parent first), so look in every form
+  for f in openForms():
+    let i = f.popupMenus.find(RootRef(m))
+    if i >= 0: f.popupMenus.delete(i)
+
+method releaseResources*(m: PopupMenu) =
+  ## A popup menu is released with its owner (`Control.free`): it leaves
+  ## `form.popupMenus` (its shortcuts stop firing) and its action links go.
+  m.unlink()
+
+proc free*(m: PopupMenu) =
+  ## Frees the menu for good: closes it, unlinks the actions of its items,
+  ## drops its image list subscription and detaches it from its owner.
+  m.unlink()
   if m.owner != nil: m.owner.removeComponent(m)
 
 proc popup*(m: PopupMenu, form: Form, x, y: float32,

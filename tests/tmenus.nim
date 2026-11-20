@@ -444,6 +444,20 @@ suite "main menu":
     x.f.tap('k', {ssCtrl})
     check log.len == 0
 
+  test "a PopupMenu is released with its owner (N11)":
+    let x = build()
+    let holder = newPanel(x.f, "holder", 20, 80, 200, 150)
+    let pm = newPopupMenu(holder)           # owned by the panel it serves
+    pm.addItem("&Copy", mk("pcopy"), shortcut("Ctrl+K"))
+    attachPopupMenu(holder, pm)
+    check x.f.popupMenus.len == 1
+    log = @[]
+    holder.free()
+    check x.f.popupMenus.len == 0
+    check holder.popupMenu == nil
+    x.f.tap('k', {ssCtrl})
+    check log.len == 0
+
   test "MenuItem[] and delete ignore out-of-range indices":
     let root = newMenuItem("r")
     root.addItem("a")

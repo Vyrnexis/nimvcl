@@ -40,6 +40,9 @@ between minor versions.
   may be off every display after a monitor change), and `saveLayout` leaves
   out window positions where the origin is unknown (Wayland). New
   `PlatformWindow.clampToDisplay`. (N10)
+- A `PopupMenu` is released with its owner: `Control.free` of the owner takes
+  it out of the form's popup menus (its shortcuts no longer fire) and unlinks
+  its actions. (N11)
 
 ## [0.2.1] - 2026-11-20
 
