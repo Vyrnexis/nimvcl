@@ -978,9 +978,21 @@ proc delete*(l: ListColumns, i: int) =
     elif l.lv.fSortCol > i: dec l.lv.fSortCol
     l.lv.refresh()
 proc move*(l: ListColumns, from0, to0: int) =
-  ## Moves column `from0` to index `to0` (the sort column follows).
+  ## Moves column `from0` to index `to0` (the sort column follows). The
+  ## cells of the stored items move with it (caption = column 0, `subItems[k]`
+  ## = column k + 1), so the text stays under its header. In virtual mode
+  ## (`ownerData`) `onData` fills the cells: it must follow the new order.
   let n = l.lv.fColumns.len
   if from0 notin 0 ..< n or to0 notin 0 ..< n or from0 == to0: return
+  if not l.lv.fOwnerData:
+    for it in l.lv.fItems:
+      var cells = newSeq[string](n)
+      for k in 0 ..< n: cells[k] = it.columnText(k)
+      let c = cells[from0]
+      cells.delete(from0)
+      cells.insert(c, to0)
+      it.fCaption = cells[0]
+      it.subItems = cells[1 .. ^1]
   let sc = if l.lv.fSortCol >= 0 and l.lv.fSortCol < n: l.lv.fColumns[l.lv.fSortCol] else: nil
   let c = l.lv.fColumns[from0]
   l.lv.fColumns.delete(from0)

@@ -19,6 +19,7 @@ between minor versions.
 
 ### Fixed
 
+- `ListColumns.move` moves the cells of the stored items with the header (they stayed in place, so the text sat under the wrong header). (N29)
 - The numpad Enter key arrives as Enter (default buttons, Edit, CodeEdit, grids
   handled only the main Enter key). (N19)
 - The first use of a system font family no longer waits for a listing of every installed font: on Linux/BSD `fc-list` is asked for that family only; the Windows/macOS font folder scan is cached in the user's cache folder (`nimvcl/fontscan.tsv`). Replaced `registerFontFamilyData` bytes are freed once no rendering context can read them (they were kept forever). (Q7)

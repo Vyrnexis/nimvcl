@@ -185,6 +185,14 @@ suite "listview":
     lv.sortItems(proc(a, b: ListItem): int = cmp(a.caption, b.caption))
     check lv.items.toSeq.mapIt(it.tag) == @[0, 2, 4, 1, 3, 5]
 
+  test "columns.move moves the cells with the header":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 3)
+    lv.columns.move(0, 2)
+    check lv.columns[2].caption == "Name"
+    check lv.items[1].columnText(0) == "10" and lv.items[1].columnText(1) == "t1"
+    check lv.items[1].columnText(2) == "Item 1"
+
   test "vsList geometry and 2D keys":
     let f = newShown()
     let lv = mkList(f, vsList, 25, 340, 136)           # viewport height 122 (bar 12) -> 6 rows of 20
