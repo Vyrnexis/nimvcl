@@ -63,11 +63,15 @@ proc whenElse(cond: NimNode, yes, no: NimNode, src: NimNode): NimNode =
      nn(nnkElse, src, nn(nnkStmtList, src, no)))
 
 proc claim(g: var Gen, name: string, src: NimNode) =
-  if isReservedFieldName(name):
+  if isHardReservedName(name):
     error("nimvcl form: `" & name & "` is reserved in `" & g.formName &
           "`: it is a field or property of Component/Control/Form, so a child " &
           "or `var` cannot use that name; pick another (e.g. `" & name &
           "Edit`)", src)
+  elif isReservedFieldName(name):
+    warning("nimvcl form: `" & name & "` in `" & g.formName & "` shadows a " &
+            "member of Component/Control/Form; consider another name (e.g. `" &
+            name & "Edit`)", src)
   if g.names.hasKey(name):
     error("nimvcl form: duplicate name `" & name & "` in `" & g.formName &
           "`: child and `var` names must be unique", src)

@@ -120,13 +120,40 @@ const reservedNames = [
   "popupMenu", "action", "onMouseWheel", "onKeyDown", "onKeyUp", "onKeyPress",
   "onPaint"]
 
+const hardReservedNames = [
+  # The names the `form`/`loadForm` macros have always refused: a child of the
+  # same name breaks the generated code. The rest of `reservedNames` only
+  # shadows a member, which compiled before, so the macros warn about those
+  # (old forms keep building) while the designer does not hand them out.
+  "name", "tag", "owner", "components", "actionLink", "caption", "parent",
+  "left", "top", "width", "height", "align", "anchors", "margins", "padding",
+  "constraints", "autoSize", "visible", "enabled", "hint", "cursor", "font",
+  "parentFont", "color", "parentColor", "tabStop", "tabOrder", "children",
+  "host", "ui", "win", "menuBar", "popupMenus", "position", "borderStyle",
+  "formStyle", "modalResult", "designRect", "designBase", "designBaseSet",
+  "onClick", "onDblClick", "onMouseEnter", "onMouseLeave", "onEnter", "onExit",
+  "onResize", "onMouseDown", "onMouseUp", "onMouseMove", "onShow", "onHide",
+  "onActivate", "onDeactivate", "onClose", "onCloseQuery", "onCreate",
+  "windowState"]
+
+proc sameName(r, s: string): bool =
+  s.len > 0 and r[0] == s[0] and cmpIgnoreStyle(r, s) == 0
+
+proc isHardReservedName*(s: string): bool =
+  ## True for the names the `form`/`loadForm` macros refuse outright (a child
+  ## of that name breaks the generated code); see `isReservedFieldName`.
+  for r in hardReservedNames:
+    if sameName(r, s): return true
+
 proc isReservedFieldName*(s: string): bool =
   ## True when a child or variable called `s` would clash with a field,
   ## property or public proc of Component/Control/Form (`icon`, `menu`, `text`,
-  ## `show`, `close`...; compared like Nim identifiers); the `form`/`loadForm` macros refuse such names, so the
-  ## designer should not hand them out (the form's own name is exempt).
+  ## `show`, `close`...; compared like Nim identifiers). The designer does not
+  ## hand them out; the `form`/`loadForm` macros refuse `isHardReservedName`
+  ## names and warn about the others (the form's own name is exempt).
+  if isHardReservedName(s): return true
   for r in reservedNames:
-    if s.len > 0 and r[0] == s[0] and cmpIgnoreStyle(r, s) == 0: return true
+    if sameName(r, s): return true
 
 proc cur(lx: Lexer): char =
   if lx.pos < lx.src.len: lx.src[lx.pos] else: '\0'

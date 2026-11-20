@@ -297,10 +297,14 @@ macro loadForm*(name: untyped, path: static[string]): untyped =
               "` is a `" & anc.classes[n.name] & "` in the ancestor, not a `" &
               n.className & "`", site)
       continue
-    if isReservedFieldName(n.name) and n != root:
+    if isHardReservedName(n.name) and n != root:
       error("loadForm: " & nfmPos(file, n.line, n.col) & ": `" & n.name &
             "` is reserved in `" & formName & "`: it is a field or property of " &
             "Component/Control/Form, so an object cannot use that name", site)
+    elif isReservedFieldName(n.name) and n != root:
+      warning("loadForm: " & nfmPos(file, n.line, n.col) & ": `" & n.name &
+              "` in `" & formName & "` shadows a member of Component/Control/Form; " &
+              "consider another name", site)
     if n.name in names and n != root:
       error("loadForm: " & nfmPos(file, n.line, n.col) & ": duplicate object name `" &
             n.name & "`", site)
