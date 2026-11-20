@@ -933,6 +933,7 @@ proc sortItems*(lv: ListView, cmp: proc(a, b: ListItem): int) =
   lv.fHot = -1
   lv.invalidate()
   if lv.fIndex >= 0: lv.makeVisible(lv.fIndex)
+  lv.layoutEdit()                        # the edited item moved with the sort
 
 proc `sortColumn=`*(lv: ListView, v: int) =
   lv.fSortCol = v
@@ -1078,7 +1079,11 @@ proc layoutEdit(lv: ListView) =
   else:
     y = r.y + (r.h - ih) / 2
   w = min(w, max(vp.right - x, 40))
-  lv.fEditor.edit.setBounds(x, y, w, h)
+  # clipped to the viewport (below the header, inside the bars); a fully
+  # hidden editor waits off screen, like the grid's
+  let vis = rectF(x, y, w, h).intersect(vp)
+  if vis.isEmpty: lv.fEditor.edit.setBounds(-100, -100, 1, 1)
+  else: lv.fEditor.edit.setBounds(vis.x, vis.y, vis.w, vis.h)
 
 proc endEdit*(lv: ListView, cancel = false) =
   ## Ends the in-place edit: commits (`onEdited`) unless `cancel`.
@@ -1151,6 +1156,15 @@ method doMouseDown*(lv: ListView, button: MouseButton, shift: ShiftState,
   lv.fDownIdx = -1
   lv.fMouseX = x
   lv.fMouseY = y
+  if button == mbRight:
+    # the item under the pointer becomes the selection unless it is selected
+    let (i, part) = lv.hitTestAt(pointF(x, y))
+    if i >= 0 and part != lhCheck and not lv.selected(i):
+      let v = lv.fVer
+      let sn = lv.snap()
+      lv.applyClick(i, {})
+      lv.makeVisible(i)
+      lv.notify(v, sn)
   if button == mbLeft:
     let p = pointF(x, y)
     let hb = lv.columnBorderAt(p)

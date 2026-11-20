@@ -193,6 +193,43 @@ suite "listview":
     check lv.items[1].columnText(0) == "10" and lv.items[1].columnText(1) == "t1"
     check lv.items[1].columnText(2) == "Item 1"
 
+  test "right click selects the item under the pointer unless it is selected":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 5)
+    lv.multiSelect = true
+    lv.setSelection([0, 1])
+    let p = lv.fpos(ctr(lv.captionRect(1)))
+    f.feed(ekMouseDown, p.x, p.y, button = mbRight)
+    f.feed(ekMouseUp, p.x, p.y, button = mbRight)
+    check lv.selCount == 2                     # already selected: kept
+    let q = lv.fpos(ctr(lv.captionRect(3)))
+    f.feed(ekMouseDown, q.x, q.y, button = mbRight)
+    f.feed(ekMouseUp, q.x, q.y, button = mbRight)
+    check lv.selCount == 1 and lv.selected(3) and lv.itemIndex == 3
+
+  test "in-place editor stays inside the rows area and follows a sort":
+    let f = newShown()
+    let lv = mkList(f, vsReport, 30)
+    lv.items[0].caption = "zzz"
+    check lv.beginEdit(0)
+    let e = lv.editControl
+    check e.top >= lv.headerHeight
+    lv.scrollBy(0, 100)
+    f.settle()
+    check e.top + e.height <= lv.height
+    check e.top >= lv.headerHeight or e.top < -50      # clipped or parked
+    lv.endEdit(cancel = true)
+    lv.scrollBy(0, -1000)
+    f.settle()
+    check lv.beginEdit(0)
+    lv.sortItems(proc(a, b: ListItem): int = cmp(b.caption, a.caption))
+    check lv.items[0].caption == "zzz"
+    lv.sortItems(proc(a, b: ListItem): int = cmp(a.caption, b.caption))
+    check lv.items[29].caption == "zzz"
+    check lv.editControl.top + lv.editControl.height <= lv.height   # moved, not left on row 0
+    check lv.editControl.top != lv.headerHeight + 1
+    lv.endEdit(cancel = true)
+
   test "vsList geometry and 2D keys":
     let f = newShown()
     let lv = mkList(f, vsList, 25, 340, 136)           # viewport height 122 (bar 12) -> 6 rows of 20

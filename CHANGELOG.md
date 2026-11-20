@@ -19,6 +19,7 @@ between minor versions.
 
 ### Fixed
 
+- ListView: a right click selects the item under the pointer when it is not selected (N30). The in-place editor of ListView and TreeView is clipped to the viewport (parked off screen when its row is hidden) and ListView re-lays it out after `sortItems`. (N32)
 - `ListColumns.move` moves the cells of the stored items with the header (they stayed in place, so the text sat under the wrong header). (N29)
 - The numpad Enter key arrives as Enter (default buttons, Edit, CodeEdit, grids
   handled only the main Enter key). (N19)

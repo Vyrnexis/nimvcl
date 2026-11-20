@@ -1089,7 +1089,9 @@ proc layoutEdit(tv: TreeView) =
   let vp = tv.viewport
   let x = g.labelX - 3
   let w = max(g.labelW + 24, 80)
-  tv.fEditor.edit.setBounds(x, y, min(w, max(vp.right - x, 40)), ih)
+  let vis = rectF(x, y, min(w, max(vp.right - x, 40)), ih).intersect(vp)
+  if vis.isEmpty: tv.fEditor.edit.setBounds(-100, -100, 1, 1)
+  else: tv.fEditor.edit.setBounds(vis.x, vis.y, vis.w, vis.h)
 
 proc endEdit*(tv: TreeView, cancel = false) =
   ## Ends the in-place edit: commits (`onEdited`) unless `cancel`.
