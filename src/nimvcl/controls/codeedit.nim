@@ -2211,6 +2211,7 @@ proc loadFromFile*(e: CodeEdit, path: string): LoadReport {.discardable.} =
   ## the trailing newline and invalid bytes are reported in the result and
   ## preserved by `saveToFile` (except that mixed endings become the dominant
   ## one).
+  let data = readTextFile(path)     # first: an unreadable file changes nothing
   e.stopDrag()
   e.composition = ""
   e.fFileName = path
@@ -2220,7 +2221,7 @@ proc loadFromFile*(e: CodeEdit, path: string): LoadReport {.discardable.} =
       if e.fHl != nil: e.fHl.detach()
       e.fHl = h
       if h != nil: h.attach(e.fModel)
-  result = e.fModel.loadFile(path)
+  result = e.fModel.loadText(data)
   e.fMarkers.setLen 0
   e.rebuildFold()
   e.fMaxStale = true

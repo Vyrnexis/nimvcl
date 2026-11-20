@@ -23,6 +23,8 @@ between minor versions.
   IOError and the text stays modified. `saveToFile(path)` now renames through
   `fileName=` (the language follows). New `saveCopyTo(path)` and
   `CodeModel.saveCopy` write a copy without renaming or marking saved. (N3)
+- `CodeEdit.loadFromFile` reads the file before it changes the name or the
+  highlighter, so an unreadable file leaves the editor as it was. (N4)
 
 ## [0.2.1] - 2026-11-20
 

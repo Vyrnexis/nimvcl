@@ -908,7 +908,7 @@ suite "codeedit":
     removeDir dir
     expect IOError: e.saveToFile("")
 
-  test "files: failed read or write changes nothing, saveCopyTo, no temp file left (N3)":
+  test "files: failed read or write changes nothing, saveCopyTo, no temp file left (N3, N4)":
     let f = newShown()
     let e = f.mk("keep me")
     let dir = getTempDir() / "nimvcl_codeedit_test2"
@@ -916,6 +916,8 @@ suite "codeedit":
     e.caretPos = (0, 7)
     f.typeText("!")
     e.fileName = dir / "old.txt"
+    expect IOError: e.loadFromFile(dir / "missing.nim")
+    check e.fileName == dir / "old.txt" and e.text == "keep me!" and e.language == "text"
     let p = dir / "out.txt"
     writeFile(p, "original")
     e.saveCopyTo(p)
