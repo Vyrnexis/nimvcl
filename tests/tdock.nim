@@ -644,6 +644,52 @@ suite "docking":
     check ide.ed2.state == dpHidden
     check ide.ed1.group.activePanel == ide.ed1
 
+  test "Ctrl+Tab / Ctrl+F4 ignore the dock while the focus is outside the panels":
+    let ide = buildIde()
+    let f = ide.f
+    let outside = newEdit(f)
+    f.insertControl outside
+    ide.ed1.activate(focus = true)
+    outside.setFocus()
+    f.tap(keyTab, {ssCtrl})
+    check ide.ed1.group.activePanel == ide.ed1
+    f.tap(keyF4, {ssCtrl})
+    check ide.ed1.state == dpDocked
+
+  test "many tabs keep a minimum width, the strip scrolls and shows the active tab":
+    let f = newForm(nil, 500, 400)
+    mainForm = f
+    f.show()
+    let site = newDockSite(f)
+    site.align = alClient
+    var ps: seq[DockPanel]
+    for i in 0 ..< 20:
+      let p = newDockPanel(site, "p" & $i, "Panel number " & $i, newContent())
+      if i == 0: site.dock(p) else: site.dock(p, ps[0], dsCenter)
+      ps.add p
+    settle()
+    let g = ps[0].group
+    ps[0].activate()
+    var rs = g.tabRects
+    for r in rs: check r.w >= 48
+    check rs[^1].right > g.width                      # does not fit: scrolls
+    ps[19].activate()
+    rs = g.tabRects
+    check rs[19].right <= g.width and rs[19].x >= 0
+    ps[0].activate()
+    check g.tabRects[0].x >= 0
+
+  test "a split without room does not produce NaN weights":
+    let ide = buildIde()
+    let sp = ide.ed1.group.parent
+    check sp of DockSplit
+    sp.setBounds(0, 0, 0, 0)
+    let f = ide.f
+    f.feed(ekMouseDown, 0, 0)
+    f.feed(ekMouseMove, 5, 5, shift = {ssLeft})
+    f.feed(ekMouseUp, 5, 5)
+    check "nan" notin ide.site.saveLayout().toLowerAscii
+
   test "Ctrl+Tab inside a nested PageControl cycles its pages, not the panels":
     let ide = buildIde()
     let f = ide.f

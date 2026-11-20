@@ -125,6 +125,7 @@ type
     fPressPos: PointF
     fDragging: bool
     fMenu: PopupMenu
+    fTabScroll: float32        ## strip scroll when the tabs do not fit
 
   DockSplit* = ref object of Container
     fOrient: Orientation
@@ -502,6 +503,8 @@ proc nodePanelNames(n: Control, acc: var seq[string]) =
 
 # ------------------------------------------------------------- group content
 
+const MinTabW = 48'f32            ## narrowest tab; below it the strip scrolls
+
 proc stripHeight*(g: DockTabs): float32 = max(g.theme.controlHeight - 2, 20)
 
 method padding*(g: DockTabs): Spacing = spacing(1, g.stripHeight, 1, 1)
@@ -515,9 +518,12 @@ proc showActive(g: DockTabs) =
       let want = Control(c) == Control(g.fActive)
       if c.visible != want: c.visible = want
 
+proc revealActiveTab(g: DockTabs)
+
 proc setActiveTab(g: DockTabs, p: DockPanel) =
   g.fActive = p
   g.showActive()
+  g.revealActiveTab()
   g.invalidate()
 
 method childBoundsChanged*(g: DockTabs, child: Control) =
@@ -1000,7 +1006,9 @@ proc nodeToJson(n: Control): JsonNode =
     let s = DockSplit(n)
     s.syncWeights()
     var ws = newJArray()
-    for w in s.fWeights: ws.add %round(float64(w), 4)
+    for w in s.fWeights:
+      ws.add %round(if w.classify in {fcNormal, fcSubnormal, fcZero}: float64(w)
+                    else: 1.0 / float64(max(s.fWeights.len, 1)), 4)
     var cs = newJArray()
     for c in s.children: cs.add nodeToJson(c)
     result = %*{"split": (if s.fOrient == orHorizontal: "h" else: "v"),
@@ -1283,23 +1291,46 @@ proc tabWidthNatural(g: DockTabs, p: DockPanel): float32 =
   if p.fClosable and p == g.fActive: w += 20   # only the selected tab reserves room
   clamp(w, 56'f32, 220'f32)
 
+proc tabMetrics(g: DockTabs): tuple[widths: seq[float32], total, avail: float32] =
+  ## Tab widths: shrunk to fit but never below `MinTabW`; when even that does
+  ## not fit the strip scrolls (`fTabScroll`).
+  var sum = 0'f32
+  var nat: seq[float32]
+  for p in g.panels:
+    let w = g.tabWidthNatural(p)
+    nat.add w
+    sum += w
+  result.avail = max(g.width - 4, 40)
+  let k = if sum > result.avail: result.avail / sum else: 1'f32
+  for w in nat:
+    let tw = max(floor(w * k), min(w, MinTabW))
+    result.widths.add tw
+    result.total += tw
+
+proc clampTabScroll(g: DockTabs, m: tuple[widths: seq[float32], total, avail: float32]) =
+  g.fTabScroll = clamp(g.fTabScroll, 0'f32, max(m.total - m.avail, 0'f32))
+
 proc tabRects*(g: DockTabs): seq[RectF] =
   ## Rect of every tab (client coordinates of the group).
-  let ps = g.panels
-  var widths: seq[float32]
-  var sum = 0'f32
-  for p in ps:
-    let w = g.tabWidthNatural(p)
-    widths.add w
-    sum += w
-  let avail = max(g.width - 4, 40)
-  let k = if sum > avail: avail / sum else: 1'f32
-  var x = 2'f32
+  let m = g.tabMetrics
+  g.clampTabScroll(m)
+  var x = 2'f32 - g.fTabScroll
   let h = g.stripHeight
-  for w in widths:
-    let tw = floor(w * k)
-    result.add rectF(x, 0, tw, h)
-    x += tw
+  for w in m.widths:
+    result.add rectF(x, 0, w, h)
+    x += w
+
+proc revealActiveTab(g: DockTabs) =
+  ## Scrolls the strip so that the active tab is fully visible.
+  let m = g.tabMetrics
+  var x = 0'f32
+  for i, p in g.panels:
+    if p == g.fActive:
+      if x < g.fTabScroll: g.fTabScroll = x
+      elif x + m.widths[i] > g.fTabScroll + m.avail: g.fTabScroll = x + m.widths[i] - m.avail
+      break
+    x += m.widths[i]
+  g.clampTabScroll(m)
 
 proc closeRectOf(g: DockTabs, p: DockPanel, tab: RectF): RectF =
   if not p.fClosable: return rectF(0, 0, 0, 0)
@@ -1551,7 +1582,7 @@ proc keyHook(site: DockSite, ui: UiRoot, key: var Key, shift: ShiftState) =
     if c of PageControl and PageControl(c).showTabs: return
     c = Control(c.parent)
   if c != nil: p = DockPanel(c)
-  else:
+  elif ui.focusedControl == nil:         # nothing focused: the active panel
     let a = site.primary.fActive
     if a != nil and a.group != nil and Control(a.root) == Control(ui.root): p = a
   if p == nil or p.group == nil: return
@@ -1667,6 +1698,7 @@ method doMouseMove*(s: DockSplit, shift: ShiftState, x, y: float32) =
       let k = s.fDragGap
       let pos = if s.fOrient == orHorizontal: x else: y
       let pair = s.fDragSizes[0] + s.fDragSizes[1]
+      if pair <= 0: return               # a split without room: no NaN weights
       let first = clamp(s.fDragSizes[0] + pos - s.fDragPos, min(MinPane, pair / 2),
                         pair - min(MinPane, pair / 2))
       let wsum = s.fDragWeights[0] + s.fDragWeights[1]
@@ -1735,6 +1767,7 @@ method paint*(g: DockTabs, c: Canvas) =
   c.frameRect(g.clientRect, if active: th.accent.withAlpha(150) else: th.border, 1)
   let ps = g.panels
   let rs = g.tabRects
+  c.pushClip(rectF(1, 0, max(g.width - 2, 0), h))
   for i, p in ps:
     let r = rs[i]
     let sel = p == g.fActive
@@ -1759,6 +1792,7 @@ method paint*(g: DockTabs, c: Canvas) =
       if g.fHotClose == i:
         c.fillRoundRect(rect, 3, th.pressed)
       c.drawCloseGlyph(rect, if g.fHotClose == i: th.text else: th.textMuted)
+  c.popClip()
   procCall paint(Container(g), c)
 
 proc updateHot(g: DockTabs, x, y: float32) =
@@ -1788,6 +1822,19 @@ proc showMenu(g: DockTabs, p: DockPanel, x, y: float32) =
     m.items.addItem("Close", proc(sender: MenuItem) = p.close())
   let o = g.clientToForm(pointF(x, y))
   m.popup(Form(f), o.x, o.y)
+
+method doMouseWheel*(g: DockTabs, shift: ShiftState, dx, dy: float32,
+                     handled: var bool) =
+  ## Over the strip, the wheel scrolls tabs that do not fit.
+  procCall doMouseWheel(Container(g), shift, dx, dy, handled)
+  if handled or g.fHot < 0: return          # the pointer is on a tab
+  let m = g.tabMetrics
+  if m.total <= m.avail: return
+  let d = if dy != 0: dy else: dx
+  g.fTabScroll -= d * 40
+  g.clampTabScroll(m)
+  g.invalidate()
+  handled = true
 
 method doMouseDown*(g: DockTabs, button: MouseButton, shift: ShiftState, x, y: float32) =
   let i = g.tabAt(x, y)
