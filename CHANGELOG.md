@@ -18,6 +18,11 @@ between minor versions.
 - Saving a form writes an object reference (`focusControl`, `popupMenu`, `images`,
   `action`, `menu`...) only when its target is in the saved tree; a deleted
   component no longer makes a file that fails to load. (N2)
+- `CodeEdit.saveToFile` / `CodeModel.saveFile` write to a temporary file with
+  checked writes and replace the target only on success; a failure raises
+  IOError and the text stays modified. `saveToFile(path)` now renames through
+  `fileName=` (the language follows). New `saveCopyTo(path)` and
+  `CodeModel.saveCopy` write a copy without renaming or marking saved. (N3)
 
 ## [0.2.1] - 2026-11-20
 

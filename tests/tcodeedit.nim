@@ -908,6 +908,25 @@ suite "codeedit":
     removeDir dir
     expect IOError: e.saveToFile("")
 
+  test "files: failed read or write changes nothing, saveCopyTo, no temp file left (N3)":
+    let f = newShown()
+    let e = f.mk("keep me")
+    let dir = getTempDir() / "nimvcl_codeedit_test2"
+    createDir dir
+    e.caretPos = (0, 7)
+    f.typeText("!")
+    e.fileName = dir / "old.txt"
+    let p = dir / "out.txt"
+    writeFile(p, "original")
+    e.saveCopyTo(p)
+    check readFile(p) == "keep me!" and e.fileName == dir / "old.txt" and e.modified
+    # a target that cannot be replaced (a directory) fails and is not marked saved
+    createDir(dir / "sub")
+    expect IOError: e.saveToFile(dir / "sub")
+    check e.modified and e.fileName == dir / "old.txt"
+    check not fileExists(dir / "sub.nimvcl-tmp")
+    removeDir dir
+
   test "theme switch repaints with the matching palette":
     let f = newShown()
     let e = f.mk("proc a() = discard # c", "nim")

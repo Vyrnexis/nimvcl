@@ -2232,10 +2232,18 @@ proc loadFromFile*(e: CodeEdit, path: string): LoadReport {.discardable.} =
   e.touched(follow = false)
 
 proc saveToFile*(e: CodeEdit, path = "") =
-  ## Writes the text with its line endings (UTF-8, no BOM), marks it saved and
-  ## remembers `path` (default: `fileName`) as the file name.
+  ## Writes the text with its line endings (UTF-8, no BOM) to a temporary file
+  ## that then replaces the target (IOError on failure, nothing marked saved),
+  ## marks it saved and remembers `path` (default: `fileName`) as the file name
+  ## (through `fileName=`, so the language follows the extension).
   let p = if path.len > 0: path else: e.fFileName
   if p.len == 0: raise newException(IOError, "CodeEdit.saveToFile: no file name")
   e.fModel.saveFile(p, e.fEnsureNewline)
-  e.fFileName = p
+  e.fileName = p
   e.touched(follow = false)
+
+proc saveCopyTo*(e: CodeEdit, path: string) =
+  ## Writes the text like `saveToFile` but leaves the file name, the language
+  ## and the `modified` state alone (Save a Copy As). Raises IOError on failure.
+  if path.len == 0: raise newException(IOError, "CodeEdit.saveCopyTo: no file name")
+  e.fModel.saveCopy(path, e.fEnsureNewline)

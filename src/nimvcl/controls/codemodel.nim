@@ -46,7 +46,7 @@
 ##   the lines `firstLine ..< firstLine + oldCount` were replaced by
 ##   `newCount` lines. The highlighter cache and the fold map subscribe to it.
 
-import std/strutils
+import std/[strutils, os]
 import ./textutil
 export textutil.snapIndex, textutil.prevBoundary, textutil.nextBoundary,
        textutil.runeCount, textutil.runeColOf, textutil.byteOfRuneCol,
@@ -623,35 +623,59 @@ proc setLineEnding*(m: CodeModel, e: LineEnding) =
   m.fModified = true
   m.savedStep = -1
 
+proc readTextFile*(path: string): string =
+  ## Reads `path` (raises IOError if it cannot be read) and strips a UTF-8 BOM.
+  result = readFile(path)
+  if result.len >= 3 and result[0] == '\xEF' and result[1] == '\xBB' and result[2] == '\xBF':
+    result = result[3 .. ^1]
+
 proc loadFile*(m: CodeModel, path: string): LoadReport =
   ## Reads `path` (raises IOError if it cannot be read). Strips a UTF-8 BOM.
-  var data = readFile(path)
-  if data.len >= 3 and data[0] == '\xEF' and data[1] == '\xBB' and data[2] == '\xBF':
-    data = data[3 .. ^1]
-  m.loadText(data)
+  m.loadText(readTextFile(path))
 
 proc setText*(m: CodeModel, s: string) =
   ## Programmatic replacement (line endings detected like `loadText`).
   discard m.loadText(s)
 
-proc saveFile*(m: CodeModel, path: string, ensureTrailingNewline = false) =
+proc saveCopy*(m: CodeModel, path: string, ensureTrailingNewline = false) =
   ## Writes the document with its detected line ending, in chunks (no copy of
-  ## the whole text), and calls `markSaved`.
+  ## the whole text), without touching the saved state. The text goes to a
+  ## temporary file next to `path` that replaces it when every write worked, so
+  ## a full disk leaves the old file intact. Raises IOError on failure.
   let eol = eolString(m.fLineEnding)
-  let f = open(path, fmWrite)
+  let tmp = path & ".nimvcl-tmp"
+  var ok = false
+  let f = open(tmp, fmWrite)
   try:
+    proc put(f: File, chunk: var string) =
+      if chunk.len > 0:
+        if f.writeBuffer(addr chunk[0], chunk.len) != chunk.len:
+          raise newException(IOError, "cannot write " & tmp)
+        chunk.setLen 0
     var chunk = newStringOfCap(1 shl 20)
     for i, l in m.lines:
       if i > 0: chunk.add eol
       chunk.add l
-      if chunk.len >= (1 shl 20) - 256:
-        discard f.writeBuffer(addr chunk[0], chunk.len)
-        chunk.setLen 0
+      if chunk.len >= (1 shl 20) - 256: f.put chunk
     if ensureTrailingNewline and not m.trailingNewline and m.docEnd != (0, 0):
       chunk.add eol
-    if chunk.len > 0: discard f.writeBuffer(addr chunk[0], chunk.len)
+    f.put chunk
+    f.flushFile()
+    ok = true
   finally:
     f.close()
+    if not ok: discard tryRemoveFile(tmp)
+  try:
+    try: setFilePermissions(tmp, getFilePermissions(path))
+    except OSError: discard         # a new file keeps the default permissions
+    moveFile(tmp, path)
+  except OSError as e:
+    discard tryRemoveFile(tmp)
+    raise newException(IOError, "cannot replace " & path & ": " & e.msg)
+
+proc saveFile*(m: CodeModel, path: string, ensureTrailingNewline = false) =
+  ## `saveCopy`, then `markSaved` (only when the write succeeded).
+  m.saveCopy(path, ensureTrailingNewline)
   m.markSaved()
 
 proc newCodeModel*(text: string): CodeModel =
