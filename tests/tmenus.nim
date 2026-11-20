@@ -188,6 +188,57 @@ suite "main menu":
                                        x: 10, y: 10, dy: 5))
     check menuItemRect(p, x.exit).y > r.y
 
+  test "a long menu shows scroll arrows; press, hover, End and Home scroll":
+    let x = build()
+    menuMaxHeight = 90
+    defer: menuMaxHeight = 0
+    x.f.tap('f', {ssAlt})
+    let p = top()
+    let h = p.content.height
+    check menuScrollOffset(p) == 0
+    check menuScrollArrow(p, 4) == 0 and menuScrollArrow(p, h - 4) == 1
+    p.ui.win.click(p.content.width / 2, h - 4)         # a press on the bottom arrow
+    check menuScrollOffset(p) > 0
+    check menuScrollArrow(p, 4) == -1
+    check chainLen(x.f) == 1                           # the arrow is not a row
+    x.f.tap(keyEnd)
+    check hotMenuItem(p) == x.exit
+    let r = menuItemRect(p, x.exit)
+    check r.y >= 0 and r.y + r.h <= h
+    check menuScrollArrow(p, h - 4) == 0               # at the end: no bottom arrow
+    x.f.tap(keyHome)
+    check hotMenuItem(p) == x.open
+    check menuScrollOffset(p) == 0
+    # hovering an arrow keeps scrolling
+    focusIdProc = nil
+    p.ui.win.move(p.content.width / 2, h - 4)
+    let t0 = getMonoTime()
+    while menuScrollOffset(p) < 20 and (getMonoTime() - t0).inMilliseconds < 2000:
+      Application.processMessages(20)
+    check menuScrollOffset(p) >= 20
+    p.ui.win.move(p.content.width / 2, h / 2)          # leaving the arrow stops it
+    let at = menuScrollOffset(p)
+    Application.processMessages(150)
+    check menuScrollOffset(p) == at
+
+  test "a submenu of a scrolled long menu opens beside its visible row":
+    let x = build()
+    menuMaxHeight = 90
+    defer: menuMaxHeight = 0
+    x.f.tap('f', {ssAlt})
+    let p = top()
+    x.f.tap(keyEnd)
+    check menuScrollOffset(p) > 0
+    # move to Recent (scrolled out at the top), then Right opens its submenu
+    x.f.tap(keyUp); x.f.tap(keyUp)
+    check hotMenuItem(p) == x.recent
+    let r = menuItemRect(p, x.recent)
+    check r.y >= 0 and r.y + r.h <= p.content.height
+    x.f.tap(keyRight)
+    check chainLen(x.f) == 2
+    let sub = top()
+    check abs((sub.bounds.y + 4) - (p.bounds.y + r.y)) < 8
+
   test "Alt+letter opens the menu and selects the first item":
     let x = build()
     x.f.tap('f', {ssAlt})

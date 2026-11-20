@@ -84,6 +84,8 @@ type
     hot: int
     pressed: bool
     scroll, fullH: float32      ## taller than the display: the rows scroll
+    autoDir: int                ## -1/1: the pointer rests on a scroll arrow
+    autoTimer: Timer
     sub: PopupWindow
     subItem: MenuItem
     delay: Timer
@@ -112,6 +114,9 @@ const
   TextGap = 36'f32
   MinPanelW = 120'f32
   BarPadX = 10'f32
+  ScrollArrowH = 16'f32         ## the scroll arrows of a menu taller than the display
+  ScrollTick = 40               ## ms between auto-scroll steps on a scroll arrow
+  ScrollStep = 14'f32
 
 # --------------------------------------------------------------- shortcuts
 
@@ -324,9 +329,18 @@ var menuMaxHeight* = 0'f32
 proc rowRect(p: MenuPanel, i: int): RectF =
   rectF(1, p.rowY[i] - p.scroll, p.width - 2, p.rowH[i])
 
+func canScroll(p: MenuPanel, dir: int): bool =
+  p.fullH > 0 and (if dir < 0: p.scroll > 0 else: p.scroll < p.fullH - p.height)
+
+func arrowAt(p: MenuPanel, y: float32): int =
+  ## -1/1 when `y` is on a visible scroll arrow (top/bottom), else 0.
+  if p.canScroll(-1) and y < ScrollArrowH: -1
+  elif p.canScroll(1) and y >= p.height - ScrollArrowH: 1
+  else: 0
+
 proc rowAt(p: MenuPanel, x, y: float32): int =
   result = -1
-  if x < 0 or x >= p.width: return
+  if x < 0 or x >= p.width or p.arrowAt(y) != 0: return
   for i in 0 ..< p.entries.len:
     let top = p.rowY[i] - p.scroll
     if y >= top and y < top + p.rowH[i]: return i
@@ -387,10 +401,48 @@ proc scrollTo(p: MenuPanel, v: float32) =
 proc reveal(p: MenuPanel, i: int) =
   ## Scrolls row `i` into view (a panel taller than the display).
   if p.fullH <= 0 or i < 0 or i >= p.entries.len: return
-  let top = p.rowY[i] - PadV - 1
-  let bottom = p.rowY[i] + p.rowH[i] + PadV + 1
-  if top < p.scroll: p.scrollTo(top)
-  elif bottom > p.scroll + p.height: p.scrollTo(bottom - p.height)
+  # keep the row clear of the scroll arrows (they show only where there is more)
+  let top = p.rowY[i]
+  let bottom = p.rowY[i] + p.rowH[i]
+  if top < p.scroll + ScrollArrowH: p.scrollTo(top - ScrollArrowH)
+  elif bottom > p.scroll + p.height - ScrollArrowH:
+    p.scrollTo(bottom - p.height + ScrollArrowH)
+  if p.scroll + p.height >= p.fullH - 1: p.scrollTo(p.fullH)  # last row: include the padding
+  if p.scroll <= 1: p.scrollTo(0)
+
+proc stopAuto(p: MenuPanel) =
+  p.autoDir = 0
+  if p.autoTimer != nil: p.autoTimer.enabled = false
+
+proc setAuto(p: MenuPanel, dir: int) =
+  ## Starts (or stops, 0) the auto-scroll of a pointer resting on an arrow.
+  if dir == p.autoDir: return
+  if dir == 0: p.stopAuto(); return
+  p.autoDir = dir
+  if p.autoTimer == nil:
+    p.autoTimer = newTimer(nil, ScrollTick)
+    let pn = p
+    p.autoTimer.onTimer = proc(t: Timer) =
+      if pn.autoDir == 0 or not pn.canScroll(pn.autoDir):
+        pn.stopAuto()
+      else:
+        pn.scrollTo(pn.scroll + float32(pn.autoDir) * ScrollStep)
+  p.autoTimer.enabled = false
+  p.autoTimer.enabled = true
+
+proc scrollBy*(p: PopupWindow, dy: float32) =
+  ## Scrolls a menu popup that is taller than the display (no effect otherwise).
+  if p != nil and p.content of MenuPanel:
+    let m = MenuPanel(p.content)
+    m.scrollTo(m.scroll + dy)
+
+proc menuScrollOffset*(p: PopupWindow): float32 =
+  ## How far the rows of a menu popup are scrolled (0: not scrolled).
+  if p != nil and p.content of MenuPanel: MenuPanel(p.content).scroll else: 0
+
+proc menuScrollArrow*(p: PopupWindow, y: float32): int =
+  ## -1/1 when popup-local `y` is on the visible top/bottom scroll arrow, else 0.
+  if p != nil and p.content of MenuPanel: MenuPanel(p.content).arrowAt(y) else: 0
 
 proc closeSub(p: MenuPanel) =
   if p.sub != nil:
@@ -420,7 +472,9 @@ proc openSub(p: MenuPanel, idx: int, selectFirst: bool) =
   let r = p.rowRect(idx)
   let b = p.popup.bounds
   # the submenu overlaps the panel by 2px and lines up with the row's top
-  let anchor = rectF(b.x + 2, b.y + r.y - PadV, b.w - 4, r.h)
+  # (r is already scrolled; a partly visible row is pulled into the panel)
+  let ry = clamp(r.y, 0'f32, max(p.height - r.h, 0'f32))
+  let anchor = rectF(b.x + 2, b.y + ry - PadV, b.w - 4, r.h)
   let panel = p
   let sp = showPanel(p.ownerForm, it, anchor, plRight, p.popup, selectFirst,
     onClosed = proc(q: PopupWindow) =
@@ -530,6 +584,19 @@ method paint*(p: MenuPanel, c: Canvas) =
       let sc = $it.shortcut
       let tc = if not on: t.textDisabled elif hot: t.menuHoverText else: t.textMuted
       c.textRect(sc, f, rectF(r.x, r.y, r.w - RightPad, r.h), tc, taRight, vaCenter)
+  for dir in [-1, 1]:
+    if not p.canScroll(dir): continue
+    let ar = if dir < 0: rectF(1, 1, w - 2, ScrollArrowH)
+             else: rectF(1, p.height - 1 - ScrollArrowH, w - 2, ScrollArrowH)
+    c.fillRect(ar, t.menuBg)
+    if p.autoDir == dir: c.fillRect(ar, t.menuHover)
+    let col = if p.autoDir == dir: t.menuHoverText else: t.text
+    let cx = w / 2
+    let cy = ar.y + ar.h / 2
+    if dir < 0:
+      c.fillPolygon([pointF(cx - 4, cy + 2), pointF(cx + 4, cy + 2), pointF(cx, cy - 3)], col)
+    else:
+      c.fillPolygon([pointF(cx - 4, cy - 2), pointF(cx + 4, cy - 2), pointF(cx, cy + 3)], col)
   c.frameRect(p.clientRect, t.menuBorder, 1)
   # a soft edge on the lower right, standing in for a drop shadow
   c.fillRect(rectF(2, p.height - 2, p.width - 3, 1), t.shadow)
@@ -539,6 +606,7 @@ method doMouseMove*(p: MenuPanel, shift: ShiftState, x, y: float32) =
   var i = p.rowAt(x, y)
   if not p.selectable(i): i = -1
   p.setHot(i, true)
+  p.setAuto(p.arrowAt(y))
   procCall doMouseMove(Container(p), shift, x, y)
 
 method doMouseWheel*(p: MenuPanel, shift: ShiftState, dx, dy: float32,
@@ -550,12 +618,15 @@ method doMouseWheel*(p: MenuPanel, shift: ShiftState, dx, dy: float32,
 
 method doMouseLeave*(p: MenuPanel) =
   if p.sub == nil or not p.sub.isOpen: p.setHot(-1, true)
+  p.setAuto(0)
   procCall doMouseLeave(Container(p))
 
 method doMouseDown*(p: MenuPanel, button: MouseButton, shift: ShiftState,
                     x, y: float32) =
   if button == mbLeft:
     p.pressed = true
+    let a = p.arrowAt(y)
+    if a != 0: p.scrollTo(p.scroll + float32(a) * RowH)   # a press scrolls a row
     let i = p.rowAt(x, y)
     if p.selectable(i):
       p.setHot(i, true)
@@ -625,6 +696,7 @@ proc showPanel(owner: Form, root: MenuItem, anchor: RectF, placement: Placement,
   if selectFirst: panel.setHot(panel.step(1), false)
   result.onClosed = proc(q: PopupWindow) =
     if panel.delay != nil: panel.delay.free()
+    if panel.autoTimer != nil: panel.autoTimer.free()
     if onClosed != nil: onClosed(q)
 
 # ------------------------------------------------------------ registration

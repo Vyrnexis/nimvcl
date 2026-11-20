@@ -7,6 +7,10 @@ between minor versions.
 
 ## Unreleased
 
+### Added
+
+- A menu popup taller than the display shows scroll arrows at its top and bottom (shown only where there is more): a press scrolls a row, resting the pointer on one scrolls continuously; the wheel and Up/Down/Home/End/accelerators keep the selected row clear of the arrows, and a submenu opens beside the visible part of its row. `scrollBy`, `menuScrollOffset` and `menuScrollArrow` expose the state of a menu `PopupWindow`.
+
 ## [0.3.0] - 2026-11-21
 
 ### Added
