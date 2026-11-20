@@ -60,6 +60,54 @@ suite "memo":
   teardown:
     for f in openForms(): f.freeWindow()
 
+  test "word wrap: row bookkeeping survives line inserts and deletes without a paint":
+    let f = newShown()
+    let m = f.mkMemo("", w = 120, h = 140)
+    m.wordWrap = true
+    settle(f)
+    m.beginUpdate()
+    for i in 0 ..< 300: m.lines.add "alpha beta gamma delta epsilon " & $i
+    m.lines.insert(5, "x")
+    m.lines.delete(0)
+    m.endUpdate()
+    settle(f)
+    var sum = 0
+    for i in 0 ..< m.lines.count:
+      m.caretPos = (i, 0)
+      sum += 1
+    check m.lines.count == 300 and sum == 300
+    check m.visualRowCount >= 300 * 2
+    let rows = m.visualRowCount
+    m.lines.delete(10)
+    check m.visualRowCount < rows
+
+  test "beginUpdate batches onChange; addStrings keeps caret and undo":
+    let f = newShown()
+    let m = f.mkMemo("one\ntwo")
+    m.setFocus()
+    var n = 0
+    m.onChange = proc(s: Control) = inc n
+    m.beginUpdate()
+    m.beginUpdate()
+    m.lines.add "three"
+    m.lines.add "four"
+    m.endUpdate()
+    check n == 0
+    m.endUpdate()
+    check n == 1 and m.lines.count == 4
+    m.caretPos = (1, 1)
+    f.typeText("Z")
+    check m.canUndo
+    n = 0
+    m.lines.addStrings(["five", "six\nseven"])
+    check n == 1 and m.lines.count == 7 and m.lines[6] == "seven"
+    check m.caretPos == (1, 2) and m.canUndo
+    m.undo()
+    check m.lines[1] == "two" and m.lines.count == 7
+    let p = newMemo(nil)
+    p.lines.addStrings(["a", "b"])
+    check p.lines.count == 2
+
   test "lines.add splits at newlines on a pristine memo too":
     let m = newMemo(nil)
     m.lines.add "a\nb"

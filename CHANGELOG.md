@@ -9,6 +9,7 @@ between minor versions.
 
 ### Added
 
+- `Memo.beginUpdate` / `endUpdate` (nestable: no layout, repaint or `onChange` in between, one refresh at the end) and `Memo.lines.addStrings` (several lines as one change; the caret, selection and undo history stay).
 - `ListBox.onSelect`: fires only when the user changed the selection (click, drag, keys, type-ahead), after `onChange`, which keeps firing for code changes too. `ListBox.items=` keeps the scroll position. (N35)
 - Window state: `Form.windowState` (`wsNormal`, `wsMinimized`, `wsMaximized`, a
   property the designer lists), `maximize`, `minimize`, `restore`,
@@ -20,6 +21,7 @@ between minor versions.
 
 ### Fixed
 
+- Memo performance: appending lines to a word-wrapped memo is no longer quadratic (the row index is extended in O(log n), rebuilt once per batch after other inserts/deletes; 50,000 appended lines 7.7 s to 0.9 s), a wrap break no longer copies the rest of the line, and `text=` tests emptiness without joining the text. (Q1, Q2)
 - `FileDialog.executeModal` resets `isRunning` (and drops its pending callback) when the application ends or the loop raises before the dialog reports. (N42)
 - `PageControl` / `TabControl`: the tab strip is re-clamped when a sheet is added or removed (a scroll past the last tab showed no tabs), and the mouse wheel over the strip scrolls tabs that do not fit. (N41)
 - A disabled `ToolButton` with an `image` is dimmed like one with an image list icon. (N40)

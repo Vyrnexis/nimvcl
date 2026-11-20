@@ -504,6 +504,27 @@ proc insertLine*(m: MemoModel, i: int, s: string) =
   for p in parts: m.fRunes += runeCount(p) + 1
   m.afterLineApi(i, 0, parts.len)
 
+proc appendLines*(m: MemoModel, items: openArray[string]) =
+  ## Adds lines at the end in one change (each string splits at "\n"; cut to
+  ## `maxLength` like `insertLine`). Caret, selection and undo history stay:
+  ## nothing before the end moves.
+  var parts: seq[string]
+  var room = if m.fMaxLength > 0: m.fMaxLength - m.fRunes else: high(int)
+  for s in items:
+    var t = sanitize(s)
+    if m.fMaxLength > 0:
+      room -= 1                        # the line break
+      if room < 0: break
+      t = truncateRunes(t, room)
+      room -= runeCount(t)
+    parts.add splitAtNewlines(t)
+  if parts.len == 0: return
+  let first = m.lines.len
+  for p in parts:
+    m.lines.add p
+    m.fRunes += runeCount(p) + 1
+  m.fireChanged(first, 0, parts.len)
+
 proc deleteLineAt*(m: MemoModel, i: int) =
   if i < 0 or i >= m.lines.len: return
   if m.lines.len == 1:

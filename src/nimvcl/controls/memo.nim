@@ -78,6 +78,9 @@ type
     fRows: seq[int32]         ## visual rows per line (wrap mode)
     fFen: seq[int32]          ## Fenwick tree over fRows
     fTotalRows: int
+    fFenDirty: bool           ## fRows changed in size: the tree is rebuilt on its next use
+    fUpdating: int            ## beginUpdate nesting
+    fUpdDirty: bool           ## something changed while updating
     fMaxW: float32            ## widest measured line (no wrap)
     fMaxCount: int            ## measured lines whose width equals fMaxW
     fMaxDirty: bool           ## the last widest line changed: fMaxW is only an upper bound
@@ -204,21 +207,29 @@ proc slotTabs(e: Memo, s: string, a, b: int, x: float32): int =
     i = t + 1
   b
 
+const FitWindow = 512         ## bytes measured at a time when wrapping
+
 proc fitEnd(e: Memo, s: string, a: int, w: float32): int =
   ## End of the longest piece starting at `a` that fits `w` (at least one
-  ## rune); `s.len` when the rest fits.
+  ## rune); `s.len` when the rest fits. Works on windows of the line, so the
+  ## cost of a break does not grow with the length of the rest of the line.
   var x = 0'f32
   var i = a
   let tab = e.tabW
   while i < s.len:
-    let t = s.find('\t', i)
-    let stop = if t < 0: s.len else: t
+    var wEnd = min(s.len, i + FitWindow)
+    while wEnd < s.len and (ord(s[wEnd]) and 0xC0) == 0x80: dec wEnd   # not inside a rune
+    let t = s.find('\t', i, wEnd - 1)
+    let stop = if t < 0: wEnd else: t
     if stop > i:
       let seg = s[i ..< stop]
       let n = e.fitCount(seg, w - x)
       if n < seg.len: return max(i + n, nextBoundary(s, a))
       x += e.tw(seg)
-    if t < 0: return s.len
+    if t < 0:
+      if wEnd >= s.len: return s.len
+      i = stop                              # the run goes on in the next window
+      continue
     if x + tab > w: return (if t > a: t else: t + 1)
     x += tab
     i = t + 1
@@ -246,6 +257,7 @@ proc computeBreaks(e: Memo, s: string, w: float32): seq[int32] =
 
 proc rebuildFen(e: Memo) =
   let n = e.model.lineCount
+  e.fFenDirty = false
   if not e.fWrap:
     e.fTotalRows = n
     return
@@ -261,9 +273,37 @@ proc rebuildFen(e: Memo) =
     let j = i + (i and -i)
     if j <= n: e.fFen[j] += e.fFen[i]
 
+proc ensureFen(e: Memo) =
+  ## Lines were inserted or deleted (wrap mode): one rebuild covers however
+  ## many changes came since the tree was last used.
+  if e.fFenDirty: e.rebuildFen()
+
+proc fenPrefix(e: Memo, k: int): int =
+  var j = k
+  while j > 0:
+    result += int(e.fFen[j])
+    j -= j and -j
+
+proc fenPush(e: Memo) =
+  ## A line with `fRows` already set was appended: extends the tree in O(log n).
+  let k = e.fFen.len                     # index of the new line (1-based)
+  let r = int(e.fRows[k - 1])
+  e.fFen.add int32(r + e.fenPrefix(k - 1) - e.fenPrefix(k - (k and -k)))
+  e.fTotalRows += r
+
+proc fenTruncate(e: Memo, n: int) =
+  ## The tree for the first `n` lines (the others were cut off the end).
+  e.fFen.setLen n + 1
+  e.fTotalRows = e.fenPrefix(n)
+
+proc totalRows(e: Memo): int =
+  e.ensureFen()
+  e.fTotalRows
+
 proc rowStart(e: Memo, line: int): int =
   ## First visual row of `line`.
   if not e.fWrap: return line
+  e.ensureFen()
   var k = min(line, e.model.lineCount)
   while k > 0:
     result += int(e.fFen[k])
@@ -272,6 +312,7 @@ proc rowStart(e: Memo, line: int): int =
 proc lineAtRow(e: Memo, row: int): int =
   let n = e.model.lineCount
   if not e.fWrap: return clamp(row, 0, n - 1)
+  e.ensureFen()
   var pos = 0
   var rem = max(row, 0)
   var pw = 1
@@ -287,6 +328,7 @@ proc setRows(e: Memo, line, nr: int) =
   let d = nr - int(e.fRows[line])
   if d == 0: return
   e.fRows[line] = int32(nr)
+  if e.fFenDirty: return                  # the rebuild takes it from fRows
   var k = line + 1
   let n = e.model.lineCount
   while k <= n:
@@ -425,7 +467,7 @@ proc prepare(e: Memo) =
     e.measureVisible()
     let vp = e.viewport
     let cw = if e.fWrap: 0.0 else: float64(e.fMaxW) + 2 * float64(PadX) + 1
-    let ch = float64(e.fTotalRows) * float64(rh) + 2 * float64(PadY)
+    let ch = float64(e.totalRows) * float64(rh) + 2 * float64(PadY)
     e.setContentSize(cw, ch)
     if e.wrapWidth == e.fWrapW and e.scrollPosX == bx and
        e.scrollPosY == by and e.viewport.h == vp.h:
@@ -518,7 +560,7 @@ proc rowAndX(e: Memo, line, col: int, eol: bool): (int, float32) =
 
 proc posAtRowX(e: Memo, row: int, x: float32): (MemoPos, bool) =
   ## Model position nearest to visual `row` and `x` (from the text origin).
-  let r = clamp(row, 0, max(e.fTotalRows - 1, 0))
+  let r = clamp(row, 0, max(e.totalRows - 1, 0))
   let line = e.lineAtRow(r)
   let n = e.vlineCount(line)
   let k = clamp(r - e.rowStart(line), 0, n - 1)
@@ -570,7 +612,7 @@ proc scrollCaretIntoView*(e: Memo) =
   let rh = float64(e.rowH)
   let y0 = if row == 0: 0.0 else: float64(PadY) + float64(row) * rh
   let y1 = float64(PadY) + float64(row + 1) * rh +
-           (if row >= e.fTotalRows - 1: float64(PadY) else: 0.0)
+           (if row >= e.totalRows - 1: float64(PadY) else: 0.0)
   e.scrollIntoView(float64(PadX + x - m), y0, float64(2 * m + 1), y1 - y0)
 
 # ------------------------------------------------------------------ helpers
@@ -588,6 +630,9 @@ proc resetBlink(e: Memo) =
 
 proc touched(e: Memo, follow = true) =
   ## Text, selection, composition or size changed.
+  if e.fUpdating > 0:                  # between beginUpdate and endUpdate
+    e.fUpdDirty = true
+    return
   e.resetBlink()
   e.prepare()
   if follow: e.scrollCaretIntoView()
@@ -613,7 +658,15 @@ proc modelChanged(e: Memo, first, oldN, newN: int) =
   e.fSweep = min(e.fSweep, first)
   for i in first + min(oldN, newN) ..< first + newN:
     e.layouts[i] = LineLayout()
-  if oldN != newN: e.rebuildFen()
+  if oldN != newN:
+    let count = e.model.lineCount
+    if not e.fWrap: e.rebuildFen()
+    elif e.fFenDirty: discard                # rebuilt once, when next needed
+    elif oldN == 0 and first == count - newN and e.fFen.len == first + 1:
+      for _ in 0 ..< newN: e.fenPush()       # appended at the end: O(log n) each
+    elif newN == 0 and first == count and e.fFen.len == count + oldN + 1:
+      e.fenTruncate count                    # cut off the end
+    else: e.fFenDirty = true
   if newN <= 16:                  # a small edit: measure it now, extents stay exact
     for i in first ..< min(first + newN, e.layouts.len): e.ensureLayout(i)
 
@@ -661,8 +714,23 @@ proc `text=`*(e: Memo, v: string) =
   e.fMaxDirty = true
   let same = not e.model.setText(v)     # compared after sanitising / maxLength
   if same: e.fChanged = false
-  e.fPristine = e.model.text.len == 0
+  e.fPristine = e.model.lineCount == 1 and e.model.line(0).len == 0
   e.touched()
+
+proc beginUpdate*(e: Memo) =
+  ## Batches changes: no layout, scrolling, repaint or `onChange` until the
+  ## matching `endUpdate` (nestable). Appending many lines in between stays
+  ## linear.
+  inc e.fUpdating
+
+proc endUpdate*(e: Memo) =
+  ## Ends a `beginUpdate`; the outermost call does the one refresh (and fires
+  ## `onChange` once when the text changed).
+  if e.fUpdating == 0: return
+  dec e.fUpdating
+  if e.fUpdating == 0 and e.fUpdDirty:
+    e.fUpdDirty = false
+    e.touched(follow = false)
 
 proc lineCount*(e: Memo): int = e.model.lineCount
 proc lineAt*(e: Memo, i: int): string = e.model.line(i)
@@ -784,7 +852,7 @@ proc topLine*(e: Memo): int =
 proc visualRowCount*(e: Memo): int =
   ## Visual rows of the (measured) text; equals `lineCount` without wrapping.
   e.prepare()
-  e.fTotalRows
+  e.totalRows
 
 proc visualRowOfCaret*(e: Memo): int =
   e.prepare()
@@ -820,6 +888,20 @@ proc add*(l: MemoLines, s: string) =
   if l.m.fPristine and m.lineCount == 1 and m.line(0).len == 0:
     m.setText(s)                        # splits at "\n" like a later add does
   else: m.insertLine(m.lineCount, s)
+  l.m.programmatic()
+proc addStrings*(l: MemoLines, items: openArray[string]) =
+  ## Appends the strings as lines (each splits at "\n" like `add`) as one
+  ## change: one `onChange`, one layout. The caret, the selection and the undo
+  ## history stay (a pristine memo is filled like `add` does).
+  if items.len == 0: return
+  let m = l.m.model
+  if l.m.fPristine and m.lineCount == 1 and m.line(0).len == 0:
+    var t = items[0]
+    for i in 1 ..< items.len: t.add '\n' & items[i]
+    m.setText(t)
+    l.m.programmatic()
+    return
+  m.appendLines(items)
   l.m.programmatic()
 proc delete*(l: MemoLines, i: int) =
   l.m.model.deleteLineAt(i)
@@ -944,7 +1026,7 @@ proc moveVisual(e: Memo, delta: int, extend: bool) =
   if target < 0:
     e.model.setCaret((0, 0), extend)
     e.fEol = false
-  elif target >= e.fTotalRows:
+  elif target >= e.totalRows:
     e.model.setCaret(e.model.docEnd, extend)
     e.fEol = false
   else:
