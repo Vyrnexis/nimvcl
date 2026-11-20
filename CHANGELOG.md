@@ -9,6 +9,7 @@ between minor versions.
 
 ### Added
 
+- `MainMenu` overflow: when the top items do not fit the form width, the ones that do not fit move behind a » button at the right end of the bar; it opens a popup listing them, each a submenu with its own items. Alt+letter, F10 and Left/Right on the bar reach hidden items, the layout follows the form width, and an open overflow popup closes on resize. `overflowing`, `overflowItems`, `overflowRect` and `openOverflow` expose it.
 - A menu popup taller than the display shows scroll arrows at its top and bottom (shown only where there is more): a press scrolls a row, resting the pointer on one scrolls continuously; the wheel and Up/Down/Home/End/accelerators keep the selected row clear of the arrows, and a submenu opens beside the visible part of its row. `scrollBy`, `menuScrollOffset` and `menuScrollArrow` expose the state of a menu `PopupWindow`.
 
 ## [0.3.0] - 2026-11-21

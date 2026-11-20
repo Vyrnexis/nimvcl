@@ -63,6 +63,10 @@ proc build(): Fixture =
   log = @[]
   x
 
+proc resizeTo(x: Fixture, w: float32) =
+  x.f.width = w
+  discard x.f.paintIfDirty()          # lays the bar out at the new width
+
 proc top(): PopupWindow = topPopup(openForms()[0])
 proc chainLen(f: Form): int = menuChain(f).len
 
@@ -238,6 +242,67 @@ suite "main menu":
     check chainLen(x.f) == 2
     let sub = top()
     check abs((sub.bounds.y + 4) - (p.bounds.y + r.y)) < 8
+
+  test "bar overflow: items that do not fit move behind a » button":
+    let x = build()
+    check not x.mm.overflowing
+    resizeTo(x, 120)                      # File, Edit fit; View does not
+    check x.mm.overflowing
+    let hid = x.mm.overflowItems
+    check hid.len >= 1 and hid[^1] == x.view
+    check x.mm.itemRect(2).w == 0 or x.view notin hid
+    let ch = x.mm.overflowRect
+    check ch.w > 0 and ch.x + ch.w <= x.mm.width
+    # nothing overlaps the button
+    for i in 0 ..< 3:
+      let r = x.mm.itemRect(i)
+      if r.w > 0: check r.x + r.w <= ch.x
+    # click: the popup lists the hidden items, each opens its own children
+    let cp = x.mm.clientToForm(pointF(ch.x + ch.w / 2, ch.y + ch.h / 2))
+    x.f.win.click(cp.x, cp.y)
+    check chainLen(x.f) == 1
+    let p = top()
+    check menuItemRect(p, x.view).w > 0
+    check menuItemRect(p, x.file).w == 0 or x.file in hid
+    p.ui.win.click(menuItemRect(p, x.view).x + 10, menuItemRect(p, x.view).y + 5)
+    check chainLen(x.f) == 2
+    let sp = top()
+    check menuItemRect(sp, x.dark).w > 0
+    x.f.clickItem(sp, x.status)
+    check log == @["status"] and chainLen(x.f) == 0
+    # a second click on the button closes it
+    x.f.win.click(cp.x, cp.y)
+    check chainLen(x.f) == 1
+    x.f.win.click(cp.x, cp.y)
+    check chainLen(x.f) == 0
+    # relayout: widening the form brings every item back
+    x.f.win.click(cp.x, cp.y)
+    check chainLen(x.f) == 1
+    resizeTo(x, 520)
+    check not x.mm.overflowing and chainLen(x.f) == 0
+
+  test "bar overflow: keyboard reaches hidden items":
+    let x = build()
+    resizeTo(x, 120)
+    check x.view in x.mm.overflowItems
+    x.f.tap('v', {ssAlt})                       # Alt+V: a hidden item
+    check chainLen(x.f) == 2
+    check hotMenuItem(top()) == x.dark
+    x.f.tap(keyEscape); x.f.tap(keyEscape)
+    check chainLen(x.f) == 0
+    x.f.tap('f', {ssAlt})                       # File, then Right: Edit, Right: View (hidden)
+    x.f.tap(keyRight)
+    check x.mm.openIndex == 1
+    x.f.tap(keyRight)
+    check x.mm.openIndex == 2 and chainLen(x.f) == 2
+    check hotMenuItem(top()) == x.dark
+    x.f.tap(keyRight)                           # wraps to File (visible)
+    check x.mm.openIndex == 0 and chainLen(x.f) == 1
+    x.f.tap(keyLeft)                            # back to the hidden View
+    check x.mm.openIndex == 2 and chainLen(x.f) == 2
+    x.f.tap(keyEnter)                           # Enter on the hot item fires it
+    check log == @["dark"]
+    check chainLen(x.f) == 0
 
   test "Alt+letter opens the menu and selects the first item":
     let x = build()

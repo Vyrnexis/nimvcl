@@ -91,11 +91,14 @@ type
     delay: Timer
     navigate: proc(dir: int)
     altKey: proc(ch: Rune): bool
+    overflowList: bool          ## the bar's overflow popup: its submenus are bar-level dropdowns
+    barLevel: bool              ## a bar-level dropdown below the overflow list (Left/Right move along the bar)
 
   MainMenu* = ref object of Control
     fRoot: MenuItem
     fOpen, fHot: int
     fPressed: bool              ## the left button is down since it opened a dropdown
+    fOverflow: bool             ## the overflow (») popup is open
     fDrop: PopupWindow
     fImgRef: ImageListRef
 
@@ -114,6 +117,8 @@ const
   TextGap = 36'f32
   MinPanelW = 120'f32
   BarPadX = 10'f32
+  ChevW = 24'f32                ## the overflow button at the right end of the bar
+  ChevIdx = -2                  ## the overflow button as a bar position
   ScrollArrowH = 16'f32         ## the scroll arrows of a menu taller than the display
   ScrollTick = 40               ## ms between auto-scroll steps on a scroll arrow
   ScrollStep = 14'f32
@@ -483,6 +488,11 @@ proc openSub(p: MenuPanel, idx: int, selectFirst: bool) =
         panel.subItem = nil)
   p.sub = sp
   p.subItem = it
+  if p.overflowList and sp.content of MenuPanel:
+    let sc = MenuPanel(sp.content)
+    sc.barLevel = true
+    sc.navigate = p.navigate
+    sc.altKey = p.altKey
 
 proc syncSub(p: MenuPanel) =
   ## The submenu follows the hot item: opens for one with sub-items, else closes.
@@ -646,7 +656,7 @@ method doMouseUp*(p: MenuPanel, button: MouseButton, shift: ShiftState,
 
 method doKeyDown*(p: MenuPanel, key: var Key, shift: ShiftState) =
   let k = key
-  let isTop = p.popup == nil or p.popup.parent == nil
+  let isTop = p.popup == nil or p.popup.parent == nil or p.barLevel
   var used = true
   if k == keyDown: p.setHot(p.step(1), false)
   elif k == keyUp: p.setHot(p.step(-1), false)
@@ -865,14 +875,38 @@ func visibleIndices(m: MainMenu): seq[int] =
   for i in 0 ..< m.fRoot.count:
     if not m.fRoot[i].fHidden: result.add i
 
-proc itemRects(m: MainMenu): seq[tuple[idx: int, r: RectF]] =
-  var x = 4'f32
+type BarLayout = object
+  rects: seq[tuple[idx: int, r: RectF]]   ## the items that fit
+  hidden: seq[int]                        ## the items that moved to the overflow popup
+  chev: RectF                             ## the overflow button (when `hidden` is not empty)
+
+proc layoutBar(m: MainMenu): BarLayout =
+  ## Items are laid out left to right; when they do not fit the width, the ones
+  ## that do not fit move (in order) to the overflow popup behind a » button.
   let f = m.font
   let ctx = m.renderCtx
-  for i in m.visibleIndices:
+  var widths: seq[float32]
+  let vis = m.visibleIndices
+  var total = 4'f32
+  for i in vis:
     let w = ceil(textSize(ctx, parseMnemonic(m.fRoot[i].caption).text, f).w) + 2 * BarPadX
-    result.add (i, rectF(x, 2, w, max(m.height - 4, 0)))
-    x += w
+    widths.add w
+    total += w
+  let h = max(m.height - 4, 0)
+  var limit = m.width
+  let over = total > limit
+  if over: limit -= ChevW + 2
+  var x = 4'f32
+  for k, i in vis:
+    if over and (x + widths[k] > limit or result.hidden.len > 0):
+      result.hidden.add i
+    else:
+      result.rects.add (i, rectF(x, 2, widths[k], h))
+      x += widths[k]
+  if result.hidden.len > 0:
+    result.chev = rectF(m.width - ChevW - 2, 2, ChevW, h)
+
+proc itemRects(m: MainMenu): seq[tuple[idx: int, r: RectF]] = m.layoutBar().rects
 
 proc initMainMenu*(m: MainMenu, owner: Component = nil) =
   m.initControl(owner)
@@ -906,42 +940,95 @@ proc closeMenus*(m: MainMenu) =
   ## Closes an open dropdown.
   if m.fDrop != nil: closePopup(m.fDrop)
 
+proc openOverflow*(m: MainMenu, select = -1, selectFirst = false)
+proc openDropdown*(m: MainMenu, idx: int, selectFirst = false)
+
+proc isHiddenItem(m: MainMenu, idx: int): bool = idx in m.layoutBar().hidden
+
+proc barNav(m: MainMenu): proc(dir: int) =
+  ## Left/Right in a menu: the next/previous top item that has a dropdown
+  ## (also one that sits in the overflow popup).
+  result = proc(dir: int) =
+    let v = m.visibleIndices
+    if v.len == 0: return
+    var cur = m.fOpen
+    if cur < 0 and m.fOverflow:           # the overflow popup without an item open
+      let hi = m.fRoot.indexOf(hotMenuItem(m.fDrop))
+      cur = if hi >= 0: hi else: m.layoutBar().hidden[0]
+    var n = v.find(cur)
+    for _ in 0 ..< v.len:                     # next enabled one with a dropdown
+      n = (n + dir + v.len) mod v.len
+      let c = m.fRoot[v[n]]
+      if not c.fDisabled and c.hasSubmenu:
+        m.openDropdown(v[n], true)
+        return
+
+proc barAlt(m: MainMenu): proc(ch: Rune): bool =
+  result = proc(ch: Rune): bool =
+    for i in m.visibleIndices:
+      let c = m.fRoot[i]
+      if not c.fDisabled and c.hasSubmenu and parseMnemonic(c.caption).ch == ch:
+        m.openDropdown(i, true)
+        return true
+
 proc openDropdown*(m: MainMenu, idx: int, selectFirst = false) =
-  ## Opens the dropdown of top item `idx` (replacing an open one).
+  ## Opens the dropdown of top item `idx` (replacing an open one). An item that
+  ## sits in the overflow popup opens as a submenu of that popup.
   let f = m.menuForm
   if f == nil or not f.visible or idx < 0 or idx >= m.fRoot.count: return
   let it = m.fRoot[idx]
   if it.fHidden or it.fDisabled or not it.hasSubmenu: return
+  if m.isHiddenItem(idx):
+    m.openOverflow(idx, selectFirst)
+    return
   var rect: RectF
   for e in m.itemRects:
     if e.idx == idx: rect = m.clientToForm(e.r)
   let mm = m
-  let nav = proc(dir: int) =
-    let v = mm.visibleIndices
-    let at = v.find(mm.fOpen)
-    if v.len == 0: return
-    var n = at
-    for _ in 0 ..< v.len:                     # next enabled one with a dropdown
-      n = (n + dir + v.len) mod v.len
-      let c = mm.fRoot[v[n]]
-      if not c.fDisabled and c.hasSubmenu:
-        mm.openDropdown(v[n], true)
-        return
-  let alt = proc(ch: Rune): bool =
-    for i in mm.visibleIndices:
-      let c = mm.fRoot[i]
-      if not c.fDisabled and c.hasSubmenu and parseMnemonic(c.caption).ch == ch:
-        mm.openDropdown(i, true)
-        return true
   m.closeMenus()
-  let p = showPanel(f, it, rect, plBelow, nil, selectFirst, nav, alt,
+  let p = showPanel(f, it, rect, plBelow, nil, selectFirst, barNav(m), barAlt(m),
     onClosed = proc(q: PopupWindow) =
       if mm.fDrop == q:
         mm.fDrop = nil
         mm.fOpen = -1
+        mm.fOverflow = false
         mm.invalidate())
   m.fDrop = p
   m.fOpen = idx
+  m.invalidate()
+
+proc openOverflow*(m: MainMenu, select = -1, selectFirst = false) =
+  ## Opens the overflow popup: the top items that do not fit the bar, each a
+  ## submenu with its own items. `select` (an index in `items`) highlights that
+  ## item and opens its submenu.
+  let f = m.menuForm
+  if f == nil or not f.visible: return
+  let lay = m.layoutBar()
+  if lay.hidden.len == 0: return
+  let proxy = newMenuItem()          # lists the hidden items without adopting them
+  proxy.fImages = m.fRoot.fImages
+  for i in lay.hidden: proxy.fItems.add m.fRoot[i]
+  m.closeMenus()
+  let mm = m
+  let p = showPanel(f, proxy, m.clientToForm(lay.chev), plBelow, nil, false,
+    barNav(m), barAlt(m),
+    onClosed = proc(q: PopupWindow) =
+      if mm.fDrop == q:
+        mm.fDrop = nil
+        mm.fOpen = -1
+        mm.fOverflow = false
+        mm.invalidate())
+  m.fDrop = p
+  m.fOpen = -1
+  m.fOverflow = true
+  MenuPanel(p.content).overflowList = true
+  if select >= 0:
+    let pn = MenuPanel(p.content)
+    let i = pn.entries.find(m.fRoot[select])
+    if i >= 0:
+      pn.setHot(i, false)
+      pn.openSub(i, selectFirst)
+      m.fOpen = select
   m.invalidate()
 
 proc openByMnemonic*(m: MainMenu, ch: Rune): bool =
@@ -965,16 +1052,36 @@ proc itemRect*(m: MainMenu, idx: int): RectF =
     if e.idx == idx: return e.r
 
 proc itemAt(m: MainMenu, x, y: float32): int =
+  ## Bar item under (x, y); `ChevIdx` for the overflow button.
   result = -1
-  for e in m.itemRects:
+  let lay = m.layoutBar()
+  for e in lay.rects:
     if e.r.contains(pointF(x, y)): return e.idx
+  if lay.hidden.len > 0 and lay.chev.contains(pointF(x, y)): return ChevIdx
+
+proc overflowing*(m: MainMenu): bool = m.layoutBar().hidden.len > 0
+  ## True when some top items do not fit and sit behind the » button.
+
+proc overflowItems*(m: MainMenu): seq[MenuItem] =
+  ## The top items in the overflow popup, in order.
+  for i in m.layoutBar().hidden: result.add m.fRoot[i]
+
+proc overflowRect*(m: MainMenu): RectF =
+  ## The » button in the control's coordinates (empty when nothing overflows).
+  let lay = m.layoutBar()
+  if lay.hidden.len > 0: lay.chev else: RectF()
+
+proc barOpen(m: MainMenu): int =
+  ## The bar position whose popup is open: an item, `ChevIdx`, or -1.
+  if m.fOverflow: ChevIdx else: m.fOpen
 
 method paint*(m: MainMenu, c: Canvas) =
   let t = m.theme
   c.fillRect(m.clientRect, t.menuBg)
   c.fillRect(rectF(0, m.height - 1, m.width, 1), t.border)
-  let underline = m.altHeld or m.fOpen >= 0
-  for e in m.itemRects:
+  let underline = m.altHeld or m.fOpen >= 0 or m.fOverflow
+  let lay = m.layoutBar()
+  for e in lay.rects:
     let it = m.fRoot[e.idx]
     let on = not it.fDisabled
     let lit = e.idx == m.fOpen or (e.idx == m.fHot and on)
@@ -982,7 +1089,22 @@ method paint*(m: MainMenu, c: Canvas) =
     let col = if not on: t.textDisabled elif lit: t.menuHoverText else: t.text
     drawMnemonic(c, it.caption, m.font, rectF(e.r.x + BarPadX, e.r.y,
                  e.r.w - 2 * BarPadX, e.r.h), col, underline)
+  if lay.hidden.len > 0:
+    let lit = m.fOverflow or m.fHot == ChevIdx
+    if lit: c.fillRoundRect(lay.chev, t.radius, t.menuHover)
+    let col = if lit: t.menuHoverText else: t.text
+    let cx = lay.chev.x + lay.chev.w / 2
+    let cy = lay.chev.y + lay.chev.h / 2
+    for dx in [-3'f32, 2'f32]:       # a » of two chevrons
+      c.line(cx + dx - 1.5, cy - 4, cx + dx + 1.5, cy, col, 1.4)
+      c.line(cx + dx + 1.5, cy, cx + dx - 1.5, cy + 4, col, 1.4)
   procCall paint(Control(m), c)
+
+method doResize*(m: MainMenu) =
+  ## The bar re-lays out its items: an open overflow popup no longer matches.
+  if m.fOverflow: m.closeMenus()
+  m.invalidate()
+  procCall doResize(Control(m))
 
 method preferredSize*(m: MainMenu): SizeF = sizeF(m.width, m.theme.controlHeight)
 
@@ -1008,7 +1130,9 @@ method doMouseMove*(m: MainMenu, shift: ShiftState, x, y: float32) =
   if i != m.fHot:
     m.fHot = i
     m.invalidate()
-    if i >= 0 and m.fOpen >= 0 and i != m.fOpen: m.openDropdown(i)
+    if i != m.barOpen and (m.fOpen >= 0 or m.fOverflow):
+      if i == ChevIdx: m.openOverflow()
+      elif i >= 0: m.openDropdown(i)
   procCall doMouseMove(Control(m), shift, x, y)
 
 method doMouseLeave*(m: MainMenu) =
@@ -1021,7 +1145,12 @@ method doMouseDown*(m: MainMenu, button: MouseButton, shift: ShiftState,
                     x, y: float32) =
   if button == mbLeft:
     let i = m.itemAt(x, y)
-    if i >= 0 and not m.fRoot[i].fDisabled:
+    if i == ChevIdx:
+      if m.fOverflow: m.closeMenus()
+      else:
+        m.openOverflow()
+        m.fPressed = m.fDrop != nil
+    elif i >= 0 and not m.fRoot[i].fDisabled:
       if m.fRoot[i].hasSubmenu:
         m.openDropdown(i)
         m.fPressed = m.fDrop != nil
@@ -1034,7 +1163,7 @@ method doMouseUp*(m: MainMenu, button: MouseButton, shift: ShiftState,
   ## (a release on the bar item itself leaves the dropdown open).
   if button == mbLeft and m.fPressed:
     m.fPressed = false
-    if m.fDrop != nil and m.itemAt(x, y) != m.fOpen:
+    if m.fDrop != nil and m.itemAt(x, y) != m.barOpen:
       let (pn, pt) = m.panelUnder(x, y)
       if pn != nil:
         let i = pn.rowAt(pt.x, pt.y)
