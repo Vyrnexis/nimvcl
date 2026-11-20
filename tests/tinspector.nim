@@ -515,6 +515,16 @@ suite "ObjectInspector editors":
     check r.ins.setValue("caption", pvString("Both"))
     check r.changes == @["a.caption", "b.caption"]
 
+  test "name is not listed for several targets (N5)":
+    let r = rig()
+    let a = r.mkButton("a")
+    let b = r.mkButton("b")
+    r.ins.inspect(a)
+    check r.ins.indexOfProp("name") >= 0
+    r.ins.inspect([Obj(a), Obj(b)])
+    check r.ins.indexOfProp("name") < 0
+    check r.ins.indexOfProp("caption") >= 0
+
   test "numbers that are not finite are rejected":
     let r = rig()
     let b = r.mkButton()

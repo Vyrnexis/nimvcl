@@ -206,6 +206,7 @@ proc commonProps(ins: ObjectInspector): seq[PropInfo] =
   if first == nil: return
   for p in first.propsOf:
     if p.hidden: continue
+    if p.name == "name" and ins.fTargets.len > 1: continue   # one name for several objects
     var ok = true
     for i in 1 ..< ins.fTargets.len:
       let q = infoFor(ins.fTargets[i], p.name)

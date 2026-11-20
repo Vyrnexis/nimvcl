@@ -28,6 +28,8 @@ between minor versions.
 - The designer's `uniqueName` also looks at components owned by other
   components (menu items, a timer in a panel) and compares names like Nim
   identifiers (`Button_1` is `Button1`), so new names cannot collide. (N6)
+- The inspector no longer lists `name` when several objects are selected
+  (they would all get the same name and the form file would not load). (N5)
 
 ## [0.2.1] - 2026-11-20
 
