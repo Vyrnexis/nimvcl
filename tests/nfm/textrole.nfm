@@ -1,0 +1,16 @@
+object TextRole: Form
+  width = 300
+  height = 200
+  object accent: Label
+    caption = 'x'
+    textRole = tcAccent
+  end
+  object quiet: Label
+    caption = 'y'
+    muted = true
+  end
+  object card: Panel
+    caption = 'z'
+    textRole = tcDanger
+  end
+end

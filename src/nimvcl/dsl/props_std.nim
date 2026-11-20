@@ -226,8 +226,10 @@ registerClass(Label, parent = Control):
     wordWrap: bool
     transparent: bool
     muted: bool
+    textRole: ThemeColor
   category Behaviour:
     focusControl: Control
+  skipWhen textRole, self.muted
 
 registerClass(Button, parent = Control):
   category Appearance:
@@ -268,6 +270,7 @@ registerClass(Panel, parent = Container):
     caption: string
     borderStyle: PanelBorder
     alignment: HAlign
+    textRole: ThemeColor
 
 registerClass(GroupBox, parent = Container):
   category Appearance:

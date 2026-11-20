@@ -9,7 +9,7 @@
 ## A dependency names properties that an object may not have (`text` after
 ## `itemIndex` for a class without an `itemIndex`): those are ignored.
 
-const propDeps*: array[12, (string, seq[string])] = [
+const propDeps*: array[13, (string, seq[string])] = [
   ("tabIndex", @["tabs"]),                       # a page must exist before it is selected
   ("itemIndex", @["items"]),                     # ... likewise a list row
   ("text", @["itemIndex"]),                      # an edit text overrides the selected row's
@@ -21,7 +21,8 @@ const propDeps*: array[12, (string, seq[string])] = [
   ("itemImages", @["items"]),                    # per-item data needs the items
   ("itemSelectedImages", @["items"]),
   ("checkedItems", @["items", "itemImages", "propagateChecks"]),
-  ("imageIndex", @["images"])]
+  ("imageIndex", @["images"]),
+  ("textRole", @["font"])]                       # the role replaces an own font colour
 
 proc depsOf*(name: string): seq[string] =
   ## The properties that are applied before `name`.

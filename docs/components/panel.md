@@ -26,7 +26,7 @@ let opt = newCheckBox(group, "Enabled", left = 12, top = 28)
 | `borderStyle` | `PanelBorder` | Panel: `pbNone` (flat), `pbSingle`, `pbRaised` |
 | `alignment` | `HAlign` | Panel caption alignment (centered by default) |
 | `color` | Color | Panel fill; default is `theme.surface`. On a GroupBox an own `color` fills the box behind its children (none by default) |
-| `font.color`, `textRole` | Color, `ThemeColor` | Panel caption color: fixed (`font.color`, shortcut `fontColor`, which children with `parentFont` inherit), or a theme role such as `tcMuted` that follows theme switches. `resetTextColor()` undoes both. `textColor` is a deprecated alias of `font.color` |
+| `font.color`, `textRole` | Color, `ThemeColor` | (both streamed in form files) Panel caption color: fixed (`font.color`, shortcut `fontColor`, which children with `parentFont` inherit), or a theme role such as `tcMuted` that follows theme switches. `resetTextColor()` undoes both. `textColor` is a deprecated alias of `font.color` |
 | `padding` | `Spacing` | Space kept free inside; used by aligned children |
 | `align`, `anchors`, `margins` | | See [layout](../guide/layout.md) |
 | `clientArea` | `RectF` | GroupBox only: area below the caption |

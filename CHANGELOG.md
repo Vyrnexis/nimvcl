@@ -9,6 +9,7 @@ between minor versions.
 
 ### Added
 
+- `Label.textRole` and `Panel.textRole` are registered in `props_std`, so they stream in form files and show in the inspector (a muted label is still written as `muted`).
 - `CodeEdit.modified=` (`false` is `markSaved`, `true` flags the text as modified without a change); `saveCopyTo` stays.
 - `withModal(form): body` and `executeModalForm(form)`: show a form modally, free its window in a `finally`, give the `ModalResult` (`dlgResult` in the body).
 - `ClassInfo.defaultEvent` and `defaultEventOf(obj)` (Delphi's default event: `onClick`, `onChange` for the edit-like controls, `onTimer`, `onCreate` for a form), registered in `props_std`.

@@ -13,6 +13,7 @@ const
 loadForm Sample, "nfm/sample.nfm"
 loadForm NonVis, "nfm/nonvisual.nfm"
 loadForm EnumName, "nfm/enumname.nfm"
+loadForm TextRole, "nfm/textrole.nfm"
 
 var clicks, exits: int
 proc okClick(self: Sample, sender: Control) = inc clicks
@@ -140,6 +141,15 @@ suite "run-time loading":
     check Button(a.findComponent("go")).isDefault
     check Label(a.findComponent("hello")).focusControl == Control(a.findComponent("name1"))
     check a.name == "Equiv"
+
+  test "textRole of a Label and a Panel streams (loadForm, loadNfm and the writer)":
+    let c = newTextRole()
+    check c.accent.textRole == tcAccent and c.quiet.muted and c.card.textRole == tcDanger
+    let x = readFile(here / "nfm" / "textrole.nfm")
+    let f = loadNfm(x)
+    check Label(f.findComponent("accent")).textRole == tcAccent
+    check Panel(f.findComponent("card")).textRole == tcDanger
+    check formToNfm(f) == x          # muted is written as `muted`, not twice
 
   test "formToNfm(loadNfm(x)) == x":
     let x = readFile(here / "nfm" / "sample.nfm")

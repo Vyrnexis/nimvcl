@@ -28,7 +28,7 @@ note.muted = true                       # follows theme switches
 | `color` | Color | Background when not `transparent` |
 | `font.color` | Color | A fixed text color (VCL `Font.Color`; does not follow theme switches). Alpha 0, the default, is the theme's text color. `fontColor` is a shortcut; `resetTextColor()` undoes it. `textColor` is a deprecated alias |
 | `muted` | bool | The theme's muted text color, resolved at paint time, so it follows light/dark |
-| `textRole` | `ThemeColor` | `tcText`, `tcMuted`, `tcAccent`, `tcDanger`, `tcDisabled`: a theme color by role. Replaces `font.color` |
+| `textRole` | `ThemeColor` | `tcText`, `tcMuted`, `tcAccent`, `tcDanger`, `tcDisabled`: a theme color by role. Replaces `font.color`. Streamed in form files (a `muted` label is written as `muted`) |
 | `focusControl` | Control | Gets the focus on Alt+mnemonic or a click |
 | `font` | FontSpec | e.g. `font(size = 20, style = {fsBold})` |
 
