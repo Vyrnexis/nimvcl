@@ -115,6 +115,28 @@ proc setIcon*(w: PlatformWindow, img: Image) =
   if w.window != nil and img != nil:
     discard setWindowIcon(w.window, img.surface)
 
+proc maximize*(w: PlatformWindow): bool =
+  ## Asks the window manager to maximize the window (it must be resizable).
+  ## Waits for the answer; false when the platform does not support it.
+  result = maximizeWindow(w.window)
+  if result: discard syncWindow(w.window)
+
+proc minimize*(w: PlatformWindow): bool =
+  ## Minimizes (iconifies) the window; false when the platform does not support it.
+  result = minimizeWindow(w.window)
+  if result: discard syncWindow(w.window)
+
+proc restore*(w: PlatformWindow): bool =
+  ## Undoes `maximize` / `minimize`; false when the platform does not support it.
+  result = restoreWindow(w.window)
+  if result: discard syncWindow(w.window)
+
+proc isMaximized*(w: PlatformWindow): bool =
+  w.window != nil and (getWindowFlags(w.window) and WINDOW_MAXIMIZED) != 0
+
+proc isMinimized*(w: PlatformWindow): bool =
+  w.window != nil and (getWindowFlags(w.window) and WINDOW_MINIMIZED) != 0
+
 proc setMinSize*(w: PlatformWindow, lw, lh: float32) =
   ## The smallest size the window manager lets the user resize to (logical
   ## units; 0 = no limit).

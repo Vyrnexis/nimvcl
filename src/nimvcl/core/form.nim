@@ -18,6 +18,19 @@
 ## the main form). `caFree` fires `onHide` like `caHide`. A modal form that is
 ## closed gets `mrCancel` unless a result was set.
 ##
+## Window state: `windowState` (wsNormal, wsMinimized, wsMaximized) and
+## `maximize` / `minimize` / `restore`. Before the window exists, and while it
+## is hidden, the state is only remembered and applied when the form is shown;
+## it is kept when the window is released (`caFree`) and applied again on the
+## next show. A platform without window states (some headless drivers) keeps the
+## requested value without changing the window.
+##
+## `onCreate` fires once, when the form is fully constructed: at the end of the
+## constructor of a form made with the `form` macro or `loadForm`, and after
+## `loadNfm` / `loadNfmFile` built the tree. That is before the form has a
+## window, so before the first `onShow`. A form built with `newForm` by hand
+## fires it with `notifyCreated`.
+##
 ## Freeing order (UI thread): RenderContext.close, renderer, window.
 
 import ../graphics/[context, image]
@@ -31,6 +44,7 @@ type
     mrNone, mrOk, mrCancel, mrAbort, mrRetry, mrIgnore, mrYes, mrNo, mrClose
   FormPosition* = enum poDesigned, poScreenCenter, poMainFormCenter
   FormStyle* = enum fsNormal, fsStayOnTop
+  WindowState* = enum wsNormal, wsMinimized, wsMaximized
 
   FormCloseEvent* = proc(sender: Form, action: var CloseAction)
   FormCloseQueryEvent* = proc(sender: Form, canClose: var bool)
@@ -46,6 +60,10 @@ type
     fBorderStyle: BorderStyle
     fFormStyle: FormStyle
     fIcon: Image                 ## the window icon (nil: the platform's default)
+    fWindowState: WindowState    ## requested state (applied when the window is shown)
+    fStateNative: bool           ## the platform accepted the last state request
+    fCreated: bool
+    onCreate*: NotifyEvent       ## once, after construction (see `notifyCreated`)
     onShow*, onHide*, onActivate*, onDeactivate*: NotifyEvent
     onClose*: FormCloseEvent
     onCloseQuery*: FormCloseQueryEvent
@@ -222,6 +240,46 @@ proc applyConstraints(f: Form) =
 method constraintsChanged*(f: Form) =
   f.applyConstraints()
 
+func nativeState(f: Form): WindowState =
+  let w = f.fUi.win
+  if w.isMinimized: wsMinimized
+  elif w.isMaximized: wsMaximized
+  else: wsNormal
+
+func windowState*(f: Form): WindowState =
+  ## The state of the window; the requested one while it does not exist (or the
+  ## platform has no window states).
+  if f.fUi.win != nil and (f.fStateNative or f.fWindowState == wsNormal):
+    f.nativeState
+  else: f.fWindowState
+
+proc applyWindowState(f: Form) =
+  let w = f.fUi.win
+  if w == nil or not f.fShown: return
+  f.fStateNative =
+    case f.fWindowState
+    of wsMaximized: w.maximize()
+    of wsMinimized: w.minimize()
+    of wsNormal: w.restore() or f.nativeState == wsNormal
+
+proc `windowState=`*(f: Form, v: WindowState) =
+  f.fWindowState = v
+  f.applyWindowState()
+
+proc maximize*(f: Form) = f.windowState = wsMaximized
+proc minimize*(f: Form) = f.windowState = wsMinimized
+proc restore*(f: Form) = f.windowState = wsNormal
+func isMaximized*(f: Form): bool = f.windowState == wsMaximized
+func isMinimized*(f: Form): bool = f.windowState == wsMinimized
+
+proc notifyCreated*(f: Form) =
+  ## Fires `onCreate` once (the form macro, `loadForm` and `loadNfm` call it
+  ## when the construction is complete).
+  if f.fCreated: return
+  f.fCreated = true
+  let h = f.onCreate
+  if h != nil: h(f)
+
 proc ensureWindow(f: Form) =
   if f.fUi.win != nil: return
   initPlatform()
@@ -254,6 +312,7 @@ proc releaseWindow(f: Form) =
   ## the form owns are stopped (a closed form must not keep ticking).
   let ui = f.fUi
   if ui.win == nil: return
+  f.fWindowState = f.windowState       # kept for the next window
   stopTimers(f)
   if closePopupsProc != nil: closePopupsProc(f)
   ui.cancelInteraction()
@@ -319,6 +378,7 @@ proc show*(f: Form) =
   f.fShown = true
   f.fUi.hidden = false
   f.fUi.dirty = true
+  if f.fWindowState != wsNormal: f.applyWindowState()
   Control(f).notifyVisibility()
   let h = f.onShow
   try:

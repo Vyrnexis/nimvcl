@@ -132,9 +132,9 @@ proc newBadge*(parent: Container = nil): Badge =
   `autoSize`, `visible`, `enabled`, `hint`, `cursor`, `font`, `parentFont`,
   `color`, `parentColor`, `tabStop`, `tabOrder`, `children`, `host`, `ui`,
   `win`, `menuBar`, `popupMenus`, `position`, `borderStyle`, `formStyle`,
-  `modalResult`, `designRect`, `designBase`, `designBaseSet` and the event
+  `windowState`, `modalResult`, `designRect`, `designBase`, `designBaseSet` and the event
   names `onClick`, `onDblClick`, `onMouseEnter`, `onMouseLeave`, `onEnter`,
-  `onExit`, `onResize`, `onMouseDown`, `onMouseUp`, `onMouseMove`, `onShow`,
+  `onExit`, `onResize`, `onMouseDown`, `onMouseUp`, `onMouseMove`, `onCreate`, `onShow`,
   `onHide`, `onActivate`, `onDeactivate`, `onClose`, `onCloseQuery`. Pick
   another name, such as `captionEdit`.
 * `onChange: ...` on a non-`NotifyEvent` event (e.g. `Form.onClose`) is

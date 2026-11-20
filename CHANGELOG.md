@@ -7,6 +7,16 @@ between minor versions.
 
 ## Unreleased
 
+### Added
+
+- Window state: `Form.windowState` (`wsNormal`, `wsMinimized`, `wsMaximized`, a
+  property the designer lists), `maximize`, `minimize`, `restore`,
+  `isMaximized`, `isMinimized` (also on `PlatformWindow`). The state is kept
+  while the window does not exist and applied when the form is shown.
+- `Form.onCreate`: fires once when a form is constructed (the `form` macro,
+  `loadForm`, `loadNfm`), before the window exists and so before `onShow`;
+  `notifyCreated` fires it for hand-built forms.
+
 ### Fixed
 
 - The numpad Enter key arrives as Enter (default buttons, Edit, CodeEdit, grids

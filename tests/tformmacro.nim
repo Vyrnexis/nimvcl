@@ -47,6 +47,7 @@ form Sample:
   caption = "Sample"
   width = 420; height = 380
   var attempts: int
+  var created: int
   var limit = 3
   var note: string = "t"
   var names: seq[string]
@@ -81,6 +82,7 @@ form Sample:
     self.names.add "bump"
   proc second(self: Sample): int = self.limit + self.attempts
   onShow: self.names.add "shown"
+  onCreate: inc self.created
   init:
     trace.add "sample init 1: " & self.ok.caption & " " & $self.limit
     self.ok.caption = "ready"
@@ -193,6 +195,15 @@ suite "form macro":
     check f.names == @["more"]
     f.show()
     check "shown" in f.names
+    f.freeWindow()
+
+  test "onCreate fires once, after the constructor, before onShow":
+    let f = newSample()
+    check f.created == 1
+    f.show()
+    check f.created == 1 and "shown" in f.names
+    f.notifyCreated()                  # once only
+    check f.created == 1
     f.freeWindow()
 
   test "init blocks run last, in order":

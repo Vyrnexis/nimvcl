@@ -73,7 +73,8 @@ const reservedNames = [
   "formStyle", "modalResult", "designRect", "designBase", "designBaseSet",
   "onClick", "onDblClick", "onMouseEnter", "onMouseLeave", "onEnter", "onExit",
   "onResize", "onMouseDown", "onMouseUp", "onMouseMove", "onShow", "onHide",
-  "onActivate", "onDeactivate", "onClose", "onCloseQuery"]
+  "onActivate", "onDeactivate", "onClose", "onCloseQuery", "onCreate",
+  "windowState"]
 
 proc claim(g: var Gen, name: string, src: NimNode) =
   if name in reservedNames:
@@ -267,6 +268,7 @@ proc generate(head, body: NimNode, isFrame: bool): NimNode =
         proc `newName`*(owner: Component = nil): `nameId` =
           new result
           result.`initName`(owner)
+          result.notifyCreated()
   result = newStmtList(g.checks)     # first, so unknown types are reported by us
   result.add typeDef
   for p in g.procs: result.add p

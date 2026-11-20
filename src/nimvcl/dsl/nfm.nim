@@ -405,6 +405,7 @@ proc loadNfm*(text: string, owner: Component = nil, options: NfmOptions = nil,
   if o == nil or not (o of Form):
     raise nfmError(fileName, root.line, root.col,
                    "the root object `" & root.className & "` is not a Form")
+  Form(o).notifyCreated()
   Form(o)
 
 proc loadNfm*(text: string, handlers: Table[string, NotifyEvent],

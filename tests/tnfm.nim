@@ -161,6 +161,15 @@ suite "run-time loading":
     check m.items[0][0].shortcut == shortcut("Ctrl+Q")
     check f.menuBar == Control(m)
 
+  test "onCreate fires once after the whole tree is built":
+    var got: seq[string]
+    var table: Table[string, NotifyEvent]
+    table["made"] = proc(s: Control) = got.add "made " & $Container(s).children.len
+    let f = loadNfm("object A: Form\n  onCreate = made\n  object b: Button\n  end\nend\n", table)
+    check got == @["made 1"]
+    f.notifyCreated()
+    check got.len == 1
+
   test "handlers are bound by name":
     var got: seq[string]
     var table: Table[string, NotifyEvent]

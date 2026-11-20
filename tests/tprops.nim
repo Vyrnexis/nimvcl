@@ -67,6 +67,9 @@ suite "registry":
     check classByName("Button").findProp("font.size") != nil
     check classByName("Button").findProp("font.style.fsBold") != nil
     check classByName("Button").findProp("anchors.akLeft") != nil
+    check classByName("Form").findProp("windowState") != nil
+    check classByName("Form").findProp("onCreate") != nil
+    check classByName("Form").findProp("onCreate").kind == pkEvent
 
   test "default values are those of a fresh instance":
     for ci in allClasses():

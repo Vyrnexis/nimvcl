@@ -185,10 +185,12 @@ registerClass(Form, parent = Container, create = newForm(owner)):
     position: FormPosition
     borderStyle: BorderStyle
     formStyle: FormStyle
+    windowState: WindowState
     icon: Image
   category Behaviour:
     menu: MainMenu
   category Events:
+    onCreate: NotifyEvent
     onShow: NotifyEvent
     onHide: NotifyEvent
     onActivate: NotifyEvent

@@ -656,3 +656,31 @@ suite "shutdown order":
     check order.find(b) < order.find(a)
     check order.find(a) >= 0
     check order.len == openForms().len
+
+suite "window state":
+  test "requested before the window exists, kept across show and release":
+    let f = newForm(nil, 200, 100)
+    f.borderStyle = bsSizeable
+    check f.windowState == wsNormal and not f.isMaximized
+    f.maximize()
+    check f.windowState == wsMaximized and f.isMaximized
+    f.show()      # headless drivers cannot maximize: the request is remembered
+    check f.isMaximized
+    f.minimize()
+    check f.isMinimized and not f.isMaximized
+    f.windowState = wsNormal
+    check f.windowState == wsNormal
+    f.maximize()
+    f.freeWindow()
+    check f.isMaximized                # kept for the next window
+    f.restore()
+    check not f.isMaximized and not f.isMinimized
+    f.show()
+    check f.windowState == wsNormal
+    f.freeWindow()
+
+  test "PlatformWindow state queries on a normal window":
+    let f = newForm(nil, 200, 100)
+    f.show()
+    check not f.win.isMaximized and not f.win.isMinimized
+    f.freeWindow()
