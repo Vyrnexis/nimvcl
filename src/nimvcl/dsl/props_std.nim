@@ -163,6 +163,14 @@ registerClass(Control, parent = Component, abstract = true):
   defaultWhen font, parentFont
   defaultWhen color, parentColor
 
+block:
+  let ctl = classByName("Control")
+  ctl.findProp("font").inherited = proc(o: Obj): PropValue =
+    let c = Control(o)
+    pvFont(if c.parent != nil: c.parent.font else: c.theme.font)
+  ctl.findProp("color").inherited = proc(o: Obj): PropValue =
+    pvColor(Control(o).inheritedColor())
+
 registerClass(Container, parent = Control, abstract = true,
               kids = toObjs(self.children)):
   category Layout:

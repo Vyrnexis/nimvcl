@@ -273,6 +273,25 @@ suite "font.color in form files":
     let text = formToNfm(f)
     check text.count("font.color") == 1
 
+  test "an own font or colour equal to the class default under another parent value is saved (N24)":
+    let f = newForm(nil, 100, 100)
+    f.name = "F"
+    let p = newPanel(f)
+    p.name = "p"
+    p.fontColor = hex"#336699"
+    p.color = hex"#102030"
+    let l = newLabel(p, "x")
+    l.name = "l"
+    l.font = currentTheme().font                    # the class default, the panel's differs
+    l.color = hex"#ffffff"
+    let want = l.font
+    let text = formToNfm(f)
+    let g = loadNfm(text)
+    let l2 = Label(Panel(g.findComponent("p")).children[0])
+    check l2.font == want
+    check not l2.parentFont
+    check formToNfm(g) == text
+
   test "the old textColor name still loads, and is written as font.color":
     let f = loadNfm("object F: Form\n  object p: Panel\n    textColor = #00ff00\n  end\nend\n")
     check Panel(f.findComponent("p")).fontColor == hex"#00ff00"

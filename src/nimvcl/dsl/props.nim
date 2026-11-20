@@ -130,6 +130,7 @@ type
     stored*: bool                        ## written to form files when not default
     hidden*: bool                        ## not listed by the object inspector (edited through another property's dialog)
     defaultWhen*: string                 ## default while this bool property is true
+    inherited*: proc(o: Obj): PropValue {.closure.}   ## with `defaultWhen`: the value taken from the parent while the flag is true (an own value equal to the class default but not to this is stored)
     skipWhen*: proc(o: Obj): bool {.closure.}   ## not stored while this returns true (value implied by another property)
     declaredIn*: ClassInfo
     get*: proc(o: Obj): PropValue {.closure.}
@@ -719,14 +720,32 @@ proc isDefault*(o: Obj, p: PropInfo): bool =
   let base = if '.' in p.name: p.name[0 ..< p.name.find('.')] else: p.name
   let bp = ci.findProp(base)
   if bp != nil and bp.skipWhen != nil and bp.skipWhen(o): return true
+  var inheritsFrom: PropValue
+  var hasInherited = false
   if bp != nil and bp.defaultWhen.len > 0:
     let flag = ci.findProp(bp.defaultWhen)
     if flag != nil and flag.get(o).b: return true
+    if bp.inherited != nil:
+      inheritsFrom = bp.inherited(o)
+      hasInherited = true
   if p.kind == pkEvent:
     return handlerNameOf(o, p.name).len == 0 and not p.isAssigned(o)
   ci.ensureDefaults()
   if not ci.defaults.hasKey(base): return false
-  p.get(o) == defaultOf(ci, p)
+  let mine = p.get(o)
+  if mine != defaultOf(ci, p): return false
+  # an own value equal to the class default still has to be written when the
+  # parent's differs: the reload would inherit the parent's
+  if hasInherited:
+    var v = inheritsFrom
+    let parts = p.name.split('.')
+    var cur = bp
+    for i in 1 ..< parts.len:
+      if cur.kind == pkSet: v = pvBool(hasBit(v.bits, cur.enumValue(parts[i])))
+      else: v = getSub(v, parts[i])
+      cur = ci.findProp(parts[0 .. i].join("."))
+    if v != mine: return false
+  true
 
 proc isDefault*(o: Obj, name: string): bool =
   let p = requireProp(o, name)

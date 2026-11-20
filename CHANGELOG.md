@@ -90,6 +90,7 @@ between minor versions.
 - The undo history of CodeModel and MemoModel is also capped by stored text
   (64 MB, `maxUndoBytes=`) and drops its oldest steps without moving the whole
   history on every edit. (Q8)
+- A font or colour set explicitly to the class default is saved when the parent's value differs (the reload inherited the parent's instead). (N24)
 
 ## [0.2.1] - 2026-11-20
 
