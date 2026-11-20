@@ -93,6 +93,16 @@ proc askName(): string =
   if dlg.showModal() == mrOk: edit.text else: ""
 ```
 
+`withModal(dlg): body` shows the form modally, runs `body` once it is closed
+(`dlgResult` holds the `ModalResult`) and frees the form's window afterwards,
+also when `body` raises; `dlg.executeModalForm()` does the same and returns the
+result. The form object and its controls stay, so `edit.text` can still be read.
+
+```nim
+withModal(dlg):
+  if dlgResult == mrOk: name = edit.text
+```
+
 A button sets the form's `modalResult` before its `onClick` runs, so the handler
 can veto closing by setting `form.modalResult = mrNone` (to validate the input
 first, say). Closing the window gives `mrCancel`. A modal form is centered on the active

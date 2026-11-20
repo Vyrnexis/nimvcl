@@ -499,6 +499,26 @@ suite "application":
     check not m.visible and not m.isModal
     m.destroy()
 
+  test "withModal / executeModalForm return the result and free the window":
+    let a = newForm()
+    queued: a.modalResult = mrOk
+    check a.executeModalForm() == mrOk
+    check not a.hasWindow
+    var seen = mrNone
+    let b = newForm()
+    queued: b.modalResult = mrYes
+    withModal(b):
+      seen = dlgResult
+      check b.hasWindow                 # still there while the body runs
+    check seen == mrYes and not b.hasWindow
+    # the window is freed when the body raises too
+    let c = newForm()
+    queued: c.modalResult = mrOk
+    expect ValueError:
+      withModal(c):
+        raise newException(ValueError, "boom")
+    check not c.hasWindow
+
   test "modal: other forms ignore input; closing gives mrCancel":
     let a = newShown()
     discard probe(a, "pa", 10, 10, 100, 50)

@@ -479,6 +479,30 @@ proc showModal*(f: Form): ModalResult =
     for o in openForms(): o.fUi.refreshHover()
     if parent != nil and parent.fUi.win != nil: parent.bringToFront()
 
+proc executeModalForm*(f: Form): ModalResult {.discardable.} =
+  ## `showModal`, then frees the form's window (also when a handler raised),
+  ## and returns the modal result. The form object and its controls stay, so
+  ## their values can still be read; a dialog built per use needs no cleanup.
+  try:
+    result = f.showModal()
+  finally:
+    f.freeWindow()
+
+template withModal*(f: Form, body: untyped) =
+  ## Shows `f` modally, runs `body` once it is closed (with `dlgResult`, the
+  ## `ModalResult`, in scope) and frees the window afterwards, also when `body`
+  ## raises or the dialog's handlers do:
+  ##
+  ## .. code-block:: nim
+  ##   withModal(dlg):
+  ##     if dlgResult == mrOk: name = edit.text
+  let frm = f
+  try:
+    let dlgResult {.inject.} = frm.showModal()
+    body
+  finally:
+    frm.freeWindow()
+
 # --------------------------------------------------------- loop integration
 
 proc windowActivated*(f: Form, active: bool) =
