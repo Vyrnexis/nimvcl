@@ -5,6 +5,7 @@
 ## The GPU texture is created lazily by the `RenderContext` that draws it and
 ## re-uploaded when `generation` changes.
 
+import std/atomics
 import sdl3 except Color
 import sdl3_image
 import ./color
@@ -21,7 +22,7 @@ type
   Image* = ref ImageObj
     ## Pixel image. `width`/`height` are in pixels (not logical units).
 
-var nextImageId = 0'u64
+var nextImageId: Atomic[uint64]   # images may be loaded on worker threads
 
 proc `=destroy`(x: ImageObj) =
   if x.surface != nil: destroySurface(x.surface)
@@ -38,8 +39,7 @@ proc wrap(surf: ptr Surface, what: string): Image =
     if conv == nil:
       raise newException(ImageError, what & ": " & $getError())
     s = conv
-  inc nextImageId
-  Image(surface: s, id: nextImageId, generation: 0)
+  Image(surface: s, id: nextImageId.fetchAdd(1'u64) + 1, generation: 0)
 
 func source*(img: Image): string = img.fSource
   ## Where the image came from: the path it was loaded with (`loadImage`), or
