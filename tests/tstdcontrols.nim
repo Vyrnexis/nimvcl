@@ -239,6 +239,29 @@ suite "standard controls":
     other.setFocus()
     check s.value == -7
 
+  test "spinedit: value reads pending text, paste is filtered, overflow clamps":
+    let f = newShown()
+    let s = newSpinEdit(f, 5, 10, 10, 100)
+    s.maxValue = 1000
+    let other = newButton(f, "x", 200, 10, 60)
+    lay f
+    s.edit.setFocus()
+    s.edit.text = "77"
+    check s.value == 77                             # not committed yet
+    s.edit.text = "99999999999999999999999"
+    check s.value == 1000
+    s.edit.clear()
+    let saved = editClipboardGet
+    editClipboardGet = proc(): string = "1a2-3"
+    f.tap('v'.key, {ssCtrl})
+    editClipboardGet = saved
+    check s.edit.text == "123"
+    # the commit does not depend on the edit's onExit
+    s.edit.onExit = proc(c: Control) = discard
+    s.edit.text = "2000"
+    other.setFocus()
+    check s.value == 1000 and s.edit.text == "1000"
+
   test "spinedit: buttons and auto-repeat":
     let f = newShown()
     let s = newSpinEdit(f, 0, 10, 10, 100)

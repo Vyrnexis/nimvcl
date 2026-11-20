@@ -8,9 +8,12 @@
 ## per Up/Down key, wheel notch (while the edit has focus) or button press; PageUp/Down
 ## step by 10 increments. Holding a button repeats: first after 400 ms, then
 ## every 50 ms (`repeatTick` is what the timer calls). The text is parsed on
-## Enter and when the edit loses focus: an out-of-range number is clamped,
-## unparsable text reverts to the current value. `onChange` fires when `value`
-## changes.
+## Enter and when the edit loses focus (also when the application replaced the
+## edit's `onExit`): an out-of-range number, even one too large for an `int`, is
+## clamped, unparsable text reverts to the current value. Reading `value` already
+## takes pending text into account. Typing and pasting keep only digits (and a
+## leading minus when negative values are allowed). `onChange` fires when
+## `value` changes.
 
 import std/strutils
 import ../core/timer
@@ -126,7 +129,33 @@ method paint*(s: SpinEdit, c: Canvas) =
 
 func minValue*(s: SpinEdit): int = s.fRng.lo
 func maxValue*(s: SpinEdit): int = s.fRng.hi
-func value*(s: SpinEdit): int = s.fRng.pos
+proc parseText(s: SpinEdit, ok: var bool): int =
+  ## The number in the edit, clamped to the range (overflow saturates).
+  let txt = s.edit.text.strip
+  ok = txt.len > 0 and txt != "-"
+  if not ok: return
+  var neg = false
+  var i = 0
+  if txt[0] == '-': neg = true; i = 1
+  elif txt[0] == '+': i = 1
+  if i >= txt.len: ok = false; return
+  var big = false
+  var n = 0
+  for k in i ..< txt.len:
+    let d = ord(txt[k]) - ord('0')
+    if d < 0 or d > 9: ok = false; return
+    if not big:
+      if n > (high(int) - d) div 10: big = true
+      else: n = n * 10 + d
+  if big: n = high(int)
+  if neg: n = if big: low(int) else: -n
+  result = min(max(n, s.fRng.lo), s.fRng.hi)
+
+proc value*(s: SpinEdit): int =
+  ## The current value; text typed but not yet committed counts.
+  var ok: bool
+  let n = s.parseText(ok)
+  if ok: n else: s.fRng.pos
 func increment*(s: SpinEdit): int = s.fInc
 
 proc stopRepeat(s: SpinEdit) =
@@ -154,12 +183,8 @@ proc `increment=`*(s: SpinEdit, v: int) = s.fInc = max(v, 1)
 
 proc commit*(s: SpinEdit) =
   ## Applies the edit's text: clamps a number, reverts anything else.
-  let txt = s.edit.text.strip
-  var n: int
-  var ok = txt.len > 0 and txt != "-"
-  if ok:
-    try: n = parseInt(txt)
-    except ValueError: ok = false
+  var ok: bool
+  let n = s.parseText(ok)
   if ok: s.value = n
   else: s.syncText()
 
@@ -190,6 +215,22 @@ method doMouseWheel*(s: SpinEdit, shift: ShiftState, dx, dy: float32,
     handled = true
   procCall doMouseWheel(Control(s), shift, dx, dy, handled)
 
+method doExit*(e: SpinField) =
+  ## The commit lives here, not in `onExit`, which the application may replace.
+  e.spin.stopRepeat()
+  e.spin.commit()
+  procCall doExit(Edit(e))
+  e.spin.invalidate()
+
+method doEnter*(e: SpinField) =
+  procCall doEnter(Edit(e))
+  e.spin.invalidate()                 # the focus ring is the spin's
+
+proc spinFilter(s: SpinEdit, text: string): string =
+  for i, ch in text:
+    if ch in {'0'..'9'} or
+       (ch == '-' and s.fRng.lo < 0 and i == 0 and s.edit.selStart == 0): result.add ch
+
 method doExit*(s: SpinEdit) =
   s.stopRepeat()
   procCall doExit(Control(s))
@@ -213,11 +254,14 @@ proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
   e.text = "0"
   s.edit = e
   e.onKeyPress = proc(sender: Control, text: var string) =
-    var d = ""
-    for i, ch in text:
-      if ch in {'0'..'9'} or (ch == '-' and s.fRng.lo < 0 and i == 0): d.add ch
-    text = d
+    text = s.spinFilter(text)
   e.onKeyDown = proc(sender: Control, key: var Key, shift: ShiftState) =
+    if (ssCtrl in shift and key == 'v'.key) or
+       (ssShift in shift and key == keyInsert and ssCtrl notin shift):
+      if not e.readOnly:                 # paste keeps the digits only
+        discard e.insertText(s.spinFilter(editClipboardGet()))
+      key = Key(0)
+      return
     if shift * {ssCtrl, ssAlt, ssSuper} != {}: return
     if key == keyUp: s.stepBy(1)
     elif key == keyDown: s.stepBy(-1)
@@ -230,11 +274,6 @@ proc initSpinEdit*(s: SpinEdit, owner: Component = nil) =
     else: return
     e.selectAll()
     key = Key(0)
-  e.onEnter = proc(sender: Control) = s.invalidate()      # the focus ring is the spin's
-  e.onExit = proc(sender: Control) =
-    s.stopRepeat()
-    s.commit()
-    s.invalidate()
   let b = SpinButtons()
   b.initControl(s)
   b.setBounds(0, 0, SpinButtonWidth, s.height)

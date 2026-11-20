@@ -19,6 +19,7 @@ between minor versions.
 
 ### Fixed
 
+- `SpinEdit`: `value` takes typed text into account (it was stale until Enter or focus loss), a paste keeps only the digits (and a leading minus), a number too large for an `int` clamps to the range instead of reverting, and the commit on focus loss no longer depends on the edit's `onExit`, which the application may replace. (N33)
 - Grids: when the current cell moves on its own (`rowCount` / `colCount` shrink, `insertRow`, `deleteRow`) `onSelectCell` and `onSelectionChanged` fire. A sort leaves the cell in place, so it fires nothing. (N31)
 - ListView: a right click selects the item under the pointer when it is not selected (N30). The in-place editor of ListView and TreeView is clipped to the viewport (parked off screen when its row is hidden) and ListView re-lays it out after `sortItems`. (N32)
 - `ListColumns.move` moves the cells of the stored items with the header (they stayed in place, so the text sat under the wrong header). (N29)
