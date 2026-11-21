@@ -2,7 +2,7 @@ import std/strutils
 
 # Package
 
-version       = "0.4.0"
+version       = "0.4.1"
 author        = "Vyrnexis"
 description   = "Delphi VCL-style UI library for Nim, drawn with SDL3"
 license       = "MIT"
@@ -11,9 +11,10 @@ srcDir        = "src"
 # Dependencies
 
 requires "nim >= 2.2.0"
-# Official binding, pinned by URL: stale local nimble package lists map "sdl3"
-# to a different (transmutrix) package.
-requires "https://github.com/nim-lang/sdl3#533d22196dab2ea637ea0131171ed3f8db61fe90"
+# Official binding, by URL: the nimble package list maps "sdl3" to a different
+# (transmutrix) package. A version range, not a #commit: nimble 0.22 leaves a
+# #commit dependency off the compiler path when it is already installed.
+requires "https://github.com/nim-lang/sdl3 >= 1.1"
 
 task test, "Run the test suite headless (debug)":
   exec "bash scripts/test.sh"

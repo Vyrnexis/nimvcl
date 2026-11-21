@@ -7,6 +7,12 @@ between minor versions.
 
 ## Unreleased
 
+## [0.4.1] - 2026-11-21
+
+### Fixed
+
+- `nimble install` of nimvcl (or of a package that needs it) failed with "cannot open file: sdl3" when the SDL3 binding was already installed: the binding is now required by version range (`>= 1.1`) instead of a pinned commit, which nimble left off the compiler path.
+
 ## [0.4.0] - 2026-11-21
 
 ### Added
@@ -333,3 +339,4 @@ First release. There are no earlier versions.
 [0.2.1]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.2.1
 [0.3.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.3.0
 [0.4.0]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.4.0
+[0.4.1]: https://github.com/Vyrnexis/nimvcl/releases/tag/v0.4.1
